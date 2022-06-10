@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+
+
+
+
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>from ex </title>
+
+
+    <style>
+
+
+body {background: rgba(0,0,0, 50)}
+.bg {
+  background: url("static/moonscape2.jpg") center top no-repeat;
+  display: block;
+  background-size: cover;
+  height: 100vh;
+  width: 100%;
+  position: relative;
+}
+
+input {
+  background: rgba(255,255,255,0.6);
+  border: none;
+  position: relative;
+  display: block;
+  outline: none;
+  width: 400px;
+  height: 30px;
+  top: 25vh;
+  margin: 0 auto;
+  padding: 10px;
+  color: #333;
+  -webkit-box-shadow: 0 3px 14px 8px rgba(0,0,0,0.75);
+  box-shadow: 0 0px 14px 8px rgba(0,0,0,0.75);
+}
+::-webkit-input-placeholder { color: #666;}
+:-moz-placeholder { color: #666; }
+::-moz-placeholder { color: #666; }
+:-ms-input-placeholder { color: #666; }
+
+.agent_voice {
+  background: rgba(255,255,255,0.);
+  border: none;
+  position: relative;
+  display: block;
+  outline: none;
+  width: 400px;
+  height: 30px;
+  top: 60vh;
+  margin: 0 auto;
+  padding: 10px;
+  color: #333;
+  -webkit-box-shadow: 0 3px 14px 8px rgba(0,0,0,0.75);
+  box-shadow: 0 0px 14px 8px rgba(0,0,0,0.75);
+}
+::-webkit-input-placeholder { color: #666;}
+:-moz-placeholder { color: #666; }
+::-moz-placeholder { color: #666; }
+:-ms-input-placeholder { color: #666; }
+}
+
+</style>
+
+
+</head>
+
+<body>
+
+<div class="bg">
+
+    <form method="POST">
+
+        <div class="bg">
+            <input name="text" placeholder="" autocomplete="off" />
+
+    </form>
+
+    <div class="agent_voice">
+        Agent:
+        {{ agent_answer }}
+    </div>
+
+</div>
+
+
+
+
+</body>
+</html>
