@@ -1,0 +1,19 @@
+{
+  "name": "existential-detective-chat",
+  "version": "1.0.0",
+  "description": "Simple chat UI with OpenAI Responses API and usage limits",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon --watch server.js --watch .env --watch api/prompts/prompt.md --watch api/prompts/closers.md server.js"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "openai": "^4.73.0"
+  }
+}

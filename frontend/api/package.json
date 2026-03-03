@@ -1,0 +1,14 @@
+{
+  "name": "existential-detective-api",
+  "version": "1.0.0",
+  "description": "Azure Functions API for Existential Detective chat",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@azure/functions": "^4.0.0",
+    "openai": "^4.73.0"
+  }
+}

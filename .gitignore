@@ -134,3 +134,12 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Environment variables
+.env
+
+# Node
+node_modules/
+
+# frontend daily usage data
+frontend/data/

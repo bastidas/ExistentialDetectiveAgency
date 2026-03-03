@@ -1,0 +1,9 @@
+# Local dev and secrets
+.env
+.env.local
+*.local.json
+.git
+.gitignore
+node_modules
+*.log
+.DS_Store
