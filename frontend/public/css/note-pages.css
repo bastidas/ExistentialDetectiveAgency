@@ -1,0 +1,130 @@
+/* Note pages: region inset from panel; notes placed absolutely inside */
+
+.philosopher-notes-content {
+  position: relative;
+  min-height: 100%;
+  box-sizing: border-box;
+  overflow: visible;
+}
+
+.notes-region {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow: visible;
+  border: none;
+  pointer-events: none;
+}
+
+.notes-region > * {
+  pointer-events: auto;
+}
+
+.note-page {
+  position: absolute;
+  z-index: 1;
+  flex-shrink: 0;
+  border: none;
+  outline: none;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.note-page__paper {
+  position: relative;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-color: transparent;
+  border: none;
+  outline: none;
+  box-shadow: none;
+
+  /*
+   * NOTE PAPER SHADOW (bottom-right, follows paper shape)
+   * -----------------------------------------------
+   * Uses filter: drop-shadow() so the shadow follows the opaque parts of the
+   * paper image (PNG/WebP transparency). A box-shadow would cast a rectangular
+   * shadow; drop-shadow uses the image alpha.
+   *
+   * To change the effect:
+   *   - offset-x offset-y: position (e.g. 6px 6px = more to bottom-right)
+   *   - blur-radius: softness (e.g. 12px = softer, 4px = harder)
+   *   - color: e.g. rgba(0,0,0,0.25) for lighter, 0.5 for stronger
+   * To disable: remove the filter line or set to "none".
+   */
+  filter: drop-shadow(5px 5px 6px rgba(0, 0, 0, 0.819));
+}
+
+/* Values from NoteFormatConfig applied via --note-* on .note-page__content */
+.note-page__content {
+  position: absolute;
+  overflow: hidden;
+  font-size: var(--note-fontSize, calc(0.875rem * 1.15));
+  line-height: var(--note-lineHeight, 1.45);
+  padding-top: var(--note-paddingTop, 0);
+  padding-right: var(--note-paddingRight, 0);
+  padding-bottom: var(--note-paddingBottom, 0);
+  padding-left: var(--note-paddingLeft, 0);
+  opacity: var(--note-opacity, 1);
+  color: var(--note-color, #333);
+  font-family: var(--note-fontFamily, inherit);
+  box-sizing: border-box;
+  background: transparent;
+  border: none;
+  outline: none;
+  box-shadow: none;
+}
+
+/* Debug: allow label above text box to overflow (dev only) */
+.note-page__content.note-page__content--debug-overflow {
+  overflow: visible;
+}
+
+.note-page__debug-text-box {
+  overflow: visible;
+}
+
+/* Left philosopher: use full width of note content (override panel’s fixed 205px) */
+.left-philosopher .note-page__content .handwritten {
+  margin-top: 0.25rem;
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+  background: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  padding: 0.25rem 0;
+  color: inherit;
+  font-size: inherit;
+  transform: none;
+}
+
+.right-philosopher .note-page__content .container {
+  margin-top: 0;
+  padding-top: 0;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* Each line reserves full height so new lines go below; written text doesn’t slide up */
+.right-philosopher .note-page__content .line {
+  position: relative;
+  height: 3rem;
+  min-height: 3rem;
+  margin-bottom: 0;
+  padding-bottom: calc(24px + 1.5em);
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+.right-philosopher .note-page__content .line span {
+  position: absolute;
+  top: 0;
+  bottom: auto;
+  left: 0.5rem;
+  right: auto;
+  color: inherit;
+}

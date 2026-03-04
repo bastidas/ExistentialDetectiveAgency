@@ -4,9 +4,9 @@ This app is set up to deploy as an **Azure Static Web App** with a Node.js API (
 
 ## What’s included
 
-- **Static app**: `public/` (HTML, CSS, JS) is served as the front end.
-- **API**: `api/` runs as Azure Functions and serves `/api/debug` and `/api/chat`.
-- **Config**: `public/staticwebapp.config.json` sets the API runtime to Node 20.
+- **Static app**: `frontend/public/` (HTML, CSS, JS) is served as the front end.
+- **API**: `frontend/api/` runs as Azure Functions and serves `/api/debug`, `/api/chat`, `/api/philosopher-notes`, and `/api/philosopher-dialog`. The API is **self-contained**: shared logic lives under `frontend/api/shared/`, and prompts in `frontend/api/prompts/`. When Azure deploys the API folder, both are included.
+- **Config**: `frontend/public/staticwebapp.config.json` sets the API runtime to Node 20.
 
 ## 1. Create the Static Web App in Azure
 
@@ -50,8 +50,8 @@ Save the configuration.
 ## 4. Notes
 
 - **Session and daily usage**: The API keeps session state and daily usage **in memory**. After a cold start or with multiple instances, counts can reset. For production, you can later add Azure Table Storage (or similar) for persistent daily usage and session data.
-- **Prompt files**: All prompt/closer markdown lives in **`frontend/api/prompts/`** (`prompt.md`, `closers.md`, `easter_egg_prompt.md`). Both the Express server and the Azure API read from this folder. Edit them there.
-- **Local dev**: Keep using `npm run dev` in `frontend` for the Express server. The Azure Functions in `api/` mirror the same behavior for production.
+- **Prompt files**: All prompt/closer markdown and `phil_annotations.json` live in **`frontend/api/prompts/`**. Both the Express server (local) and the Azure API read from this folder. Edit them there.
+- **Local dev**: Run `npm run dev` in `frontend` for the Express server; it loads shared code from `frontend/api/shared/`. The Azure Functions in `frontend/api/` use the same shared module and mirror the same behavior for production.
 
 ## 5. GitHub secret
 

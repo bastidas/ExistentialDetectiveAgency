@@ -5,17 +5,46 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Chat</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="css/left-philosopher.css">
+  <link rel="stylesheet" href="css/right-philosopher.css">
+  <link rel="stylesheet" href="css/note-pages.css">
+  <link rel="stylesheet" href="css/chat-paper.css">
 </head>
 <body>
-  <main>
-    <h1>Chat</h1>
-    <div id="messages" class="messages"></div>
-    <form id="form" class="form">
-      <input type="text" id="input" name="message" placeholder="Ask something..." autocomplete="off">
-      <button type="submit" id="submit">Send</button>
-    </form>
-    <p id="status" class="status"></p>
-  </main>
+  <div class="app-layout">
+    <aside id="left-philosopher" class="philosopher-notes left-philosopher">
+      <h2 class="philosopher-notes-title">Philosopher's notes</h2>
+      <div id="left-philosopher-content" class="philosopher-notes-content"></div>
+    </aside>
+    <main>
+      <h1>Chat</h1>
+      <form id="form" class="form form--hidden">
+        <div id="messages" class="messages">
+          <div class="chat-editor-wrapper">
+            <div id="input-wrap" class="chat-editor typewriter" contenteditable="true" tabindex="0" data-placeholder="Type here…" aria-label="Message"></div>
+          </div>
+        </div>
+        <button type="submit" id="submit" class="visually-hidden" aria-label="Send">Send</button>
+      </form>
+      <p id="status" class="status"></p>
+    </main>
+    <aside id="right-philosopher" class="philosopher-notes right-philosopher">
+      <h2 class="philosopher-notes-title">Philosopher's notes</h2>
+      <div id="right-philosopher-content" class="philosopher-notes-content"></div>
+    </aside>
+  </div>
+  <script src="js/utils.js"></script>
+  <script src="https://unpkg.com/rough-notation@0.5.1/lib/rough-notation.iife.js"></script>
+  <script src="js/noteFormatConfig.js"></script>
+  <script src="js/chatConfig.js"></script>
+  <script src="js/handwriter.js"></script>
+  <script src="js/notePages.js"></script>
+  <script src="js/philosopherRules.js"></script>
+  <script src="js/annotationConfig.js"></script>
+  <script src="js/annotation.js"></script>
+  <script src="js/messageUI.js"></script>
+  <script src="js/chatInput.js"></script>
+  <script src="js/chatSend.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

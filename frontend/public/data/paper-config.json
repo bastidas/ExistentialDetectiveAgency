@@ -1,0 +1,14 @@
+{
+  "imgs/paper3.png": {
+    "padding": { "top": 24.2, "right": 3.0, "bottom": 25.5, "left": 6.5 },
+    "width": 440,
+    "height": 610,
+    "scale": 1
+  },
+  "imgs/paper4.webp": {
+    "padding": { "top": 11, "right": 4, "bottom": 20, "left": 12 },
+    "width": 440,
+    "height": 560,
+    "scale": 1.4
+  }
+}

@@ -1,0 +1,82 @@
+/* Right philosopher: lined paper (Homemade Apple), keyword underline */
+@import url("https://fonts.googleapis.com/css2?family=Homemade+Apple&family=Lobster&display=swap");
+
+.right-philosopher {
+  background: #1a1a1a;
+  border-color: #333;
+}
+
+.right-philosopher .philosopher-notes-title {
+  color: #5a5348;
+}
+
+.right-philosopher .philosopher-notes-content {
+  font-family: var(--note-fontFamily, "Homemade Apple", cursive);
+  font-size: var(--note-fontSize, 1.2rem);
+  background: #1a1a1a;
+  padding: 0.5rem 0;
+}
+
+.right-philosopher .philosopher-notes-content .container {
+  background: white;
+  width: 60ch;
+  max-width: 100%;
+  margin-top: -0.5rem;
+  margin-left: auto;
+  margin-right: auto;
+  padding: 1.5rem;
+  padding-top: 2rem;
+  box-shadow: 5px 5px 10px #aaa;
+}
+
+.right-philosopher .line {
+  height: 3rem;
+  position: relative;
+  padding-left: 0.5rem;
+  box-sizing: border-box;
+}
+
+.right-philosopher .line span {
+  position: absolute;
+  bottom: -24px;
+  color: var(--note-color, #284283);
+  opacity: 0.9;
+}
+
+.right-philosopher .line.right span {
+  right: 0.5rem;
+}
+
+.right-philosopher .line.indent span {
+  left: 15ch;
+}
+
+.right-philosopher .line.double-indent span {
+  left: 25ch;
+}
+
+/* Keyword underline (strong) - SVG jagged underline behind text */
+.right-philosopher strong {
+  position: relative;
+  font-weight: 400;
+}
+
+.right-philosopher strong::after {
+  content: "";
+  position: absolute;
+  bottom: -0.125rem;
+  left: -0.5rem;
+  right: -0.5rem;
+  height: 0.75rem;
+  z-index: -1;
+  background-image: url("https://s3-us-west-2.amazonaws.com/s.cdpn.io/664131/underline.svg");
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+.right-philosopher .line span strong::after {
+  bottom: -0.2rem;
+  height: 0.5rem;
+  left: -0.25rem;
+  right: -0.25rem;
+}

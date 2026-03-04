@@ -1,0 +1,144 @@
+/* Paper sheet: main chat column. Values from ChatConfig via --chat-* (set at runtime). */
+main {
+  background-color: var(--chat-bg, #e8e4d8);
+  margin: var(--chat-margin, 2em);
+  max-width: var(--chat-max-width, 120em);
+  min-width: 0;
+  padding: var(--chat-padding, 1.5em);
+  border-radius: var(--chat-radius, 0.25rem);
+  color: var(--chat-text, #1a1a1a);
+}
+
+@media (min-width: 1024px) {
+  main {
+    min-width: var(--chat-min-width-lg, 56em);
+  }
+}
+
+main .messages {
+  background: transparent;
+}
+
+main .message .label {
+  color: var(--chat-label, #555);
+}
+
+main .message.user .label {
+  color: var(--chat-user-label, #2c5282);
+}
+
+main .message.user .content {
+  background: var(--chat-user-bubble-bg, #d4d0c4);
+  border: 1px solid var(--chat-user-bubble-border, #bbb);
+  color: var(--chat-text, #1a1a1a);
+}
+
+main .message.assistant .content {
+  background: var(--chat-assistant-bubble-bg, #e0dcd0);
+  border: 1px solid var(--chat-assistant-bubble-border, #999);
+  color: var(--chat-text, #1a1a1a);
+}
+
+main .message .content.typewriter {
+  font-family: var(--chat-editor-font, monospace);
+  line-height: var(--chat-editor-line-height, 1.5);
+}
+
+main .status {
+  color: var(--chat-status, #555);
+}
+
+main .status.error {
+  color: var(--chat-status-error, #c53030);
+}
+
+/* Hidden chat bar: editor at top like start of a letter */
+main .form--hidden {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+main .form--hidden .chat-editor-wrapper {
+  margin-bottom: 0.5em;
+}
+
+main .visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Editor wrapper and contenteditable: top-left like a letter */
+main .chat-editor-wrapper {
+  position: relative;
+  min-height: 2em;
+}
+
+main .chat-editor {
+  font-family: var(--chat-editor-font, monospace);
+  line-height: var(--chat-editor-line-height, 1.5);
+  min-height: 2em;
+  padding: 0 0 0.25em 0;
+  outline: none;
+  caret-color: transparent;
+}
+
+main .chat-editor:empty::before {
+  content: attr(data-placeholder);
+  color: var(--chat-placeholder, #888);
+}
+
+/* User block: frozen text in place, no bubble, no shift */
+main .chat-user-block {
+  font-family: var(--chat-editor-font, monospace);
+  line-height: var(--chat-editor-line-height, 1.5);
+  padding: 0 0 0.25em 0;
+  margin-bottom: 0.25em;
+}
+
+/* Sketchy black box cursor */
+main .chat-cursor {
+  position: absolute;
+  pointer-events: none;
+  background: var(--chat-cursor-bg, #1a1a1a);
+  border: var(--chat-cursor-border, 2px solid #1a1a1a);
+  border-radius: 1px;
+  box-shadow: var(--chat-cursor-shadow, 1px 1px 0 #1a1a1a, -0.5px 0 0 #1a1a1a);
+  min-width: var(--chat-cursor-min-width, 2px);
+  min-height: var(--chat-cursor-min-height, 1em);
+  z-index: 2;
+}
+
+/* Typewriter: monospace everywhere in chat */
+main .typewriter,
+main .message .content.typewriter {
+  font-family: var(--chat-editor-font, monospace);
+  line-height: var(--chat-editor-line-height, 1.5);
+}
+
+/* Horizontal line between user message and assistant reply */
+.chat-paper-line {
+  margin: var(--chat-line-margin, 0.75rem 0);
+  overflow: hidden;
+  min-height: 4px;
+}
+
+.chat-paper-line .line-inner {
+  height: var(--chat-line-height, 2px);
+  background: var(--chat-line-color, #1a1a1a);
+  width: 0;
+  transition: var(--chat-line-transition, width 1.5s ease-out);
+}
+
+.chat-paper-line .line-inner.drawn {
+  width: 100%;
+}

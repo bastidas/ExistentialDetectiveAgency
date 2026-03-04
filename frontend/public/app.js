@@ -1,95 +1,73 @@
 (function () {
+  "use strict";
+
   (function debugOnLoad() {
     fetch("/api/debug", { credentials: "same-origin" })
-      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (res) {
+        return res.ok ? res.json() : null;
+      })
       .then(function (d) {
         if (!d) return;
         console.log("[DEBUG] Model:", d.model);
         console.log("[DEBUG] Service tier:", d.serviceTier);
-        console.log("[DEBUG] Prompt file first 5 lines:", d.promptPreview);
-        console.log("[DEBUG] Your exchange count (this session):", (d.userExchangeCount ?? 0) + "/" + (d.maxUserExchanges ?? 5));
-        console.log("[DEBUG] Daily usage:", d.dailyCount + " / " + (d.maxDailyUsage ?? 100));
+        var preview = d.promptPreview;
+        var previewText =
+          Array.isArray(preview) && preview.length
+            ? preview.join("\n")
+            : "(none – file not found or empty)";
+        console.log("[DEBUG] Prompt file first 5 lines:", previewText);
+        if (d.promptFilePath != null)
+          console.log("[DEBUG] Prompt file path:", d.promptFilePath);
+        if (d.promptPreviewFound === false)
+          console.log("[DEBUG] Prompt file was not found or empty.");
+        console.log(
+          "[DEBUG] Your exchange count (this session):",
+          (d.userExchangeCount ?? 0) + "/" + (d.maxUserExchanges ?? 5)
+        );
+        console.log(
+          "[DEBUG] Daily usage:",
+          d.dailyCount + " / " + (d.maxDailyUsage ?? 100)
+        );
       })
       .catch(function () {});
   })();
 
-  const form = document.getElementById("form");
-  const input = document.getElementById("input");
-  const messages = document.getElementById("messages");
-  const status = document.getElementById("status");
-  const submitBtn = document.getElementById("submit");
+  var form = document.getElementById("form");
+  if (!form) return;
 
-  function setStatus(text, isError) {
-    status.textContent = text;
-    status.className = "status " + (isError ? "error" : "");
+  if (typeof ChatConfig !== "undefined" && ChatConfig.applyChatStyle) {
+    ChatConfig.applyChatStyle();
   }
-
-  function addMessage(role, text) {
-    const div = document.createElement("div");
-    div.className = "message " + role;
-    const label = document.createElement("span");
-    label.className = "label";
-    label.textContent = role === "user" ? "You" : "Assistant";
-    const content = document.createElement("div");
-    content.className = "content";
-    content.textContent = text;
-    div.appendChild(label);
-    div.appendChild(content);
-    messages.appendChild(div);
-    messages.scrollTop = messages.scrollHeight;
+  if (typeof NoteFormatConfig !== "undefined" && NoteFormatConfig.applyNoteFormatToPanels) {
+    NoteFormatConfig.applyNoteFormatToPanels();
   }
+  EDARules.loadRules();
 
-  form.addEventListener("submit", async function (e) {
+  form.addEventListener("submit", function (e) {
     e.preventDefault();
-    const message = input.value.trim();
+    var message = EDAChatInput && EDAChatInput.getValue ? EDAChatInput.getValue().trim() : "";
     if (!message) return;
 
-    addMessage("user", message);
-    input.value = "";
-    submitBtn.disabled = true;
-    setStatus("Thinking…");
+    console.log(
+      "[phil-annotations] Submit: checking message, rules count =",
+      EDARules.getRulesCount()
+    );
+    var rewriteInfo = EDARules.applyRewriteFirst(message);
 
-    try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({ message }),
+    function sendAndRunNotes(msg, html) {
+      EDAChatSend.doSendMessage(msg, html);
+      EDARules.runNoteActions(msg).catch(function (err) {
+        console.warn("[phil-annotations] runNoteActions:", err);
       });
+    }
 
-      if (res.status === 204) {
-        setStatus("");
-        console.log("[DEBUG] no response");
-        return;
-      }
-
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        const kind = data.errorKind || (res.status === 429 ? "rate_limit" : "");
-        const displayMsg =
-          kind === "flex_busy"
-            ? "Service busy (Flex). Please try again in a moment."
-            : kind === "rate_limit"
-              ? "Too many requests. Please try again later."
-              : kind === "bad_request"
-                ? (data.error || "Invalid request. Check your message and try again.")
-                : (data.error || "Something went wrong. Please try again.");
-        setStatus(displayMsg, true);
-        addMessage("assistant", displayMsg);
-        return;
-      }
-
-      setStatus("");
-      if (data.debug) {
-        console.log("[DEBUG] user exchanges:", data.debug.userExchanges + "/" + data.debug.maxUserExchanges);
-        console.log("[DEBUG] daily usage:", data.debug.dailyUsage + "/" + data.debug.maxDailyUsage);
-      }
-      addMessage("assistant", data.reply || "(No reply)");
-    } catch (err) {
-      setStatus("Network error: " + err.message, true);
-    } finally {
-      submitBtn.disabled = false;
+    var html = EDAChatInput && EDAChatInput.getHtml ? EDAChatInput.getHtml() : undefined;
+    if (rewriteInfo) {
+      EDAChatSend.animateRewriteInInput(rewriteInfo).then(function (newMsg) {
+        sendAndRunNotes(newMsg, EDAChatInput && EDAChatInput.getHtml ? EDAChatInput.getHtml() : undefined);
+      });
+    } else {
+      sendAndRunNotes(message, html);
     }
   });
 })();

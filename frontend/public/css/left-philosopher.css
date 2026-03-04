@@ -1,0 +1,33 @@
+/* Left philosopher: handwritten style (Annie Use Your Telescope, ruled lines, rotation) */
+@import url("https://fonts.googleapis.com/css2?family=Annie+Use+Your+Telescope&display=swap");
+
+.left-philosopher .philosopher-notes-content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.left-philosopher .handwritten {
+  line-height: 1;
+  margin-top: 0.5rem;
+  margin-left: 0;
+  width: 205px;
+  padding: 20px 10px 20px 65px;
+  background-color: #fff;
+  background-image:
+    linear-gradient(90deg, transparent 59px, #abced4 59px, #abced4 61px, transparent 61px),
+    linear-gradient(#e1e1e1 0.1em, transparent 0.1em);
+  background-size: 100% 1em;
+  font-size: var(--note-fontSize, 1.15rem);
+  transform: rotate(10deg);
+  box-shadow: 3px 3px 6px #ccc;
+  font-family: var(--note-fontFamily, "Annie Use Your Telescope", cursive);
+  font-weight: normal;
+  color: var(--note-color, #202024);
+}
+
+.left-philosopher .handwritten em {
+  background-color: rgba(255, 247, 128, 0.7);
+  font-style: normal;
+}
