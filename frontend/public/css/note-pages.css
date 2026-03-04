@@ -1,5 +1,9 @@
 /* Note pages: region inset from panel; notes placed absolutely inside */
 
+:root {
+  --note-responsive-font-scale: 1;
+}
+
 .philosopher-notes-content {
   position: relative;
   min-height: 100%;
@@ -29,7 +33,8 @@
   border: none;
   outline: none;
   box-shadow: none;
-  cursor: pointer;
+  cursor: grab;
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
 }
 
 .note-page__paper {
@@ -58,11 +63,94 @@
   filter: drop-shadow(5px 5px 6px rgba(0, 0, 0, 0.819));
 }
 
+.note-page:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.7);
+  outline-offset: 2px;
+}
+
+.note-page__controls {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.4rem;
+  z-index: 5;
+}
+
+.note-page__close {
+  appearance: none;
+  border: none;
+  border-radius: 999px;
+  width: 28px;
+  height: 28px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fefefe;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.note-page__close:hover {
+  background: rgba(244, 192, 127, 0.8);
+  color: #1f1204;
+}
+
+.note-page--dragging {
+  cursor: grabbing;
+  box-shadow: 0 24px 40px rgba(0, 0, 0, 0.45);
+}
+
+.note-page--active:not(.note-page--dragging) {
+  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.4);
+}
+
+.note-page--destroying {
+  pointer-events: none;
+  animation: note-page-shred 0.55s ease forwards;
+}
+
+.note-page__fragment {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 2px;
+  animation: note-fragment-pop 0.55s ease forwards;
+  pointer-events: none;
+}
+
+@keyframes note-page-shred {
+  0% {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(0.94) rotate(-4deg);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.7) rotate(12deg);
+  }
+}
+
+@keyframes note-fragment-pop {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--frag-x, 0), var(--frag-y, 0)) scale(0.6);
+  }
+}
+
 /* Values from NoteFormatConfig applied via --note-* on .note-page__content */
 .note-page__content {
   position: absolute;
   overflow: hidden;
-  font-size: var(--note-fontSize, calc(0.875rem * 1.15));
+  font-size: clamp(0.8rem, calc(var(--note-fontSize, 0.875rem) * var(--note-responsive-font-scale, 1)), 1.35rem);
   line-height: var(--note-lineHeight, 1.45);
   padding-top: var(--note-paddingTop, 0);
   padding-right: var(--note-paddingRight, 0);
@@ -127,4 +215,15 @@
   left: 0.5rem;
   right: auto;
   color: inherit;
+}
+
+@media (max-width: 768px) {
+  .notes-region {
+    inset: 0;
+  }
+
+  .note-page__close {
+    width: 32px;
+    height: 32px;
+  }
 }

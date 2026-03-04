@@ -28,7 +28,7 @@
     statusErrorColor: "#c53030",
 
     /* Editor */
-    editorFontFamily: "monospace",
+    editorFontFamily: "'Cutive Mono', 'Courier New', monospace",
     editorLineHeight: "1.5",
     placeholderColor: "#888",
 

@@ -1,5 +1,10 @@
-import { useEffect, useState } from 'react'
+import { MouseEvent, useEffect, useState } from 'react'
 import './App.css'
+
+// Timing constants for auto-play
+const SENTENCE_DURATION = 3; // seconds to hold each sentence
+const SENTENCE_DURATION_VAR = 1.5; // seconds of random variance
+const INTRO_DURATION = 3 // seconds for intro splash screen
 
 // TypeScript interfaces
 interface AnimationEffect {
@@ -14,173 +19,118 @@ interface EffectPreferences {
   includedEffects: string[]
 }
 
-// All entrance animations from Animista.net
-const ENTRANCE_EFFECTS: AnimationEffect[] = [
-  // Bounce In
-  { name: 'bounce-in-top', duration: '1.1s', timing: 'ease', category: 'Bounce' },
-  { name: 'bounce-in-right', duration: '1.1s', timing: 'ease', category: 'Bounce' },
-  { name: 'bounce-in-bottom', duration: '1.1s', timing: 'ease', category: 'Bounce' },
-  { name: 'bounce-in-left', duration: '1.1s', timing: 'ease', category: 'Bounce' },
-  { name: 'bounce-in-fwd', duration: '1.1s', timing: 'ease', category: 'Bounce' },
-  { name: 'bounce-in-bck', duration: '1.1s', timing: 'ease', category: 'Bounce' },
-  
-  // Fade In
-  { name: 'fade-in', duration: '1.2s', timing: 'cubic-bezier(0.39, 0.575, 0.565, 1)', category: 'Fade' },
-  { name: 'fade-in-top', duration: '0.6s', timing: 'cubic-bezier(0.39, 0.575, 0.565, 1)', category: 'Fade' },
-  { name: 'fade-in-right', duration: '0.6s', timing: 'cubic-bezier(0.39, 0.575, 0.565, 1)', category: 'Fade' },
+// Selected effects subset - 46 effects chosen for artistic poem presentation
+const SELECTED_EFFECTS: AnimationEffect[] = [
+  // Intro Effects - Entrance animations
   { name: 'fade-in-bottom', duration: '0.6s', timing: 'cubic-bezier(0.39, 0.575, 0.565, 1)', category: 'Fade' },
-  { name: 'fade-in-left', duration: '0.6s', timing: 'cubic-bezier(0.39, 0.575, 0.565, 1)', category: 'Fade' },
-  { name: 'fade-in-fwd', duration: '0.6s', timing: 'cubic-bezier(0.39, 0.575, 0.565, 1)', category: 'Fade' },
   { name: 'fade-in-bck', duration: '0.6s', timing: 'cubic-bezier(0.39, 0.575, 0.565, 1)', category: 'Fade' },
-  
-  // Flip In
   { name: 'flip-in-hor-top', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Flip' },
-  { name: 'flip-in-hor-bottom', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Flip' },
   { name: 'flip-in-ver-right', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Flip' },
-  { name: 'flip-in-ver-left', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Flip' },
-  
-  // Roll In
-  { name: 'roll-in-left', duration: '0.6s', timing: 'ease-out', category: 'Roll' },
+  { name: 'flip-in-hor-bottom', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Flip' },
   { name: 'roll-in-right', duration: '0.6s', timing: 'ease-out', category: 'Roll' },
-  { name: 'roll-in-top', duration: '0.6s', timing: 'ease-out', category: 'Roll' },
-  { name: 'roll-in-bottom', duration: '0.6s', timing: 'ease-out', category: 'Roll' },
-  
-  // Rotate In
-  { name: 'rotate-in-center', duration: '0.6s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Rotate' },
-  { name: 'rotate-in-top', duration: '0.6s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Rotate' },
-  { name: 'rotate-in-right', duration: '0.6s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Rotate' },
-  { name: 'rotate-in-bottom', duration: '0.6s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Rotate' },
-  { name: 'rotate-in-left', duration: '0.6s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Rotate' },
-  { name: 'rotate-in-2-cw', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Rotate' },
   { name: 'rotate-in-2-ccw', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Rotate' },
-  
-  // Scale In
+  { name: 'rotate-in-top', duration: '0.6s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Rotate' },
   { name: 'scale-in-center', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Scale' },
-  { name: 'scale-in-top', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Scale' },
-  { name: 'scale-in-right', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Scale' },
   { name: 'scale-in-bottom', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Scale' },
-  { name: 'scale-in-left', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Scale' },
   { name: 'scale-in-hor-center', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Scale' },
   { name: 'scale-in-ver-center', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Scale' },
-  
-  // Slide In
   { name: 'slide-in-top', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Slide' },
-  { name: 'slide-in-right', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Slide' },
   { name: 'slide-in-bottom', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Slide' },
-  { name: 'slide-in-left', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Slide' },
-  { name: 'slide-in-fwd-center', duration: '0.4s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Slide' },
-  { name: 'slide-in-bck-center', duration: '0.6s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Slide' },
   { name: 'slide-in-blurred-top', duration: '0.6s', timing: 'cubic-bezier(0.23, 1, 0.32, 1)', category: 'Slide' },
   { name: 'slide-in-blurred-right', duration: '0.6s', timing: 'cubic-bezier(0.23, 1, 0.32, 1)', category: 'Slide' },
   { name: 'slide-in-blurred-bottom', duration: '0.6s', timing: 'cubic-bezier(0.23, 1, 0.32, 1)', category: 'Slide' },
-  { name: 'slide-in-blurred-left', duration: '0.6s', timing: 'cubic-bezier(0.23, 1, 0.32, 1)', category: 'Slide' },
-  
-  // Swing In
-  { name: 'swing-in-top-fwd', duration: '0.5s', timing: 'cubic-bezier(0.175, 0.885, 0.32, 1.275)', category: 'Swing' },
-  { name: 'swing-in-right-fwd', duration: '0.5s', timing: 'cubic-bezier(0.175, 0.885, 0.32, 1.275)', category: 'Swing' },
-  { name: 'swing-in-bottom-fwd', duration: '0.5s', timing: 'cubic-bezier(0.175, 0.885, 0.32, 1.275)', category: 'Swing' },
   { name: 'swing-in-left-fwd', duration: '0.5s', timing: 'cubic-bezier(0.175, 0.885, 0.32, 1.275)', category: 'Swing' },
-  
-  // Puff In
   { name: 'puff-in-center', duration: '0.7s', timing: 'cubic-bezier(0.47, 0, 0.745, 0.715)', category: 'Puff' },
   { name: 'puff-in-top', duration: '0.7s', timing: 'cubic-bezier(0.47, 0, 0.745, 0.715)', category: 'Puff' },
-  { name: 'puff-in-right', duration: '0.7s', timing: 'cubic-bezier(0.47, 0, 0.745, 0.715)', category: 'Puff' },
   { name: 'puff-in-bottom', duration: '0.7s', timing: 'cubic-bezier(0.47, 0, 0.745, 0.715)', category: 'Puff' },
-  { name: 'puff-in-left', duration: '0.7s', timing: 'cubic-bezier(0.47, 0, 0.745, 0.715)', category: 'Puff' },
   { name: 'puff-in-hor', duration: '0.7s', timing: 'cubic-bezier(0.47, 0, 0.745, 0.715)', category: 'Puff' },
   { name: 'puff-in-ver', duration: '0.7s', timing: 'cubic-bezier(0.47, 0, 0.745, 0.715)', category: 'Puff' },
-  
-  // TEXT EFFECTS - Focus In
+  { name: 'bounce-in-fwd', duration: '1.1s', timing: 'ease', category: 'Bounce' },
+  { name: 'bounce-in-bck', duration: '1.1s', timing: 'ease', category: 'Bounce' },
   { name: 'text-focus-in', duration: '1s', timing: 'cubic-bezier(0.55, 0.085, 0.68, 0.53)', category: 'Text' },
-  
-  // TEXT EFFECTS - Blur In
-  { name: 'text-blur-out', duration: '1.2s', timing: 'cubic-bezier(0.55, 0.085, 0.68, 0.53)', category: 'Text' },
-  
-  // TEXT EFFECTS - Flicker In
   { name: 'text-flicker-in-glow', duration: '1.5s', timing: 'linear', category: 'Text' },
-  
-  // TEXT EFFECTS - Pop Up
-  { name: 'text-pop-up-top', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Text' },
-  { name: 'text-pop-up-right', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Text' },
-  { name: 'text-pop-up-bottom', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Text' },
-  { name: 'text-pop-up-left', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Text' },
-  
-  // TEXT EFFECTS - Shadow Pop
-  { name: 'text-shadow-pop-top', duration: '0.6s', timing: 'ease', category: 'Text' },
-  { name: 'text-shadow-pop-tr', duration: '0.6s', timing: 'ease', category: 'Text' },
-  { name: 'text-shadow-pop-right', duration: '0.6s', timing: 'ease', category: 'Text' },
-  { name: 'text-shadow-pop-br', duration: '0.6s', timing: 'ease', category: 'Text' },
-  { name: 'text-shadow-pop-bottom', duration: '0.6s', timing: 'ease', category: 'Text' },
-  { name: 'text-shadow-pop-bl', duration: '0.6s', timing: 'ease', category: 'Text' },
-  { name: 'text-shadow-pop-left', duration: '0.6s', timing: 'ease', category: 'Text' },
-  { name: 'text-shadow-pop-tl', duration: '0.6s', timing: 'ease', category: 'Text' },
-  
-  // TEXT EFFECTS - Shadow Drop
-  { name: 'text-shadow-drop-center', duration: '0.6s', timing: 'ease', category: 'Text' },
-  { name: 'text-shadow-drop-top', duration: '0.6s', timing: 'ease', category: 'Text' },
-  { name: 'text-shadow-drop-tr', duration: '0.6s', timing: 'ease', category: 'Text' },
-  { name: 'text-shadow-drop-right', duration: '0.6s', timing: 'ease', category: 'Text' },
-  { name: 'text-shadow-drop-br', duration: '0.6s', timing: 'ease', category: 'Text' },
-  { name: 'text-shadow-drop-bottom', duration: '0.6s', timing: 'ease', category: 'Text' },
-  { name: 'text-shadow-drop-bl', duration: '0.6s', timing: 'ease', category: 'Text' },
-  { name: 'text-shadow-drop-left', duration: '0.6s', timing: 'ease', category: 'Text' },
-  { name: 'text-shadow-drop-tl', duration: '0.6s', timing: 'ease', category: 'Text' },
-  
-  // TEXT EFFECTS - Tracking In
-  { name: 'tracking-in-expand', duration: '0.7s', timing: 'cubic-bezier(0.215, 0.61, 0.355, 1)', category: 'Text' },
   { name: 'tracking-in-contract', duration: '0.8s', timing: 'cubic-bezier(0.215, 0.61, 0.355, 1)', category: 'Text' },
+  { name: 'tracking-in-expand', duration: '0.7s', timing: 'cubic-bezier(0.215, 0.61, 0.355, 1)', category: 'Text' },
   { name: 'tracking-in-expand-fwd', duration: '0.8s', timing: 'cubic-bezier(0.215, 0.61, 0.355, 1)', category: 'Text' },
   { name: 'tracking-in-contract-bck', duration: '1s', timing: 'cubic-bezier(0.215, 0.61, 0.355, 1)', category: 'Text' },
-]
-
-// After Effects - Attention-grabbing animations from Animista.net
-const AFTER_EFFECTS: AnimationEffect[] = [
-  // Blink
+  
+  // Ambient Effects - Can be used for intro or outro
   { name: 'blink-1', duration: '0.6s', timing: 'linear', category: 'Blink' },
   { name: 'blink-2', duration: '0.9s', timing: 'linear', category: 'Blink' },
-  
-  // Vibrate
-  { name: 'vibrate-1', duration: '0.3s', timing: 'linear', category: 'Vibrate' },
-  { name: 'vibrate-2', duration: '0.5s', timing: 'linear', category: 'Vibrate' },
-  { name: 'vibrate-3', duration: '0.5s', timing: 'linear', category: 'Vibrate' },
-  
-  // Flicker
-  { name: 'flicker-1', duration: '2s', timing: 'linear', category: 'Flicker' },
-  { name: 'flicker-2', duration: '3s', timing: 'linear', category: 'Flicker' },
   { name: 'flicker-3', duration: '1.5s', timing: 'linear', category: 'Flicker' },
-  
-  // Shake
-  { name: 'shake-horizontal', duration: '0.8s', timing: 'cubic-bezier(0.455, 0.030, 0.515, 0.955)', category: 'Shake' },
-  { name: 'shake-vertical', duration: '0.8s', timing: 'cubic-bezier(0.455, 0.030, 0.515, 0.955)', category: 'Shake' },
-  { name: 'shake-lr', duration: '0.6s', timing: 'cubic-bezier(0.455, 0.030, 0.515, 0.955)', category: 'Shake' },
-  { name: 'shake-top', duration: '0.8s', timing: 'cubic-bezier(0.455, 0.030, 0.515, 0.955)', category: 'Shake' },
-  { name: 'shake-bottom', duration: '0.8s', timing: 'cubic-bezier(0.455, 0.030, 0.515, 0.955)', category: 'Shake' },
-  
-  // Jello
+  { name: 'flicker-2', duration: '3s', timing: 'linear', category: 'Flicker' },
   { name: 'jello-horizontal', duration: '0.9s', timing: 'ease', category: 'Jello' },
-  { name: 'jello-vertical', duration: '0.9s', timing: 'ease', category: 'Jello' },
-  { name: 'jello-diagonal-1', duration: '0.8s', timing: 'ease', category: 'Jello' },
-  { name: 'jello-diagonal-2', duration: '0.8s', timing: 'ease', category: 'Jello' },
-  
-  // Wobble
-  { name: 'wobble-hor-bottom', duration: '0.8s', timing: 'ease', category: 'Wobble' },
-  { name: 'wobble-hor-top', duration: '0.8s', timing: 'ease', category: 'Wobble' },
-  { name: 'wobble-ver-left', duration: '0.8s', timing: 'ease', category: 'Wobble' },
-  { name: 'wobble-ver-right', duration: '0.8s', timing: 'ease', category: 'Wobble' },
-  
-  // Bounce (attention-grabbing, different from bounce-in)
-  { name: 'bounce-top', duration: '0.9s', timing: 'ease', category: 'Bounce Attention' },
-  { name: 'bounce-bottom', duration: '0.9s', timing: 'ease', category: 'Bounce Attention' },
-  { name: 'bounce-left', duration: '1.1s', timing: 'ease', category: 'Bounce Attention' },
-  { name: 'bounce-right', duration: '1.1s', timing: 'ease', category: 'Bounce Attention' },
-  
-  // Pulsate
   { name: 'pulsate-fwd', duration: '0.5s', timing: 'ease-in-out', category: 'Pulsate' },
   { name: 'pulsate-bck', duration: '0.5s', timing: 'ease-in-out', category: 'Pulsate' },
+  { name: 'bounce-top', duration: '0.9s', timing: 'ease', category: 'Bounce Attention' },
+  { name: 'bounce-right', duration: '1.1s', timing: 'ease', category: 'Bounce Attention' },
+  { name: 'shake-horizontal', duration: '0.8s', timing: 'cubic-bezier(0.455, 0.030, 0.515, 0.955)', category: 'Shake' },
+  { name: 'shake-vertical', duration: '0.8s', timing: 'cubic-bezier(0.455, 0.030, 0.515, 0.955)', category: 'Shake' },
+  { name: 'vibrate-1', duration: '0.3s', timing: 'linear', category: 'Vibrate' },
+  { name: 'vibrate-3', duration: '0.5s', timing: 'linear', category: 'Vibrate' },
+  { name: 'vibrate-2', duration: '0.5s', timing: 'linear', category: 'Vibrate' },
+  
+  // Outro Effect - Exit animation
+  { name: 'text-blur-out', duration: '1.2s', timing: 'cubic-bezier(0.55, 0.085, 0.68, 0.53)', category: 'Text' },
 ]
 
-// Combine all effects
-const ALL_EFFECTS = [...ENTRANCE_EFFECTS, ...AFTER_EFFECTS]
+// Outro effects - reverse animations for exits
+const OUTRO_EFFECTS: AnimationEffect[] = [
+  { name: 'fade-out-bottom', duration: '0.6s', timing: 'cubic-bezier(0.39, 0.575, 0.565, 1)', category: 'Fade' },
+  { name: 'fade-out-bck', duration: '0.6s', timing: 'cubic-bezier(0.39, 0.575, 0.565, 1)', category: 'Fade' },
+  { name: 'flip-out-hor-top', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Flip' },
+  { name: 'flip-out-ver-right', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Flip' },
+  { name: 'flip-out-hor-bottom', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Flip' },
+  { name: 'roll-out-right', duration: '0.6s', timing: 'ease-out', category: 'Roll' },
+  { name: 'rotate-out-2-cw', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Rotate' },
+  { name: 'rotate-out-top', duration: '0.6s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Rotate' },
+  { name: 'scale-out-center', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Scale' },
+  { name: 'scale-out-bottom', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Scale' },
+  { name: 'scale-out-hor-center', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Scale' },
+  { name: 'scale-out-ver-center', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Scale' },
+  { name: 'slide-out-top', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Slide' },
+  { name: 'slide-out-bottom', duration: '0.5s', timing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)', category: 'Slide' },
+  { name: 'slide-out-blurred-top', duration: '0.6s', timing: 'cubic-bezier(0.755, 0.05, 0.855, 0.06)', category: 'Slide' },
+  { name: 'slide-out-blurred-right', duration: '0.6s', timing: 'cubic-bezier(0.755, 0.05, 0.855, 0.06)', category: 'Slide' },
+  { name: 'slide-out-blurred-bottom', duration: '0.6s', timing: 'cubic-bezier(0.755, 0.05, 0.855, 0.06)', category: 'Slide' },
+  { name: 'swing-out-left-fwd', duration: '0.5s', timing: 'cubic-bezier(0.6, -0.28, 0.735, 0.045)', category: 'Swing' },
+  { name: 'puff-out-center', duration: '0.7s', timing: 'cubic-bezier(0.165, 0.84, 0.44, 1)', category: 'Puff' },
+  { name: 'puff-out-top', duration: '0.7s', timing: 'cubic-bezier(0.165, 0.84, 0.44, 1)', category: 'Puff' },
+  { name: 'puff-out-bottom', duration: '0.7s', timing: 'cubic-bezier(0.165, 0.84, 0.44, 1)', category: 'Puff' },
+  { name: 'puff-out-hor', duration: '0.7s', timing: 'cubic-bezier(0.165, 0.84, 0.44, 1)', category: 'Puff' },
+  { name: 'puff-out-ver', duration: '0.7s', timing: 'cubic-bezier(0.165, 0.84, 0.44, 1)', category: 'Puff' },
+  { name: 'bounce-out-fwd', duration: '1.1s', timing: 'ease', category: 'Bounce' },
+  { name: 'bounce-out-bck', duration: '1.1s', timing: 'ease', category: 'Bounce' },
+  { name: 'text-blur-out', duration: '1.2s', timing: 'cubic-bezier(0.55, 0.085, 0.68, 0.53)', category: 'Text' },
+  { name: 'text-focus-out', duration: '1s', timing: 'cubic-bezier(0.55, 0.085, 0.68, 0.53)', category: 'Text' },
+  { name: 'tracking-out-expand', duration: '0.7s', timing: 'cubic-bezier(0.55, 0.085, 0.68, 0.53)', category: 'Text' },
+  { name: 'tracking-out-contract', duration: '0.8s', timing: 'cubic-bezier(0.55, 0.085, 0.68, 0.53)', category: 'Text' },
+  { name: 'tracking-out-expand-fwd', duration: '0.8s', timing: 'cubic-bezier(0.55, 0.085, 0.68, 0.53)', category: 'Text' },
+  { name: 'tracking-out-contract-bck', duration: '1s', timing: 'cubic-bezier(0.55, 0.085, 0.68, 0.53)', category: 'Text' },
+]
+
+// Categorize effects for auto-play
+// Intro effects: clear entrance animations
+const INTRO_EFFECT_NAMES = [
+  'fade-in-bottom', 'fade-in-bck', 'flip-in-hor-top', 'flip-in-ver-right', 
+  'flip-in-hor-bottom', 'roll-in-right', 'rotate-in-2-ccw', 'rotate-in-top',
+  'scale-in-center', 'scale-in-bottom', 'scale-in-hor-center', 'scale-in-ver-center',
+  'slide-in-top', 'slide-in-bottom', 'slide-in-blurred-top', 'slide-in-blurred-right',
+  'slide-in-blurred-bottom', 'swing-in-left-fwd', 'puff-in-center', 'puff-in-top',
+  'puff-in-bottom', 'puff-in-hor', 'puff-in-ver', 'bounce-in-fwd', 'bounce-in-bck',
+  'text-focus-in', 'text-flicker-in-glow', 'tracking-in-contract', 'tracking-in-expand',
+  'tracking-in-expand-fwd', 'tracking-in-contract-bck'
+]
+
+// Ambient effects: can work for intro or outro
+const AMBIENT_EFFECT_NAMES = [
+  'blink-1', 'blink-2', 'flicker-3', 'flicker-2', 'jello-horizontal',
+  'pulsate-fwd', 'pulsate-bck', 'bounce-top', 'bounce-right',
+  'shake-horizontal', 'shake-vertical', 'vibrate-1', 'vibrate-3', 'vibrate-2'
+]
+
+// Combine all effects (keep for effect library compatibility)
+const ALL_EFFECTS = [...SELECTED_EFFECTS, ...OUTRO_EFFECTS]
 
 // LocalStorage utilities
 const STORAGE_KEY = 'existential-detective-effect-prefs'
@@ -190,12 +140,16 @@ function loadEffectPreferences(): Set<string> {
     const stored = localStorage.getItem(STORAGE_KEY)
     if (stored) {
       const prefs: EffectPreferences = JSON.parse(stored)
-      return new Set(prefs.includedEffects)
+      // Filter preferences to only include effects that exist in ALL_EFFECTS
+      const validEffects = prefs.includedEffects.filter(name => 
+        ALL_EFFECTS.some(e => e.name === name)
+      )
+      return new Set(validEffects.length > 0 ? validEffects : ALL_EFFECTS.map(e => e.name))
     }
   } catch (error) {
     console.warn('Failed to load effect preferences:', error)
   }
-  // Default: all effects included
+  // Default: all SELECTED_EFFECTS and OUTRO_EFFECTS included
   return new Set(ALL_EFFECTS.map(e => e.name))
 }
 
@@ -223,15 +177,30 @@ function App() {
   const [previewEffectName, setPreviewEffectName] = useState<string | null>(null)
   const [showMenuBar, setShowMenuBar] = useState(false)
   const [showSplash, setShowSplash] = useState(true)
+  const [showPoemExperience, setShowPoemExperience] = useState(false)
+  const envVars = import.meta.env as Record<string, string | boolean | undefined>
+  const rawDebugFlag = envVars.VITE_DEBUG ?? envVars.DEBUG ?? false
+  const isDebugMode = String(rawDebugFlag).toLowerCase() === 'true'
+  
+  // Auto-play state
+  const [currentPhase, setCurrentPhase] = useState<'intro' | 'outro' | 'stopped'>('stopped')
+  const [currentIntroEffect, setCurrentIntroEffect] = useState<AnimationEffect | null>(null)
+  const [currentOutroEffect, setCurrentOutroEffect] = useState<AnimationEffect | null>(null)
 
   // Get active effects (only included ones)
   const activeEffects = ALL_EFFECTS.filter(effect => includedEffects.has(effect.name))
+  
+  // Get effect arrays for random selection
+  const introEffects = SELECTED_EFFECTS.filter(e => INTRO_EFFECT_NAMES.includes(e.name) && includedEffects.has(e.name))
+  const ambientEffects = SELECTED_EFFECTS.filter(e => AMBIENT_EFFECT_NAMES.includes(e.name) && includedEffects.has(e.name))
+  const outroEffects = [...OUTRO_EFFECTS.filter(e => includedEffects.has(e.name)), ...ambientEffects]
+  const allIntroOptions = [...introEffects, ...ambientEffects]
 
-  // Splash screen timer - fade to main content after 3 seconds
+  // Splash screen timer - fade to main content after INTRO_DURATION
   useEffect(() => {
     const timer = setTimeout(() => {
       setShowSplash(false)
-    }, 3000)
+    }, INTRO_DURATION * 1000)
     
     return () => clearTimeout(timer)
   }, [])
@@ -239,12 +208,12 @@ function App() {
   // Track mouse position to show/hide menu bar
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
-      setShowMenuBar(e.clientY < 200)
+      setShowMenuBar(!showSplash && e.clientY < 200)
     }
     
     window.addEventListener('mousemove', handleMouseMove)
     return () => window.removeEventListener('mousemove', handleMouseMove)
-  }, [])
+  }, [showSplash])
 
   // Load preferences from localStorage on mount
   useEffect(() => {
@@ -258,28 +227,87 @@ function App() {
       .then(response => response.text())
       .then(text => {
         setPoemContent(text)
-        // Split by periods OR by lines (for poetry without periods)
-        let splitSentences: string[]
-        
-        if (text.includes('.')) {
-          // Has periods - split by sentences
-          splitSentences = text
-            .split('.')
-            .map(s => s.trim())
-            .filter(s => s.length > 0)
-            .map(s => s + '.')
-        } else {
-          // No periods - split by lines (poetry format)
-          splitSentences = text
-            .split('\n')
-            .map(s => s.trim())
-            .filter(s => s.length > 0)
-        }
-        
+        // Always respect the original line breaks from the source poem
+        const splitSentences = text
+          .split(/\r?\n/)
+          .map(line => line.trim())
+          .filter(line => line.length > 0)
+
         setSentences(splitSentences)
       })
       .catch(err => console.error('Error loading poem:', err))
   }, [])
+
+  // Auto-play effect - manages intro and outro phases
+  useEffect(() => {
+    // Don't start until splash is done, the landing is cleared, and we have sentences
+    if (showSplash || !showPoemExperience || sentences.length === 0) return
+    
+    // Start first line if we're in stopped state
+    if (currentPhase === 'stopped' && currentIndex === 0) {
+      // Select random intro effect
+      const introOptions = allIntroOptions.length > 0 ? allIntroOptions : SELECTED_EFFECTS.filter(e => INTRO_EFFECT_NAMES.includes(e.name))
+      const randomIntro = introOptions[Math.floor(Math.random() * introOptions.length)]
+      setCurrentIntroEffect(randomIntro)
+      setCurrentPhase('intro')
+      setKey(prev => prev + 1)
+      return
+    }
+    
+    if (currentPhase === 'stopped') return
+
+    let timeoutId: number
+    
+    if (currentPhase === 'intro' && currentIntroEffect) {
+      // Wait for intro animation to complete, then transition to hold
+      const introDuration = parseFloat(currentIntroEffect.duration) * 1000
+      timeoutId = window.setTimeout(() => {
+        setCurrentPhase('hold')
+      }, introDuration)
+    }
+    
+    else if (currentPhase === 'hold') {
+      // Hold for SENTENCE_DURATION +/- random variance
+      const randomVariance = Math.random() * SENTENCE_DURATION_VAR
+      const holdDuration = (SENTENCE_DURATION + randomVariance) * 1000
+      timeoutId = window.setTimeout(() => {
+        // Select random outro effect
+        const outroOptions = outroEffects.length > 0 ? outroEffects : OUTRO_EFFECTS
+        const randomOutro = outroOptions[Math.floor(Math.random() * outroOptions.length)]
+        setCurrentOutroEffect(randomOutro)
+        setCurrentPhase('outro')
+        setKey(prev => prev + 1) // Trigger outro animation
+      }, holdDuration)
+    }
+    
+    else if (currentPhase === 'outro' && currentOutroEffect) {
+      // Wait for outro animation to complete, then move to next line
+      const outroDuration = parseFloat(currentOutroEffect.duration) * 1000
+      timeoutId = window.setTimeout(() => {
+        // Check if this was the last sentence
+        if (currentIndex >= sentences.length - 1) {
+          // Stay on last line
+          setCurrentPhase('stopped')
+        } else {
+          // Move to next sentence
+          const nextIndex = currentIndex + 1
+          setCurrentIndex(nextIndex)
+          
+          // Select new random intro effect for next line
+          const introOptions = allIntroOptions.length > 0 ? allIntroOptions : SELECTED_EFFECTS.filter(e => INTRO_EFFECT_NAMES.includes(e.name))
+          const randomIntro = introOptions[Math.floor(Math.random() * introOptions.length)]
+          setCurrentIntroEffect(randomIntro)
+          setCurrentOutroEffect(null)
+          setCurrentPhase('intro')
+          setKey(prev => prev + 1) // Trigger intro animation
+        }
+      }, outroDuration)
+    }
+    
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId)
+    }
+  }, [currentPhase, sentences, showSplash, showPoemExperience, currentIndex, currentIntroEffect, currentOutroEffect, allIntroOptions, outroEffects])
 
   const handleNext = () => {
     const nextSentenceIndex = (currentIndex + 1) % sentences.length
@@ -291,19 +319,40 @@ function App() {
     setPreviewEffectName(null) // Clear any preview effect
   }
 
+  const handleSkipToOutro = () => {
+    // Only allow skipping during intro or hold phases
+    if (currentPhase === 'intro' || currentPhase === 'hold') {
+      // Select random outro effect
+      const outroOptions = outroEffects.length > 0 ? outroEffects : OUTRO_EFFECTS
+      const randomOutro = outroOptions[Math.floor(Math.random() * outroOptions.length)]
+      setCurrentOutroEffect(randomOutro)
+      setCurrentPhase('outro')
+      setKey(prev => prev + 1) // Trigger outro animation
+    }
+  }
+
+  const handleOpenPoemExperience = (event: MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault()
+    setShowPoemExperience(true)
+    setCurrentIndex(0)
+    setCurrentPhase('stopped')
+    setCurrentIntroEffect(null)
+    setCurrentOutroEffect(null)
+  }
+
   const toggleCurrentEffect = () => {
-    if (!currentEffect) return
+    if (!appliedEffect) return
     
     const newIncluded = new Set(includedEffects)
-    if (newIncluded.has(currentEffect.name)) {
+    if (newIncluded.has(appliedEffect.name)) {
       // Prevent removing the last effect
       if (newIncluded.size <= 1) {
         alert('You must keep at least one effect included!')
         return
       }
-      newIncluded.delete(currentEffect.name)
+      newIncluded.delete(appliedEffect.name)
     } else {
-      newIncluded.add(currentEffect.name)
+      newIncluded.add(appliedEffect.name)
     }
     setIncludedEffects(newIncluded)
     saveEffectPreferences(newIncluded)
@@ -342,10 +391,17 @@ function App() {
 
   const categories = Object.keys(effectsByCategory).sort()
 
-  // Use preview effect if set, otherwise use current effect from activeEffects
-  const currentEffect = previewEffectName 
-    ? ALL_EFFECTS.find(e => e.name === previewEffectName) || activeEffects[effectIndex] || activeEffects[0]
-    : activeEffects[effectIndex] || activeEffects[0]
+  // Use preview effect if set, otherwise determine effect based on current phase
+  const previewedEffect = previewEffectName
+    ? ALL_EFFECTS.find(e => e.name === previewEffectName) || null
+    : null
+
+  const appliedEffect = previewedEffect
+    ?? (currentPhase === 'intro'
+      ? currentIntroEffect
+      : currentPhase === 'outro'
+        ? currentOutroEffect
+        : null)
   const currentSentence = sentences[currentIndex]
 
   return (
@@ -380,9 +436,47 @@ function App() {
               <span>Existential Detective Agency</span>
             </h1>
           </div>
+        ) : !showPoemExperience ? (
+          <section className="landing-gallery" aria-label="Select an artifact">
+            <p className="landing-tagline">choose your instrument</p>
+            <div className="landing-grid">
+              <div className="landing-card landing-card--glass" aria-label="Glass experience placeholder">
+                <div className="landing-image-wrap">
+                  <span className="glass-blur" aria-hidden="true"></span>
+                  <img src="/imgs/glass.png" alt="Vintage magnifying glass" loading="lazy" />
+                </div>
+                {/* <p className="landing-card-caption">glass • coming soon</p> */}
+              </div>
+
+              <div className="landing-card landing-card--measure" aria-label="Tape measure placeholder">
+                <div className="landing-image-wrap">
+                  <img src="/imgs/measure.png" alt="Tape measure" loading="lazy" />
+                </div>
+                {/* <p className="landing-card-caption">measure • coming soon</p> */}
+              </div>
+
+              <a
+                href="#poem"
+                className="landing-card landing-card--letters"
+                onClick={handleOpenPoemExperience}
+                role="button"
+                aria-label="Enter the poem experience"
+                title="Enter the poem experience"
+              >
+                <div className="landing-image-wrap">
+                  <img src="/imgs/letters.png" alt="Stack of letters leading to the poem experience" loading="lazy" />
+                </div>
+                {/* <p className="landing-card-caption">letters • poem experience</p> */}
+              </a>
+            </div>
+          </section>
         ) : (
           /* Main Content - Fades in after splash */
-          <div className={`poem-container ${!showSplash ? 'fade-in-content' : ''}`}>
+          <div 
+            className={`poem-container ${!showSplash ? 'fade-in-content' : ''}`}
+            onClick={handleSkipToOutro}
+            style={{ cursor: sentences.length > 0 ? 'pointer' : 'default' }}
+          >
             
             {activeEffects.length === 0 ? (
               <div className="no-effects-warning">
@@ -397,17 +491,16 @@ function App() {
                   Open Effect Library
                 </button>
               </div>
-            ) : sentences.length > 0 && currentEffect ? (
+            ) : sentences.length > 0 ? (
               <>
                 <div className="sentence-display">
-                  <p key={key} className={`sentence ${currentEffect.name}`}>
+                  <p
+                    key={key}
+                    className={`sentence${appliedEffect ? ` ${appliedEffect.name}` : ''}`}
+                  >
                     {currentSentence}
                   </p>
                 </div>
-
-                <button className="next-button" onClick={handleNext}>
-                  Next
-                </button>
               </>
             ) : (
               <p className="placeholder">
@@ -419,44 +512,21 @@ function App() {
       </main>
 
       {/* Effect Info Bar */}
-      {sentences.length > 0 && currentEffect && (
+      {isDebugMode && sentences.length > 0 && appliedEffect && !showSplash && (
         <div className="effect-info-bar">
           <div className="effect-info">
             <span className="info-label">Effect:</span>
-            <span className="info-value">{currentEffect.name}</span>
+            <span className="info-value">{appliedEffect.name}</span>
           </div>
           <div className="effect-info">
-            <span className="info-label">Duration:</span>
-            <span className="info-value">{currentEffect.duration}</span>
-          </div>
-          <div className="effect-info">
-            <span className="info-label">Timing:</span>
-            <span className="info-value">{currentEffect.timing}</span>
+            <span className="info-label">Phase:</span>
+            <span className="info-value">{currentPhase}</span>
           </div>
           <div className="effect-info">
             <span className="info-label">Progress:</span>
             <span className="info-value">
-              Sentence {currentIndex + 1}/{sentences.length} • 
-              Effect {effectIndex + 1}/{activeEffects.length}
+              Line {currentIndex + 1}/{sentences.length}
             </span>
-          </div>
-          <div className="effect-info">
-            <button 
-              className="toggle-effect-btn" 
-              onClick={toggleCurrentEffect}
-              title={includedEffects.has(currentEffect.name) ? "Exclude this effect" : "Include this effect"}
-            >
-              {includedEffects.has(currentEffect.name) ? '✓' : '✗'}
-            </button>
-          </div>
-          <div className="effect-info">
-            <button 
-              className="settings-btn" 
-              onClick={() => setShowEffectPicker(true)}
-              title="Manage effect library"
-            >
-              ⚙
-            </button>
           </div>
         </div>
       )}
@@ -473,16 +543,21 @@ function App() {
         >
           about
         </a>
-        <span className="footer-separator">•</span>
-        <a 
-          href="https://svs.gsfc.nasa.gov/4655" 
-          target="_blank" 
-          rel="noopener noreferrer"
-          className="footer-link"
-          title="Moon visualization by NASA's Scientific Visualization Studio"
-        >
-          moon imagery: nasa svs
-        </a>
+        {isDebugMode && (
+          <>
+            <span className="footer-separator">•</span>
+            <a 
+              href="#effects" 
+              className="footer-link"
+              onClick={(e) => {
+                e.preventDefault()
+                setShowEffectPicker(true)
+              }}
+            >
+              effect explorer
+            </a>
+          </>
+        )}
       </footer>
 
       {/* About Modal */}
@@ -492,43 +567,23 @@ function App() {
             <button className="modal-close" onClick={() => setShowAbout(false)}>×</button>
             <h2>About</h2>
             <div className="modal-body">
-              <p className="pending-message">Content pending...</p>
+              <figure className="about-art">
+                <img
+                  src="/imgs/black_cat_left_gaze.png"
+                  alt="Black cat gazing left in a dim detective office"
+                  loading="lazy"
+                />
+                <figcaption>resident familiar, on permanent stakeout.</figcaption>
+              </figure>
+              <p className="about-copy">
+                The Existential Detective Agency watches the thresholds where intuition, poetry, and
+                cosmic paperwork intersect. The cat keeps score, the letters whisper, and every
+                visitor becomes a co-conspirator.
+              </p>
             </div>
             <div className="modal-credits">
-              <h3>Moon Visualization Credit</h3>
-              <p>
-                Please give credit for this item to:<br />
-                <strong>NASA's Scientific Visualization Studio</strong>
-              </p>
-              <p>
-                <strong>Visualizer</strong><br />
-                Ernie Wright (USRA)
-              </p>
-              <p>
-                <strong>Technical support</strong><br />
-                Laurence Schuler (ADNET Systems, Inc.)<br />
-                Ian Jones (ADNET Systems, Inc.)
-              </p>
-              <p>
-                <strong>Editor</strong><br />
-                Ernie Wright (USRA)
-              </p>
-              <p>
-                <strong>Producer</strong><br />
-                Wade Sisler (NASA/GSFC)
-              </p>
-              <p>
-                <strong>Scientist</strong><br />
-                Noah Petro (NASA/GSFC)
-              </p>
               <p className="credit-link">
-                <a 
-                  href="https://svs.gsfc.nasa.gov/4655" 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                >
-                  View full visualization details at NASA SVS
-                </a>
+                <span><a href="https://svs.gsfc.nasa.gov/4655">Filed in the archives under "stray miracles".</a></span>
               </p>
             </div>
           </div>

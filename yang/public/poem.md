@@ -1,52 +1,58 @@
-LOREM IPSUM.
+Our ancestors taught us
 
+to remember small things
 
-The wrong sculpture garden,
+and big things,
 
-where a ribbon on the Madonna of the unloved reads
+Our Lady of Guadalupe
 
-that her cells can not accept the intimacy she wants.
+and the service
 
-Absence is a silent bell that collapses on the day,
+of a ladybug.
 
-the golden wound louder than ever.
+Then they showed us
 
+the whole act
 
+of life is letting go.
 
+If you could have
 
+seen my grandmother
 
-Seven thousand mirrors in the sky beg
+waiting to follow
 
-to scale the colorful tower in my throat.
+the little man
 
-Everything touched by a Saharan iron cloud.
+through the stone arch
 
-It burns with the naked names of the rose,
+of the french chapel,
 
-and beneath it the tunnel of ruby sleeps.
+she would have shown us
 
+how to let go
 
+of a pancreas,
 
+a country,
 
+and the sins
 
-A blue mist surrounds me,
+of a husband
 
-lingers in doorways,
+hunting jaguars
 
-matched to the fertility of regret.
+in the jungle.
 
-The birth of the sky chooses to plant black dahlias,
+The tip of her index finger
 
-in the emerald moss of the earth’s spine.
+is missing,
 
+like her last August.
 
+She could still teach us,
 
+to let go of each other.
 
-
-We split the secret in half seven times,
-
-seven for the secret that’s never been told.
-
-Then let ourselves closer to abandoned star signs
-
-to rest in my curved horns
+But then grandmother why are we here?
+.

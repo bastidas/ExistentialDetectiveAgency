@@ -28,7 +28,7 @@ Edit these files to change what the agent and philosophers are told to do. The b
 | File | Purpose |
 |------|--------|
 | `phil_annotations.json` | Rules for notes and annotations: `userText`, `respondText`, `mode` (`note`, `rewrite`, `keyword`, `highlight`, `strike`). Served by `/api/philosopher-notes`. Backend loads from `public/data/phil_annotations.json` or `api/prompts/phil_annotations.json` (or `PHIL_ANNOTATIONS_FILE` if set). |
-| `paper-config.json` | Per-paper image: `padding` (top/right/bottom/left in **percent**), `width`, `height` (px), optional `scale`. Keys are paper image paths (e.g. `imgs/paper3.png`). Defines the paper list and layout. Loaded by `noteFormatConfig.js`. |
+| `paper-config.json` | Per-paper image: `padding` (top/right/bottom/left in **percent**), `width`/`height` (legacy px values interpreted as relative multipliers), optional `scale`. Keys are paper image paths (e.g. `imgs/paper3.png`). Loaded by `noteFormatConfig.js`. |
 
 ---
 
@@ -59,10 +59,10 @@ Edit these files to change what the agent and philosophers are told to do. The b
 | `NOTE_FORMAT` | Per side (`left`, `right`): `lineHeight`, `paddingTop`/`Right`/`Bottom`/`Left` (%), `opacity`, `color`, `fontSize`, `fontFamily`. Keys match CSS vars `--note-*`. |
 | `CONTENT_HEIGHT_SCALING` | Multiplier for “how tall” content counts when fitting on a note: `base`, `left`, `right`. Effective = base × (left or right). |
 | `ESTIMATE_LINE_HEIGHT_PX` | Estimated px per line for “will it fit?” (per side). |
-| `PAPER_CONFIG` | Paper image path → `{ padding: { top, right, bottom, left } %, width, height, scale? }`. Loaded from `data/paper-config.json` on init; in-code object is fallback. |
+| `PAPER_CONFIG` | Paper image path → `{ padding %, widthFactor, heightFactor, scale }`. Factors come from the legacy px values in `data/paper-config.json`, so relative differences stay intact while the base canvas + responsive scaling control real pixels. |
 | `getPaperImages()` | Returns the list of paper URLs (from `PAPER_CONFIG` keys). Used by `notePages.js`. |
 | `getPaperPadding(paperUrl)` | Padding in percent for a paper. |
-| `getPaperSize(paperUrl)` | Final size in px (width × scale, height × scale). |
+| `getPaperSize(paperUrl)` | Final size in px (`NOTE_BASE_SIZE` × factor × scale × responsive note scale). |
 | `applyNoteFormatToPanels()` | Sets `--note-*` on `#left-philosopher` and `#right-philosopher` from `NOTE_FORMAT`. Call once at app init. |
 
 **Used by:** `notePages.js`, `note-pages.css`, `left-philosopher.css`, `right-philosopher.css` (via `var(--note-*)`).
@@ -98,7 +98,7 @@ Edit these files to change what the agent and philosophers are told to do. The b
 | Note text color, font, size, line spacing, opacity, text inset | `js/noteFormatConfig.js` | `NOTE_FORMAT.left` / `.right` |
 | Estimated line height for “will it fit?” | `js/noteFormatConfig.js` | `ESTIMATE_LINE_HEIGHT_PX.left` / `.right` |
 | How “tall” content counts for fitting | `js/noteFormatConfig.js` | `CONTENT_HEIGHT_SCALING` → `base`, `left`, `right` |
-| Paper list, edge padding, size or scale per sheet | `data/paper-config.json` or `js/noteFormatConfig.js` → `PAPER_CONFIG` | Per-key: `padding` (top/right/bottom/left %), `width`, `height`, `scale` |
+| Paper list, edge padding, relative size or scale per sheet | `data/paper-config.json` or `js/noteFormatConfig.js` → `PAPER_CONFIG` | Per-key: `padding` (top/right/bottom/left %), `width`/`height` (treated as relative multipliers), `scale` |
 | Rules for notes and annotations (what triggers notes/rewrite/keyword/highlight/strike) | `data/phil_annotations.json` | Array of `{ userText, respondText, mode }` |
 | Chat markup colors / duration / stroke per philosopher | `js/annotationConfig.js` | `ANNOTATION_PHILOSOPHER_SETTINGS.left` / `.right` |
 | Chat markup mode → RoughNotation type | `js/annotationConfig.js` | `ANNOTATION_MODE_TO_TYPES` |
@@ -113,7 +113,7 @@ Edit these files to change what the agent and philosophers are told to do. The b
 |------|------|
 | `api/prompts/*.md` | Prompts only; no data |
 | `data/phil_annotations.json` | Rules for notes + annotations; served by API |
-| `data/paper-config.json` | Paper list, padding (%), size (px), scale per image |
+| `data/paper-config.json` | Paper list, padding (%), relative size hints (`width`/`height`), scale per image |
 | `js/annotationConfig.js` | Annotation fallback color, mode→types, per-philosopher settings |
 | `js/noteFormatConfig.js` | Note format, paper config loading, estimation constants, `applyNoteFormatToPanels()` |
 | `js/chatConfig.js` | Chat column style object and `applyChatStyle()` |

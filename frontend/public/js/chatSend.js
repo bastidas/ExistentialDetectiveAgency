@@ -15,7 +15,19 @@
   /** Prevents double-send when submit fires twice (e.g. easter-egg path or fast double Enter). */
   var sending = false;
 
-  function animateRewriteInInput(rewriteInfo) {
+  function focusEditor(atEnd) {
+    var editorNode = EDAChatInput && EDAChatInput.getEditor ? EDAChatInput.getEditor() : null;
+    if (!editorNode) return;
+    editorNode.focus();
+    if (EDAUtils && EDAUtils.setCursorOffset && atEnd) {
+      var len = EDAChatInput && EDAChatInput.getValue ? (EDAChatInput.getValue() || "").length : 0;
+      EDAUtils.setCursorOffset(editorNode, len);
+    }
+  }
+
+  function animateRewriteInInput(rewriteInfo, options) {
+    options = options || {};
+    var preserveSubmitDisabled = options.preserveSubmitDisabled === true;
     var editor = EDAChatInput && EDAChatInput.getEditor ? EDAChatInput.getEditor() : null;
     var submitBtn = document.getElementById("submit");
     if (!editor || !submitBtn) return Promise.resolve(rewriteInfo.newMessage);
@@ -44,7 +56,9 @@
       function typeNext(j) {
         if (j >= toAdd.length) {
           editor.setAttribute("contenteditable", "true");
-          submitBtn.disabled = false;
+          if (!preserveSubmitDisabled) {
+            submitBtn.disabled = false;
+          }
           resolve(newMessage);
           return;
         }
@@ -62,7 +76,9 @@
     });
   }
 
-  function doSendMessage(messageToSend, userBlockHtml) {
+  function doSendMessage(messageToSend, userBlockHtml, options) {
+    options = options || {};
+    var deferInputClear = options.deferInputClear === true;
     if (sending) return;
     sending = true;
 
@@ -70,13 +86,17 @@
     var editorRef = EDAMessageUI.getEditorNode && EDAMessageUI.getEditorNode();
     // Always add user message via addMessage so it gets annotated (keyword/highlight/strike).
     EDAMessageUI.addMessage("user", messageToSend);
-    if (EDAChatInput && EDAChatInput.clear) EDAChatInput.clear();
+    if (EDAChatInput && EDAChatInput.clear && !deferInputClear) {
+      EDAChatInput.clear();
+      focusEditor(true);
+    }
     if (submitBtn) submitBtn.disabled = true;
     EDAMessageUI.setStatus("Thinking…");
 
     function onDone() {
       sending = false;
       if (submitBtn) submitBtn.disabled = false;
+      focusEditor(true);
     }
 
     function runFetch() {
@@ -118,10 +138,10 @@
                       "Invalid request. Check your message and try again.")
                     : (data.error ||
                       "Something went wrong. Please try again.");
-          EDAMessageUI.setStatus(displayMsg, true);
-          EDAMessageUI.addMessage("assistant", displayMsg, editorRef);
-          return;
-        }
+            EDAMessageUI.setStatus(displayMsg, true);
+            EDAMessageUI.addMessage("assistant", displayMsg, editorRef);
+            return;
+          }
 
         EDAMessageUI.setStatus("");
         if (data.debug) {
@@ -221,7 +241,7 @@
         .finally(onDone);
     }
 
-    EDAMessageUI.addSeparatorLine(runFetch, editorRef);
+    runFetch();
   }
 
   global.EDAChatSend = {

@@ -1,5 +1,6 @@
 [
   { "userText": "why", "respondText": "the subject is perplexed", "mode": "note" },
+  { "userText": "who", "respondText": "insight", "mode": "note" },
   { "userText": "time", "respondText": "the subject doesn't know what year it is", "mode": "note" },
   { "userText": "you", "respondText": "you?", "mode": "rewrite" },
   { "userText": "what", "respondText": "", "mode": "keyword" },

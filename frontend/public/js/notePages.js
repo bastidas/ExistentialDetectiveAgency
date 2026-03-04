@@ -9,9 +9,15 @@
   var getPaperSize = cfg ? cfg.getPaperSize : function () { return { width: 440, height: 560 }; };
   var getNoteFormat = cfg ? cfg.getNoteFormat : function () { return {}; };
   var getContentHeightScale = cfg ? cfg.getContentHeightScale : function () { return 1; };
-  var ESTIMATE_LINE_HEIGHT_PX = (cfg && cfg.ESTIMATE_LINE_HEIGHT_PX) ? cfg.ESTIMATE_LINE_HEIGHT_PX : { left: 28, right: 52 };
+  var FALLBACK_LINE_HEIGHT_PX = (cfg && cfg.ESTIMATE_LINE_HEIGHT_PX) ? cfg.ESTIMATE_LINE_HEIGHT_PX : { left: 28, right: 52 };
+  var getEstimatedLineHeightPx = (cfg && cfg.getEstimatedLineHeightPx)
+    ? cfg.getEstimatedLineHeightPx
+    : function (side) {
+        var fallback = FALLBACK_LINE_HEIGHT_PX || {};
+        return fallback[side] || fallback.left || 32;
+      };
 
-  var ROTATION_MIN_DEG = -18;
+  var ROTATION_MIN_DEG = -12;
   var ROTATION_MAX_DEG = 15;
   var getEstimateCharsPerLine = (cfg && cfg.getEstimateCharsPerLine) ? cfg.getEstimateCharsPerLine : null;
   var ESTIMATE_CHARS_PER_LINE_FALLBACK = 80;
@@ -23,9 +29,19 @@
   var NOTE_STACK_OFFSET_PCT = 10;
   /** Random offset per note: +/- this many % of region height (e.g. 5 = ±5%). */
   var NOTE_STACK_JITTER_PCT = 5;
+  var NOTE_ACTIVE_CLASS = "note-page--active";
+  var NOTE_DRAG_CLASS = "note-page--dragging";
+  var NOTE_DESTROY_CLASS = "note-page--destroying";
+  var NOTE_FRAGMENT_CLASS = "note-page__fragment";
+  var DESTROY_ANIMATION_MS = 550;
+  var DESTROY_FRAGMENT_COUNT = 8;
 
   function getPaperImages() {
-    return (cfg && cfg.getPaperImages) ? cfg.getPaperImages() : ["imgs/paper3.png", "imgs/paper4.webp"];
+    if (cfg && typeof cfg.getPaperImages === "function") {
+      var list = cfg.getPaperImages();
+      if (Array.isArray(list) && list.length) return list;
+    }
+    return ["imgs/paper3.png", "imgs/paper4.webp"];
   }
 
   // var REGION_PADDING_PX = 200;
@@ -36,7 +52,186 @@
     right: { currentNote: null, contentElement: null, usedHeight: 0, writingAreaHeight: 0 },
   };
 
+  function clamp(value, min, max) {
+    if (value < min) return min;
+    if (value > max) return max;
+    return value;
+  }
+
+  function clearActiveIndicators(region, active) {
+    if (!region) return;
+    var siblings = region.querySelectorAll(".note-page");
+    for (var i = 0; i < siblings.length; i++) {
+      if (siblings[i] !== active) {
+        siblings[i].classList.remove(NOTE_ACTIVE_CLASS);
+      }
+    }
+  }
+
+  function bringNoteToFront(wrapper, side) {
+    if (!wrapper) return;
+    noteZIndex += 1;
+    wrapper.style.zIndex = String(noteZIndex);
+    var region = wrapper.parentNode;
+    if (region && region.lastElementChild !== wrapper) {
+      region.appendChild(wrapper);
+    }
+    clearActiveIndicators(region, wrapper);
+    wrapper.classList.add(NOTE_ACTIVE_CLASS);
+  }
+
+  function spawnFragments(wrapper) {
+    if (!wrapper) return;
+    var rect = wrapper.getBoundingClientRect();
+    for (var i = 0; i < DESTROY_FRAGMENT_COUNT; i++) {
+      var fragment = document.createElement("span");
+      fragment.className = NOTE_FRAGMENT_CLASS;
+      fragment.style.left = Math.round(Math.random() * rect.width) + "px";
+      fragment.style.top = Math.round(Math.random() * rect.height) + "px";
+      var xOffset = (Math.random() * 120 - 60).toFixed(0) + "px";
+      var yOffset = (-30 - Math.random() * 90).toFixed(0) + "px";
+      fragment.style.setProperty("--frag-x", xOffset);
+      fragment.style.setProperty("--frag-y", yOffset);
+      wrapper.appendChild(fragment);
+      (function (frag) {
+        setTimeout(function () {
+          if (frag && frag.parentNode) frag.parentNode.removeChild(frag);
+        }, DESTROY_ANIMATION_MS);
+      })(fragment);
+    }
+  }
+
+  function destroyNoteElement(wrapper, side) {
+    if (!wrapper || wrapper.classList.contains(NOTE_DESTROY_CLASS)) return;
+    bringNoteToFront(wrapper, side);
+    wrapper.classList.add(NOTE_DESTROY_CLASS);
+    spawnFragments(wrapper);
+    setTimeout(function () {
+      if (wrapper && wrapper.parentNode) {
+        wrapper.parentNode.removeChild(wrapper);
+      }
+      var s = state[side];
+      if (s && s.currentNote === wrapper) {
+        state[side] = { currentNote: null, contentElement: null, usedHeight: 0, writingAreaHeight: 0 };
+      }
+    }, DESTROY_ANIMATION_MS);
+  }
+
+  function attachNoteControls(wrapper, side) {
+    if (!wrapper || wrapper.querySelector(".note-page__controls")) return;
+    var controls = document.createElement("div");
+    controls.className = "note-page__controls";
+    var closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "note-page__close";
+    closeBtn.setAttribute("aria-label", "Destroy note");
+    closeBtn.textContent = "x";
+    closeBtn.addEventListener("pointerdown", function (event) {
+      event.stopPropagation();
+    });
+    closeBtn.addEventListener("click", function (event) {
+      event.stopPropagation();
+      destroyNoteElement(wrapper, side);
+    });
+    controls.appendChild(closeBtn);
+    wrapper.appendChild(controls);
+  }
+
+  function enableKeyboardDeletion(wrapper, side) {
+    if (!wrapper) return;
+    wrapper.addEventListener("keydown", function (event) {
+      if (event.key === "Delete" || event.key === "Backspace") {
+        event.preventDefault();
+        destroyNoteElement(wrapper, side);
+      }
+    });
+  }
+
+  function enableNoteDragging(wrapper, side) {
+    if (!wrapper) return;
+    var activePointerId = null;
+    var dragState = null;
+
+    function endDrag(event) {
+      if (activePointerId == null || event.pointerId !== activePointerId) return;
+      if (wrapper.releasePointerCapture) {
+        wrapper.releasePointerCapture(activePointerId);
+      }
+      activePointerId = null;
+      dragState = null;
+      wrapper.classList.remove(NOTE_DRAG_CLASS);
+    }
+
+    wrapper.addEventListener("pointerdown", function (event) {
+      if (event.button && event.button !== 0) return;
+      if (event.target && event.target.closest && event.target.closest(".note-page__controls")) {
+        return;
+      }
+      var region = wrapper.parentNode;
+      if (!region) return;
+      var regionRect = region.getBoundingClientRect();
+      var noteRect = wrapper.getBoundingClientRect();
+      activePointerId = event.pointerId;
+      dragState = {
+        startX: event.clientX,
+        startY: event.clientY,
+        startLeft: noteRect.left - regionRect.left,
+        startTop: noteRect.top - regionRect.top,
+        regionLeft: regionRect.left,
+        regionTop: regionRect.top,
+      };
+      if (wrapper.setPointerCapture) {
+        wrapper.setPointerCapture(activePointerId);
+      }
+      wrapper.classList.add(NOTE_DRAG_CLASS);
+      bringNoteToFront(wrapper, side);
+    });
+
+    wrapper.addEventListener("pointermove", function (event) {
+      if (activePointerId == null || event.pointerId !== activePointerId || !dragState) return;
+      var dx = event.clientX - dragState.startX;
+      var dy = event.clientY - dragState.startY;
+      var nextLeft = dragState.startLeft + dx;
+      var nextTop = dragState.startTop + dy;
+      wrapper.style.left = nextLeft + "px";
+      wrapper.style.right = "";
+      wrapper.style.top = nextTop + "px";
+    });
+
+    wrapper.addEventListener("pointerup", endDrag);
+    wrapper.addEventListener("pointercancel", endDrag);
+    wrapper.addEventListener("lostpointercapture", function () {
+      activePointerId = null;
+      dragState = null;
+      wrapper.classList.remove(NOTE_DRAG_CLASS);
+    });
+  }
+
+  function registerNoteInteractions(wrapper, side) {
+    if (!wrapper) return;
+    wrapper.dataset.noteSide = side;
+    attachNoteControls(wrapper, side);
+    enableKeyboardDeletion(wrapper, side);
+    enableNoteDragging(wrapper, side);
+    wrapper.addEventListener("focus", function () {
+      bringNoteToFront(wrapper, side);
+    });
+    wrapper.addEventListener("pointerdown", function (event) {
+      if (event.button && event.button !== 0) return;
+      bringNoteToFront(wrapper, side);
+    });
+  }
+
+  function getSharedMobilePanel() {
+    if (typeof document === "undefined") return null;
+    var body = document.body;
+    if (!body || body.dataset.mobileNotesMode !== "shared") return null;
+    return document.getElementById("mobile-shared-notes-content");
+  }
+
   function getPanel(side) {
+    var shared = getSharedMobilePanel();
+    if (shared) return shared;
     var id = side === "right" ? "right-philosopher-content" : "left-philosopher-content";
     return document.getElementById(id);
   }
@@ -52,6 +247,41 @@
     return region;
   }
 
+  function refreshNotesForSide(side) {
+    var panel = getPanel(side);
+    if (!panel) return;
+    var region = panel.querySelector(".notes-region");
+    if (!region) return;
+    var wrappers = region.querySelectorAll(".note-page");
+    if (!wrappers.length) return;
+    var sideState = state[side];
+    for (var i = 0; i < wrappers.length; i++) {
+      var wrapper = wrappers[i];
+      var paperUrl = wrapper.dataset.paperUrl;
+      if (!paperUrl) continue;
+      var sizing = applyPaperSizing(wrapper, side, paperUrl);
+      if (!sizing) continue;
+      if (sideState && sideState.currentNote === wrapper) {
+        sideState.writingAreaHeight = sizing.writingAreaHeight || sideState.writingAreaHeight;
+        if (sideState.contentElement && sideState.contentElement.isConnected) {
+          sideState.usedHeight = getContentUsedHeight(sideState.contentElement);
+        }
+      }
+    }
+  }
+
+  function refreshAllNotesDimensions() {
+    refreshNotesForSide("left");
+    refreshNotesForSide("right");
+  }
+
+  function handleResponsiveScaleUpdate() {
+    refreshAllNotesDimensions();
+    if (global.NoteCapacity && typeof global.NoteCapacity.invalidate === "function") {
+      global.NoteCapacity.invalidate();
+    }
+  }
+
   function randomPaperUrl() {
     var list = getPaperImages();
     return list[Math.floor(Math.random() * list.length)];
@@ -61,6 +291,28 @@
     return ROTATION_MIN_DEG + Math.random() * (ROTATION_MAX_DEG - ROTATION_MIN_DEG);
   }
 
+  function applyPaperSizing(wrapper, side, paperUrl, presetSize) {
+    if (!wrapper || !paperUrl) return null;
+    var paperEl = wrapper.querySelector(".note-page__paper");
+    var contentEl = wrapper.querySelector(".note-page__content");
+    if (!paperEl || !contentEl) return null;
+    var size = presetSize || getPaperSize(paperUrl);
+    var padding = getPaperPadding(paperUrl, side);
+    var noteWidth = size.width;
+    var noteHeight = size.height;
+    paperEl.style.width = noteWidth + "px";
+    paperEl.style.height = noteHeight + "px";
+    contentEl.style.top = padding.top + "%";
+    contentEl.style.right = padding.right + "%";
+    contentEl.style.bottom = padding.bottom + "%";
+    contentEl.style.left = padding.left + "%";
+    var writingAreaHeight = noteHeight * (1 - (padding.top + padding.bottom) / 100);
+    var writingAreaWidth = noteWidth * (1 - (padding.left + padding.right) / 100);
+    contentEl.style.height = writingAreaHeight + "px";
+    contentEl.style.width = writingAreaWidth + "px";
+    return { noteWidth: noteWidth, noteHeight: noteHeight, writingAreaHeight: writingAreaHeight };
+  }
+
   /**
    * Estimated height (px) the next chunk will need. Used with getCurrentTextBounds to decide if we need a new note.
    * ESTIMATE_LINE_HEIGHT_PX (from NoteFormatConfig) must match each philosopher's real line height or we underestimate
@@ -68,7 +320,7 @@
    */
   function estimateHeightForText(text, side) {
     if (!text || !text.length) return 0;
-    var lineHeight = ESTIMATE_LINE_HEIGHT_PX[side] || ESTIMATE_LINE_HEIGHT_PX.left;
+    var lineHeight = getEstimatedLineHeightPx(side);
     var charsPerLine = getEstimateCharsPerLine ? getEstimateCharsPerLine(side) : ESTIMATE_CHARS_PER_LINE_FALLBACK;
     var lines = Math.max(1, Math.ceil(text.length / charsPerLine));
     return lines * lineHeight;
@@ -141,7 +393,7 @@
    */
   function need_new_note(side, nextText) {
     var s = state[side];
-    var defaultLineHeight = ESTIMATE_LINE_HEIGHT_PX[side] || ESTIMATE_LINE_HEIGHT_PX.left;
+    var defaultLineHeight = getEstimatedLineHeightPx(side);
     var estimatedNext = nextText != null
       ? estimateHeightForText(String(nextText), side)
       : defaultLineHeight * 2;
@@ -171,12 +423,17 @@
     }
 
     var bounds = getCurrentTextBounds(contentEl, side);
-    var currentBottom = bounds ? bounds.top + bounds.height : 0;
+    var baselineBottom = bounds ? bounds.top + bounds.height : 0;
+    var usedHeight = (s && typeof s.usedHeight === "number") ? s.usedHeight : 0;
+    if (!usedHeight && contentEl.children.length > 0) {
+      usedHeight = getContentUsedHeight(contentEl);
+    }
+    var currentBottom = Math.max(baselineBottom, usedHeight);
     var paddingPx = (global.notePages && global.notePages.NOTE_BOX_PADDING_PX != null) ? global.notePages.NOTE_BOX_PADDING_PX : NOTE_BOX_PADDING_PX;
     var spaceAfterBox = currentBottom + paddingPx;
     var fitsCurrent = spaceAfterBox + estimatedNext <= writingAreaHeight;
 
-    console.log(LOG_PREFIX, "  writingAreaHeight:", writingAreaHeight, "currentBottom:", currentBottom, "padding:", paddingPx, "spaceAfterBox:", spaceAfterBox, "estimatedNext:", estimatedNext, "fits:", fitsCurrent);
+    console.log(LOG_PREFIX, "  writingAreaHeight:", writingAreaHeight, "baselineBottom:", baselineBottom, "usedHeight:", usedHeight, "padding:", paddingPx, "spaceAfterBox:", spaceAfterBox, "estimatedNext:", estimatedNext, "fits:", fitsCurrent);
 
     if (fitsCurrent) return { needNew: false };
 
@@ -254,8 +511,15 @@
     var region = getOrCreateRegion(side);
     if (!region) return null;
 
-    var paperUrl;
-    if (options.preferLargerPaper) {
+    var paperUrl = options.paperUrl;
+    if (paperUrl) {
+      var available = getPaperImages();
+      if (available.indexOf(paperUrl) === -1) {
+        console.warn(LOG_PREFIX, "write_new_note request for unknown paper", paperUrl, "falling back to random selection");
+        paperUrl = null;
+      }
+    }
+    if (!paperUrl && options.preferLargerPaper) {
       var papers = getPaperImages();
       var bestUrl = papers[0];
       var bestArea = 0;
@@ -267,7 +531,7 @@
         }
       }
       paperUrl = bestUrl;
-    } else {
+    } else if (!paperUrl) {
       paperUrl = randomPaperUrl();
     }
     var rotationDeg = randomRotationDeg();
@@ -279,6 +543,7 @@
 
     var wrapper = document.createElement("div");
     wrapper.className = "note-page note-page--" + side;
+    wrapper.dataset.paperUrl = paperUrl;
     noteZIndex += 1;
     wrapper.style.zIndex = String(noteZIndex);
     wrapper.style.transformOrigin = "top left";
@@ -288,37 +553,21 @@
     wrapper.style.top = pos.top + "px";
     wrapper.setAttribute("role", "button");
     wrapper.setAttribute("tabindex", "0");
-    wrapper.setAttribute("aria-label", "Bring note to front");
-    wrapper.addEventListener("click", function () {
-      noteZIndex += 1;
-      wrapper.style.zIndex = String(noteZIndex);
-      if (wrapper.parentNode === region) {
-        region.appendChild(wrapper);
-      }
-    });
+    wrapper.setAttribute("aria-label", "Move note");
+    registerNoteInteractions(wrapper, side);
 
     var paper = document.createElement("div");
     paper.className = "note-page__paper";
     paper.style.backgroundImage = "url(" + paperUrl + ")";
-    paper.style.width = noteWidth + "px";
-    paper.style.height = noteHeight + "px";
     wrapper.appendChild(paper);
-
-    var padding = getPaperPadding(paperUrl, side);
-    var writingAreaHeight = noteHeight * (1 - (padding.top + padding.bottom) / 100);
-    var writingAreaWidth = noteWidth * (1 - (padding.left + padding.right) / 100);
 
     var content = document.createElement("div");
     content.className = "note-page__content";
     content.setAttribute("data-side", side);
-    content.style.top = padding.top + "%";
-    content.style.right = padding.right + "%";
-    content.style.bottom = padding.bottom + "%";
-    content.style.left = padding.left + "%";
-    content.style.height = writingAreaHeight + "px";
-    content.style.width = writingAreaWidth + "px";
     applyNoteFormatStyles(content, side);
     paper.appendChild(content);
+
+    var sizing = applyPaperSizing(wrapper, side, paperUrl, size) || { noteWidth: noteWidth, noteHeight: noteHeight, writingAreaHeight: 0 };
 
     /* Temporary dev-only: draw bounding box and label on each note. Remove before release. */
     if (NOTE_DEBUG) {
@@ -330,19 +579,21 @@
         "border:2px solid #000;background:transparent;pointer-events:none;box-sizing:border-box;";
       var label = document.createElement("span");
       label.style.cssText = "position:absolute;top:2px;left:2px;background:#000;color:#fff;font-size:10px;padding:2px 4px;font-family:sans-serif;";
-      label.textContent = String(noteZIndex);
+      var paperFilename = paperUrl.split('/').pop();
+      label.textContent = String(noteZIndex) + " - " + paperFilename;
       debugBox.appendChild(label);
       wrapper.appendChild(debugBox);
     }
 
     region.appendChild(wrapper);
+    bringNoteToFront(wrapper, side);
     state[side] = {
       currentNote: wrapper,
       contentElement: content,
       usedHeight: 0,
-      writingAreaHeight: writingAreaHeight,
+      writingAreaHeight: sizing.writingAreaHeight || 0,
     };
-    console.log(LOG_PREFIX, "write_new_note(", side, ") created note, writingAreaHeight:", writingAreaHeight, "usedHeight: 0");
+    console.log(LOG_PREFIX, "write_new_note(", side, ") created note, writingAreaHeight:", sizing.writingAreaHeight, "usedHeight: 0");
 
     return content;
   }
@@ -400,6 +651,10 @@
     var debugLabel = options.debugLabel;
     var debugQueueAtEnqueue = options.debugQueueAtEnqueue;
 
+    if (s && s.currentNote) {
+      bringNoteToFront(s.currentNote, side);
+    }
+
     if (side === "right") {
       var bounds = getCurrentTextBounds(contentEl, side);
       if (bounds) {
@@ -453,6 +708,10 @@
     });
   }
 
+  if (cfg && typeof cfg.onResponsiveScaleChange === "function") {
+    cfg.onResponsiveScaleChange(handleResponsiveScaleUpdate);
+  }
+
   global.notePages = {
     need_new_note: need_new_note,
     write_new_note: write_new_note,
@@ -462,5 +721,7 @@
     NOTE_BOX_PADDING_PX: NOTE_BOX_PADDING_PX,
     NOTE_STACK_OFFSET_PCT: NOTE_STACK_OFFSET_PCT,
     NOTE_STACK_JITTER_PCT: NOTE_STACK_JITTER_PCT,
+    bring_note_to_front: bringNoteToFront,
+    destroy_note: destroyNoteElement,
   };
 })(typeof window !== "undefined" ? window : this);

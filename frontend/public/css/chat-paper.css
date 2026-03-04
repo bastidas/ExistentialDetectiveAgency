@@ -1,17 +1,32 @@
 /* Paper sheet: main chat column. Values from ChatConfig via --chat-* (set at runtime). */
 main {
   background-color: var(--chat-bg, #e8e4d8);
-  margin: var(--chat-margin, 2em);
+  margin: clamp(1rem, 2vw, 3rem);
   max-width: var(--chat-max-width, 120em);
   min-width: 0;
-  padding: var(--chat-padding, 1.5em);
-  border-radius: var(--chat-radius, 0.25rem);
+  padding: var(--chat-padding, 1.75em);
+  border-radius: var(--chat-radius, 0.35rem);
   color: var(--chat-text, #1a1a1a);
+  box-shadow: 0 25px 70px rgba(0, 0, 0, 0.35);
 }
 
-@media (min-width: 1024px) {
+@media (max-width: 900px) {
   main {
-    min-width: var(--chat-min-width-lg, 56em);
+    margin: 1rem 0;
+    padding: 1.25rem;
+  }
+}
+
+@media (max-width: 640px) {
+  main {
+    margin: 0;
+    padding: 1rem;
+    border-radius: 0.65rem;
+    box-shadow: none;
+  }
+
+  main .messages {
+    gap: 0.75rem;
   }
 }
 
@@ -81,6 +96,19 @@ main .visually-hidden {
 main .chat-editor-wrapper {
   position: relative;
   min-height: 2em;
+  width: 100%;
+}
+
+@media (min-width: 640px) {
+  main .chat-editor-wrapper {
+    width: 70%;
+  }
+}
+
+@media (max-width: 640px) {
+  main .chat-editor-wrapper {
+    width: 100%;
+  }
 }
 
 main .chat-editor {
@@ -116,6 +144,30 @@ main .chat-cursor {
   min-width: var(--chat-cursor-min-width, 2px);
   min-height: var(--chat-cursor-min-height, 1em);
   z-index: 2;
+  animation: chatCursorBreath 3.2s ease-in-out infinite;
+  transform-origin: center bottom;
+  will-change: opacity, transform;
+}
+
+@keyframes chatCursorBreath {
+  0% {
+    opacity: 0.35;
+    transform: scaleY(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: scaleY(1.08);
+  }
+  100% {
+    opacity: 0.35;
+    transform: scaleY(0.9);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  main .chat-cursor {
+    animation: none;
+  }
 }
 
 /* Typewriter: monospace everywhere in chat */
@@ -125,20 +177,3 @@ main .message .content.typewriter {
   line-height: var(--chat-editor-line-height, 1.5);
 }
 
-/* Horizontal line between user message and assistant reply */
-.chat-paper-line {
-  margin: var(--chat-line-margin, 0.75rem 0);
-  overflow: hidden;
-  min-height: 4px;
-}
-
-.chat-paper-line .line-inner {
-  height: var(--chat-line-height, 2px);
-  background: var(--chat-line-color, #1a1a1a);
-  width: 0;
-  transition: var(--chat-line-transition, width 1.5s ease-out);
-}
-
-.chat-paper-line .line-inner.drawn {
-  width: 100%;
-}

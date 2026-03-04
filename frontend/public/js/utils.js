@@ -98,7 +98,11 @@
     if (!sel) return;
     var kids = container.children;
     if (kids.length === 0) {
+      var emptyRange = document.createRange();
+      emptyRange.setStart(container, 0);
+      emptyRange.collapse(true);
       sel.removeAllRanges();
+      sel.addRange(emptyRange);
       return;
     }
     var totalChars = 0;

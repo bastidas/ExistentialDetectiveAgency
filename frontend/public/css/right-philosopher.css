@@ -2,24 +2,24 @@
 @import url("https://fonts.googleapis.com/css2?family=Homemade+Apple&family=Lobster&display=swap");
 
 .right-philosopher {
-  background: #1a1a1a;
-  border-color: #333;
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.35);
 }
 
 .right-philosopher .philosopher-notes-title {
-  color: #5a5348;
+  color: #c8c2b3;
 }
 
 .right-philosopher .philosopher-notes-content {
   font-family: var(--note-fontFamily, "Homemade Apple", cursive);
   font-size: var(--note-fontSize, 1.2rem);
-  background: #1a1a1a;
+  background: transparent;
   padding: 0.5rem 0;
 }
 
 .right-philosopher .philosopher-notes-content .container {
   background: white;
-  width: 60ch;
+  width: min(60ch, 90vw);
   max-width: 100%;
   margin-top: -0.5rem;
   margin-left: auto;
@@ -72,6 +72,16 @@
   background-image: url("https://s3-us-west-2.amazonaws.com/s.cdpn.io/664131/underline.svg");
   background-repeat: no-repeat;
   background-size: cover;
+}
+
+@media (max-width: 768px) {
+  .right-philosopher .philosopher-notes-content {
+    font-size: calc(var(--note-fontSize, 1.2rem) * 0.92);
+  }
+
+  .right-philosopher .line {
+    height: 2.5rem;
+  }
 }
 
 .right-philosopher .line span strong::after {

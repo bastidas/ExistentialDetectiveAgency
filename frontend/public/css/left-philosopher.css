@@ -12,7 +12,8 @@
   line-height: 1;
   margin-top: 0.5rem;
   margin-left: 0;
-  width: 205px;
+  width: min(240px, 90vw);
+  max-width: 100%;
   padding: 20px 10px 20px 65px;
   background-color: #fff;
   background-image:
@@ -20,7 +21,7 @@
     linear-gradient(#e1e1e1 0.1em, transparent 0.1em);
   background-size: 100% 1em;
   font-size: var(--note-fontSize, 1.15rem);
-  transform: rotate(10deg);
+  transform: rotate(6deg);
   box-shadow: 3px 3px 6px #ccc;
   font-family: var(--note-fontFamily, "Annie Use Your Telescope", cursive);
   font-weight: normal;
@@ -30,4 +31,12 @@
 .left-philosopher .handwritten em {
   background-color: rgba(255, 247, 128, 0.7);
   font-style: normal;
+}
+
+@media (max-width: 768px) {
+  .left-philosopher .handwritten {
+    font-size: calc(var(--note-fontSize, 1.15rem) * 0.9);
+    padding: 16px 12px 18px 48px;
+    transform: rotate(3deg);
+  }
 }

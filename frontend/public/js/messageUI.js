@@ -1,8 +1,6 @@
 (function (global) {
   "use strict";
 
-  var LINE_DURATION_MS = 1500;
-
   function setStatus(text, isError) {
     var status = document.getElementById("status");
     if (!status) return;
@@ -34,44 +32,6 @@
     messages.scrollTop = messages.scrollHeight;
   }
 
-  function addSeparatorLine(callback, insertBefore) {
-    var messages = document.getElementById("messages");
-    if (!messages) {
-        if (callback) callback();
-        return;
-    }
-    var ref = getMessagesInsertRef(messages, insertBefore);
-    var wrap = document.createElement("div");
-    wrap.className = "chat-paper-line";
-    wrap.setAttribute("aria-hidden", "true");
-    var inner = document.createElement("div");
-    inner.className = "line-inner";
-    wrap.appendChild(inner);
-    if (ref) {
-      messages.insertBefore(wrap, ref);
-    } else {
-      messages.appendChild(wrap);
-    }
-    messages.scrollTop = messages.scrollHeight;
-
-    var called = false;
-    function onDone() {
-      if (called) return;
-      called = true;
-      if (callback) callback();
-    }
-
-    requestAnimationFrame(function () {
-      requestAnimationFrame(function () {
-        inner.classList.add("drawn");
-        inner.addEventListener("transitionend", function () {
-          onDone();
-        }, { once: true });
-        setTimeout(onDone, LINE_DURATION_MS + 100);
-      });
-    });
-  }
-
   function addMessage(role, text, insertBefore, options) {
     var messages = document.getElementById("messages");
     if (!messages) return;
@@ -79,8 +39,8 @@
     var div = document.createElement("div");
     div.className = "message " + role;
     var label = document.createElement("span");
-    label.className = "label";
-    label.textContent = role === "user" ? "You" : "Assistant";
+    label.className = "label" + (role === "assistant" ? " label--detective" : " label--querent");
+    label.textContent = role === "user" ? "QUERENT" : "DETECTIVE";
     var content = document.createElement("div");
     content.className = "content typewriter";
     if (role === "user") {
@@ -112,7 +72,6 @@
     setStatus: setStatus,
     addMessage: addMessage,
     addUserBlock: addUserBlock,
-    addSeparatorLine: addSeparatorLine,
     getEditorNode: getEditorNode,
   };
 })(typeof window !== "undefined" ? window : this);

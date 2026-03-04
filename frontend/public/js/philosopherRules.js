@@ -1,63 +1,39 @@
 (function (global) {
   "use strict";
 
-  var LEFT_WRITING_SPEED_MS = 1;
+  var LEFT_WRITING_SPEED_MS = 15;
   var LEFT_WRITING_VARIATION_MS =  20;
-  var RIGHT_WRITING_SPEED_MS = 1;
+  var RIGHT_WRITING_SPEED_MS = 10;
   var RIGHT_WRITING_VARIATION_MS = 15;
 
-  /** Pause after each chunk (write → pause → fit check → write next). 0.1 s. */
-  var NOTE_PAUSE_MS = 10000;
+  /** Pause after each note (write → pause → fit check → write next). 10 s. */
+  var NOTE_PAUSE_MS = 2000;
 
   /** Probability of writing to left when appendPhilosopherNoteToBothPanels is used (0.5 = 50% left, 50% right). */
   var LEFT_RIGHT_BIAS = 0.5;
 
   var philosopherRules = [];
-
-  function delay(ms) {
-    return new Promise(function (resolve) {
-      setTimeout(resolve, ms);
-    });
+  var noteQueueManager = global.NoteQueueManager || null;
+  if (noteQueueManager && typeof noteQueueManager.init === "function") {
+    noteQueueManager.init({ pauseMs: NOTE_PAUSE_MS });
   }
 
-  /** Per-philosopher write queues: only one write runs at a time per side; others wait. */
-  function createSideQueue() {
-    var queue = [];
-    var draining = false;
-    function runNext() {
-      if (queue.length === 0) {
-        draining = false;
-        return;
-      }
-      var job = queue.shift();
-      job.run(job).then(function () {
-        job.resolve();
-        runNext();
-      }).catch(function (err) {
-        job.reject(err);
-        runNext();
-      });
-    }
-    function drain() {
-      if (draining || queue.length === 0) return;
-      draining = true;
-      runNext();
-    }
-    function enqueue(job) {
-      job.queuedWhenLength = queue.length;
-      queue.push(job);
-      drain();
-    }
-    return { enqueue: enqueue };
+  function fallbackHandwriterWrite(side, text, opts) {
+    if (!text) return Promise.resolve();
+    var targetId = side === "right" ? "right-philosopher-content" : "left-philosopher-content";
+    var target = typeof document !== "undefined" ? document.getElementById(targetId) : null;
+    if (!target || typeof handwriter === "undefined") return Promise.resolve();
+    return handwriter.appendText(target, text, opts || {});
   }
 
-  var leftSideQueue = createSideQueue();
-  var rightSideQueue = createSideQueue();
-  function enqueueLeft(job) {
-    leftSideQueue.enqueue(job);
-  }
-  function enqueueRight(job) {
-    rightSideQueue.enqueue(job);
+  function queueNoteWrite(side, text, opts) {
+    if (!text) return Promise.resolve();
+    var normalizedSide = side === "right" ? "right" : "left";
+    if (noteQueueManager && typeof noteQueueManager.enqueue === "function" && typeof notePages !== "undefined") {
+      var writeOptions = Object.assign({}, opts || {});
+      return noteQueueManager.enqueue({ side: normalizedSide, text: text, writeOptions: writeOptions });
+    }
+    return fallbackHandwriterWrite(normalizedSide, text, opts);
   }
 
   function createRule(raw) {
@@ -122,46 +98,14 @@
   function appendPhilosopherNoteToBothPanels(text) {
     if (!text) return Promise.resolve();
     var writeLeft = Math.random() < LEFT_RIGHT_BIAS;
-    var run = function (job) {
-      var debugQueueAtEnqueue = job && job.queuedWhenLength != null ? job.queuedWhenLength : null;
-      var baseOpts = writeLeft
-        ? { baseDelayMs: LEFT_WRITING_SPEED_MS, variationMs: LEFT_WRITING_VARIATION_MS }
-        : { baseDelayMs: RIGHT_WRITING_SPEED_MS, variationMs: RIGHT_WRITING_VARIATION_MS, useLinedLayout: true, disableScroll: true };
-      if (debugQueueAtEnqueue != null) baseOpts.debugQueueAtEnqueue = debugQueueAtEnqueue;
-      baseOpts.debugLabel = "both";
-      if (typeof notePages !== "undefined") {
-        if (writeLeft) {
-          var leftResult = notePages.need_new_note("left", text);
-          if (leftResult.needNew) notePages.write_new_note("left", leftResult.preferLargerPaper ? { preferLargerPaper: true } : undefined);
-          return notePages.write_on_current_note("left", text, baseOpts);
-        }
-        var rightResult = notePages.need_new_note("right", text);
-        if (rightResult.needNew) notePages.write_new_note("right", rightResult.preferLargerPaper ? { preferLargerPaper: true } : undefined);
-        return notePages.write_on_current_note("right", text, baseOpts);
-      }
-      var leftEl = document.getElementById("left-philosopher-content");
-      var rightEl = document.getElementById("right-philosopher-content");
-      if (writeLeft && leftEl && typeof handwriter !== "undefined") {
-        return handwriter.appendText(leftEl, text, baseOpts);
-      }
-      if (!writeLeft && rightEl && typeof handwriter !== "undefined") {
-        return handwriter.appendText(rightEl, text, baseOpts);
-      }
-      return Promise.resolve();
-    };
-    if (writeLeft) {
-      return new Promise(function (resolve, reject) {
-        enqueueLeft({ run: run, resolve: resolve, reject: reject });
-      });
-    }
-    return new Promise(function (resolve, reject) {
-      enqueueRight({ run: run, resolve: resolve, reject: reject });
-    });
+    var baseOpts = writeLeft
+      ? { baseDelayMs: LEFT_WRITING_SPEED_MS, variationMs: LEFT_WRITING_VARIATION_MS }
+      : { baseDelayMs: RIGHT_WRITING_SPEED_MS, variationMs: RIGHT_WRITING_VARIATION_MS, useLinedLayout: true, disableScroll: true };
+    baseOpts.debugLabel = "both";
+    return queueNoteWrite(writeLeft ? "left" : "right", text, baseOpts);
   }
 
   function appendLeftPhilosopherContent(responseText, notesArray) {
-    var leftEl = document.getElementById("left-philosopher-content");
-    if (!leftEl) return Promise.resolve();
     var baseOpts = {
       baseDelayMs: LEFT_WRITING_SPEED_MS,
       variationMs: LEFT_WRITING_VARIATION_MS,
@@ -173,60 +117,21 @@
         if (note != null && String(note).trim() !== "") pieces.push(String(note).trim());
       });
     }
-    var chain;
-    if (typeof notePages !== "undefined") {
-      return new Promise(function (resolve, reject) {
-        enqueueLeft({
-          run: function (job) {
-            var debugQueueAtEnqueue = job && job.queuedWhenLength != null ? job.queuedWhenLength : null;
-            chain = Promise.resolve();
-            pieces.forEach(function (text, idx) {
-              chain = chain.then(function () {
-                console.log("[philosopherRules] left piece", idx + 1, "/", pieces.length, "len:", text.length);
-                var leftResult = notePages.need_new_note("left", text);
-                if (leftResult.needNew) notePages.write_new_note("left", leftResult.preferLargerPaper ? { preferLargerPaper: true } : undefined);
-                var opts = Object.assign({}, baseOpts, {
-                  debugLabel: "L " + (idx + 1) + "/" + pieces.length,
-                });
-                if (debugQueueAtEnqueue != null) opts.debugQueueAtEnqueue = debugQueueAtEnqueue;
-                return notePages.write_on_current_note("left", text, opts);
-              });
-              if (idx < pieces.length - 1) {
-                chain = chain.then(function () {
-                  return delay(NOTE_PAUSE_MS);
-                });
-              }
-            });
-            return chain;
-          },
-          resolve: resolve,
-          reject: reject,
-        });
-      });
-    }
-    if (typeof handwriter === "undefined") return Promise.resolve();
-    chain = Promise.resolve();
-    if (responseText && responseText.trim()) {
+    if (!pieces.length) return Promise.resolve();
+    var chain = Promise.resolve();
+    pieces.forEach(function (text, idx) {
       chain = chain.then(function () {
-        return handwriter.appendText(leftEl, responseText.trim(), baseOpts);
-      });
-    }
-    if (Array.isArray(notesArray) && notesArray.length > 0) {
-      notesArray.forEach(function (note) {
-        if (note == null || String(note).trim() === "") return;
-        chain = chain.then(function () {
-          return handwriter.appendText(leftEl, String(note).trim(), baseOpts);
+        console.log("[philosopherRules] left piece", idx + 1, "/", pieces.length, "len:", text.length);
+        var opts = Object.assign({}, baseOpts, {
+          debugLabel: "L " + (idx + 1) + "/" + pieces.length,
         });
+        return queueNoteWrite("left", text, opts);
       });
-    }
-    return new Promise(function (resolve, reject) {
-      enqueueLeft({ run: function (job) { return chain; }, resolve: resolve, reject: reject });
     });
+    return chain;
   }
 
   function appendRightPhilosopherContent(responseText, notesArray) {
-    var rightEl = document.getElementById("right-philosopher-content");
-    if (!rightEl) return Promise.resolve();
     var baseOpts = {
       baseDelayMs: RIGHT_WRITING_SPEED_MS,
       variationMs: RIGHT_WRITING_VARIATION_MS,
@@ -240,55 +145,18 @@
         if (note != null && String(note).trim() !== "") pieces.push(String(note).trim());
       });
     }
-    var chain;
-    if (typeof notePages !== "undefined") {
-      return new Promise(function (resolve, reject) {
-        enqueueRight({
-          run: function (job) {
-            var debugQueueAtEnqueue = job && job.queuedWhenLength != null ? job.queuedWhenLength : null;
-            chain = Promise.resolve();
-            pieces.forEach(function (text, idx) {
-              chain = chain.then(function () {
-                console.log("[philosopherRules] right piece", idx + 1, "/", pieces.length, "len:", text.length);
-                var rightResult = notePages.need_new_note("right", text);
-                if (rightResult.needNew) notePages.write_new_note("right", rightResult.preferLargerPaper ? { preferLargerPaper: true } : undefined);
-                var opts = Object.assign({}, baseOpts, {
-                  debugLabel: "R " + (idx + 1) + "/" + pieces.length,
-                });
-                if (debugQueueAtEnqueue != null) opts.debugQueueAtEnqueue = debugQueueAtEnqueue;
-                return notePages.write_on_current_note("right", text, opts);
-              });
-              if (idx < pieces.length - 1) {
-                chain = chain.then(function () {
-                  return delay(NOTE_PAUSE_MS);
-                });
-              }
-            });
-            return chain;
-          },
-          resolve: resolve,
-          reject: reject,
-        });
-      });
-    }
-    if (typeof handwriter === "undefined") return Promise.resolve();
-    chain = Promise.resolve();
-    if (responseText && responseText.trim()) {
+    if (!pieces.length) return Promise.resolve();
+    var chain = Promise.resolve();
+    pieces.forEach(function (text, idx) {
       chain = chain.then(function () {
-        return handwriter.appendText(rightEl, responseText.trim(), baseOpts);
-      });
-    }
-    if (Array.isArray(notesArray) && notesArray.length > 0) {
-      notesArray.forEach(function (note) {
-        if (note == null || String(note).trim() === "") return;
-        chain = chain.then(function () {
-          return handwriter.appendText(rightEl, String(note).trim(), baseOpts);
+        console.log("[philosopherRules] right piece", idx + 1, "/", pieces.length, "len:", text.length);
+        var opts = Object.assign({}, baseOpts, {
+          debugLabel: "R " + (idx + 1) + "/" + pieces.length,
         });
+        return queueNoteWrite("right", text, opts);
       });
-    }
-    return new Promise(function (resolve, reject) {
-      enqueueRight({ run: function (job) { return chain; }, resolve: resolve, reject: reject });
     });
+    return chain;
   }
 
   function runNoteActions(message) {

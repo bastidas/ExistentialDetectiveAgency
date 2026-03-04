@@ -4,6 +4,15 @@
   var editor = null;
   var cursorEl = null;
   var rafId = null;
+  var focusKeeperCleanup = null;
+  var focusRestoreRaf = null;
+  var lastCursorOffset = null;
+  var POINTER_EVENTS = ["pointerdown", "mousedown", "touchstart"];
+  var BLUR_BYPASS_SELECTOR = "[data-permits-blur]";
+  var prefersDesktopFocusLock =
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      ? window.matchMedia("(hover: hover) and (pointer: fine)").matches
+      : true;
   var lastAppliedText = "";
 
   function getEditor() {
@@ -81,8 +90,8 @@
         editor.appendChild(wrap.firstChild);
       }
     }
-
     EDAUtils.setCursorOffset(editor, Math.min(offset, text.length));
+    rememberCursorOffset();
     lastAppliedText = text;
     editor.focus();
     updateCursorPosition();
@@ -128,6 +137,7 @@
     cursorEl.style.top = (rect.top - containerRect.top) + "px";
     cursorEl.style.width = (rect.width || 2) + "px";
     cursorEl.style.height = (rect.height || 20) + "px";
+    rememberCursorOffset();
   }
 
   function scheduleCursorUpdate() {
@@ -138,7 +148,115 @@
     });
   }
 
+  function rememberCursorOffset() {
+    if (!editor || !EDAUtils || typeof EDAUtils.getCursorOffset !== "function") {
+      lastCursorOffset = null;
+      return;
+    }
+    lastCursorOffset = EDAUtils.getCursorOffset(editor);
+  }
+
+  function placeCaretAtEnd(node) {
+    if (!node || typeof document === "undefined") return;
+    var range = document.createRange();
+    range.selectNodeContents(node);
+    range.collapse(false);
+    var selection = window.getSelection();
+    if (!selection) return;
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  function shouldAllowBlur(target) {
+    return !!(
+      target &&
+      typeof target.closest === "function" &&
+      target.closest(BLUR_BYPASS_SELECTOR)
+    );
+  }
+
+  function shouldForceFocus() {
+    return !!prefersDesktopFocusLock;
+  }
+
+  function enforceEditorFocus() {
+    if (!editor || document.hidden) return;
+    if (document.activeElement !== editor) {
+      editor.focus({ preventScroll: true });
+    }
+    if (
+      EDAUtils &&
+      typeof EDAUtils.setCursorOffset === "function" &&
+      typeof lastCursorOffset === "number"
+    ) {
+      EDAUtils.setCursorOffset(editor, lastCursorOffset);
+    } else {
+      placeCaretAtEnd(editor);
+    }
+    rememberCursorOffset();
+    scheduleCursorUpdate();
+  }
+
+  function requestFocusRestore() {
+    if (!shouldForceFocus() || !editor || document.hidden) return;
+    if (focusRestoreRaf) return;
+    focusRestoreRaf = requestAnimationFrame(function () {
+      focusRestoreRaf = null;
+      enforceEditorFocus();
+    });
+  }
+
+  function teardownFocusKeeper() {
+    if (focusKeeperCleanup) {
+      focusKeeperCleanup();
+      focusKeeperCleanup = null;
+    }
+    if (focusRestoreRaf) {
+      cancelAnimationFrame(focusRestoreRaf);
+      focusRestoreRaf = null;
+    }
+  }
+
+  function setupFocusKeeper() {
+    teardownFocusKeeper();
+    if (!editor || !shouldForceFocus()) return;
+
+    var blurHandler = function (evt) {
+      if (shouldAllowBlur(evt.relatedTarget || evt.target)) return;
+      requestFocusRestore();
+    };
+
+    var pointerHandler = function (evt) {
+      if (shouldAllowBlur(evt.target)) return;
+      if (editor.contains && editor.contains(evt.target)) return;
+      requestFocusRestore();
+    };
+
+    var visibilityHandler = function () {
+      if (!document.hidden) {
+        requestFocusRestore();
+      }
+    };
+
+    editor.addEventListener("blur", blurHandler);
+    POINTER_EVENTS.forEach(function (evtName) {
+      document.addEventListener(evtName, pointerHandler, true);
+    });
+    document.addEventListener("visibilitychange", visibilityHandler);
+
+    focusKeeperCleanup = function () {
+      editor.removeEventListener("blur", blurHandler);
+      POINTER_EVENTS.forEach(function (evtName) {
+        document.removeEventListener(evtName, pointerHandler, true);
+      });
+      document.removeEventListener("visibilitychange", visibilityHandler);
+    };
+
+    requestFocusRestore();
+  }
+
   function init() {
+    teardownFocusKeeper();
     var wrap = document.getElementById("input-wrap");
     if (!wrap) return null;
 
@@ -196,8 +314,10 @@
       if (editor && document.getElementById("input-wrap") === editor) {
         editor.focus();
         scheduleCursorUpdate();
+        rememberCursorOffset();
       }
     });
+    setupFocusKeeper();
     return editor;
   }
 
