@@ -38,7 +38,9 @@ In Azure Portal:
 | `OPENAI_SERVICE_TIER` | Optional. Use `flex` for cheaper/slower. | `flex` or leave empty |
 | `MAX_USER_EXCHANGES` | Optional. Max exchanges per session before closers. | `5` |
 | `MAX_DAILY_USAGE` | Optional. Max API calls per day (all users). | `100` |
-| `DEBUG` | Optional. Enable debug endpoint and logs. | `true` or `1` |
+| `DEV` | Optional. Enable dev-only UI and advanced tools. | `1` or `true` |
+| `OFFLINE` | Optional. Disable LLM; return dummy responses (no API key needed). | `1` or `true` |
+| `DEBUG_LOGS` | Optional. Enable /api/debug and verbose logs (e.g. full message to LLM). | `1` or `true` |
 
 Save the configuration.
 

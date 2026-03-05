@@ -13,13 +13,7 @@
   var getPaperSize = cfg ? cfg.getPaperSize : function () { return { width: 440, height: 560 }; };
   var getNoteFormat = cfg ? cfg.getNoteFormat : function () { return {}; };
   var getContentHeightScale = cfg ? cfg.getContentHeightScale : function () { return 1; };
-
-  // Shared runtime config for note heuristics (also read by noteQueueManager).
-  var NOTE_RUNTIME_CONFIG = global.EDANoteConfig || (global.EDANoteConfig = {});
-  var LONG_NOTE_THRESHOLD = typeof NOTE_RUNTIME_CONFIG.LONG_NOTE_THRESHOLD === "number"
-    ? NOTE_RUNTIME_CONFIG.LONG_NOTE_THRESHOLD
-    : 350;
-  NOTE_RUNTIME_CONFIG.LONG_NOTE_THRESHOLD = LONG_NOTE_THRESHOLD;
+  var getLongNoteThreshold = cfg && typeof cfg.getLongNoteThreshold === "function" ? cfg.getLongNoteThreshold : function () { return 350; };
 
   var NoteLayout = global.NoteLayout;
   var NoteElement = global.NoteElement;
@@ -94,23 +88,101 @@
     return document.getElementById(id);
   }
 
+  /** Returns the single notes layer (sibling to panels in .app-layout). All note wrappers live here. */
+  function getOrCreateNotesLayer() {
+    var layer = document.getElementById("notes-layer");
+    if (layer && layer.isConnected) return layer;
+    var appLayout = document.querySelector(".app-layout");
+    if (!appLayout) return null;
+    layer = document.createElement("div");
+    layer.id = "notes-layer";
+    layer.className = "notes-layer";
+    layer.setAttribute("aria-hidden", "true");
+    appLayout.appendChild(layer);
+    return layer;
+  }
+
+  /**
+   * Zone bounds in notes-layer coordinates. Used for positioning and resize.
+   * On mobile, getPanel(side) returns shared content so both sides use the same zone.
+   */
+  function getZoneBoundsInLayer(side) {
+    var layer = document.getElementById("notes-layer");
+    var zoneEl = getPanel(side);
+    if (!layer || !zoneEl) return null;
+    var layerRect = layer.getBoundingClientRect();
+    var zoneRect = zoneEl.getBoundingClientRect();
+    return {
+      left: zoneRect.left - layerRect.left,
+      top: zoneRect.top - layerRect.top,
+      width: zoneRect.width,
+      height: zoneRect.height,
+    };
+  }
+
+  /** Reposition all notes in the layer from stored zone offsets. Call on resize and viewport mode change. */
+  function updateNotePositionsInLayer() {
+    var layer = document.getElementById("notes-layer");
+    if (!layer) return;
+    var wrappers = layer.querySelectorAll(".note-page, .margin-item");
+    for (var i = 0; i < wrappers.length; i++) {
+      var w = wrappers[i];
+      var side = w.dataset && (w.dataset.noteSide === "right" ? "right" : "left");
+      var zone = getZoneBoundsInLayer(side);
+      if (!zone) continue;
+      var zoneLeft = w.dataset.zoneOffsetLeft != null ? parseFloat(w.dataset.zoneOffsetLeft, 10) : null;
+      var zoneTop = w.dataset.zoneOffsetTop != null ? parseFloat(w.dataset.zoneOffsetTop, 10) : null;
+      if (zoneLeft == null || zoneTop == null) continue;
+      var leftInLayer = zone.left + zoneLeft;
+      var topInLayer = zone.top + zoneTop;
+      w.style.left = leftInLayer + "px";
+      w.style.right = "";
+      w.style.top = topInLayer + "px";
+    }
+  }
+
+  var notesPointerRoutingBound = false;
+
+  /**
+   * Disabled: document-level pointerdown redirect caused double-fire and bad interaction with capture.
+   * Single notes layer (Phase 2) gives one stacking context so topmost note gets hit-test naturally.
+   */
+  function ensureNotesPointerRouting() {
+    if (notesPointerRoutingBound || typeof document === "undefined") return;
+    notesPointerRoutingBound = true;
+    /* no-op: redirect removed */
+  }
+
+  /** Returns the single notes layer. All notes and margin items are appended here; position by zone (getZoneBoundsInLayer). */
   function getOrCreateRegion(side) {
-    var panel = getPanel(side);
-    if (!panel) return null;
-    var region = panel.querySelector(".notes-region");
-    if (region) return region;
-    region = document.createElement("div");
-    region.className = "notes-region notes-region--" + side;
-    panel.appendChild(region);
-    return region;
+    ensureNotesPointerRouting();
+    return getOrCreateNotesLayer();
+  }
+
+  var ENTRANCE_ANIMATION_MS = 280;
+
+  function addEntranceAnimation(wrapper) {
+    if (!wrapper) return;
+    var enteringClass = wrapper.classList.contains("margin-item") ? "margin-item--entering" : "note-page--entering";
+    wrapper.classList.add(enteringClass);
+    function removeEntrance() {
+      wrapper.classList.remove(enteringClass);
+      wrapper.removeEventListener("animationend", onEnd);
+    }
+    function onEnd(event) {
+      if (event.target !== wrapper) return;
+      removeEntrance();
+    }
+    wrapper.addEventListener("animationend", onEnd);
+    setTimeout(function () {
+      if (wrapper.classList.contains(enteringClass)) removeEntrance();
+    }, ENTRANCE_ANIMATION_MS + 50);
   }
 
   function refreshNotesForSide(side) {
-    var panel = getPanel(side);
-    if (!panel) return;
-    var region = panel.querySelector(".notes-region");
-    if (!region) return;
-    var wrappers = region.querySelectorAll(".note-page");
+    var layer = getOrCreateNotesLayer();
+    if (!layer) return;
+    var wrappers = layer.querySelectorAll('.note-page[data-note-side="' + side + '"]');
     if (!wrappers.length) return;
     var sideState = state[side];
     for (var i = 0; i < wrappers.length; i++) {
@@ -207,92 +279,156 @@
 
   var LOG_PREFIX = "[note-pages]";
 
+  function isDevDebugMode() {
+    try {
+      return typeof document !== "undefined" && document.body && document.body.dataset && document.body.dataset.devMode === "true";
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // #region agent log
+  function debugLogFit(location, message, data) {
+    if (!isDevDebugMode()) return;
+    var payload = {
+      sessionId: "532d40",
+      runId: "fit-debug",
+      location: location,
+      message: message,
+      data: data,
+      timestamp: Date.now(),
+    };
+    fetch("http://127.0.0.1:7889/ingest/ddcd2c66-b2ca-4bb8-8423-b269323dba2a", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "532d40" },
+      body: JSON.stringify(payload),
+    }).catch(function () {});
+  }
+  // #endregion
+
+  function getMinMaxPaperWritingArea(side) {
+    var papers = getPaperImages();
+    var minArea = Infinity;
+    var maxArea = 0;
+    for (var i = 0; i < papers.length; i++) {
+      var ha = NoteLayout.getPaperWritingAreaHeight(papers[i], side);
+      if (ha < minArea) minArea = ha;
+      if (ha > maxArea) maxArea = ha;
+    }
+    return { minArea: minArea === Infinity ? 0 : minArea, maxArea: maxArea };
+  }
+
+  /** Returns null if no current note or space cannot be computed. */
+  function getCurrentNoteSpaceInfo(side) {
+    var s = state[side];
+    if (!s.currentNote || !s.contentElement) return null;
+    var contentEl = s.contentElement;
+    if (!contentEl.isConnected) return null;
+    var writingAreaHeight = contentEl.clientHeight;
+    if (!writingAreaHeight && s.writingAreaHeight > 0) writingAreaHeight = s.writingAreaHeight;
+    if (!writingAreaHeight) return null;
+    var bounds = NoteLayout.getCurrentTextBounds(contentEl, side);
+    var baselineBottom = bounds ? bounds.top + bounds.height : 0;
+    var usedHeight = (typeof s.usedHeight === "number") ? s.usedHeight : 0;
+    if (!usedHeight && contentEl.children.length > 0) usedHeight = getContentUsedHeight(contentEl);
+    var currentBottom = Math.max(baselineBottom, usedHeight);
+    var paddingPx = NoteLayout.NOTE_BOX_PADDING_PX;
+    var spaceAfterBox = currentBottom + paddingPx;
+    return { writingAreaHeight: writingAreaHeight, spaceAfterBox: spaceAfterBox, usedHeight: usedHeight };
+  }
+
+  function fitsOnCurrentNote(spaceInfo, estimatedNextPx) {
+    if (!spaceInfo) return false;
+    return spaceInfo.spaceAfterBox + estimatedNextPx <= spaceInfo.writingAreaHeight;
+  }
+
+  /** Long-note heuristic: prefer new sheet when current is small or nearly full. */
+  function longNotePrefersNewSheet(nextText, estimatedNextPx, spaceInfo, maxArea) {
+    if (!nextText || !spaceInfo || maxArea <= 0) return false;
+    var longNoteThreshold = getLongNoteThreshold();
+    if (String(nextText).length < longNoteThreshold) return false;
+    var spaceRemaining = spaceInfo.writingAreaHeight - spaceInfo.spaceAfterBox;
+    var textLen = String(nextText).length;
+    var heightPerChar = estimatedNextPx > 0 && textLen > 0 ? (estimatedNextPx / textLen) : 0;
+    var remainingCharsApprox = heightPerChar > 0 ? spaceRemaining / heightPerChar : Infinity;
+    var remainingFraction = spaceInfo.writingAreaHeight > 0 ? (spaceRemaining / spaceInfo.writingAreaHeight) : 0;
+    var isCurrentSmallerThanMax = spaceInfo.writingAreaHeight < maxArea;
+    var isPageNearlyFull = remainingFraction < 0.25;
+    var remainingCharsLow = remainingCharsApprox < longNoteThreshold * 0.5;
+    return isCurrentSmallerThanMax || isPageNearlyFull || remainingCharsLow;
+  }
+
   /**
    * Decide if the next text chunk needs a new note using the actual current text bounding box + padding.
    */
   function need_new_note(side, nextText) {
-    var s = state[side];
     var defaultLineHeight = (cfg && cfg.getEstimatedLineHeightPx) ? cfg.getEstimatedLineHeightPx(side) : 40;
+    var currentPaperUrl = getCurrentPaperUrl(side);
     var estimatedNext = nextText != null
-      ? NoteLayout.estimateHeightForText(String(nextText), side)
+      ? NoteLayout.estimateHeightForText(String(nextText), side, currentPaperUrl || undefined)
       : defaultLineHeight * 2;
     console.log(LOG_PREFIX, "need_new_note(", side, ", nextText length:", nextText != null ? String(nextText).length : null, ", estimatedNext px:", estimatedNext, ")");
 
-    if (!s.currentNote || !s.contentElement) {
-      var papers0 = getPaperImages();
-      var minArea0 = Infinity;
-      for (var pk = 0; pk < papers0.length; pk++) {
-        var h0 = NoteLayout.getPaperWritingAreaHeight(papers0[pk], side);
-        if (h0 < minArea0) minArea0 = h0;
+    var spaceInfo = getCurrentNoteSpaceInfo(side);
+    if (!spaceInfo) {
+      var areaBounds = getMinMaxPaperWritingArea(side);
+      var preferLarger = getPaperImages().length > 1 && estimatedNext > areaBounds.minArea;
+      if (!state[side].currentNote || !state[side].contentElement) {
+        console.log(LOG_PREFIX, "  -> need new: no current note", { preferLargerPaper: preferLarger });
+      } else {
+        console.log(LOG_PREFIX, "  -> need new: contentElement not in DOM or writingAreaHeight is 0");
       }
-      var preferLarger = papers0.length > 1 && estimatedNext > (minArea0 !== Infinity ? minArea0 : 0);
-      console.log(LOG_PREFIX, "  -> need new: no current note", { preferLargerPaper: preferLarger });
       return { needNew: true, preferLargerPaper: preferLarger };
     }
-    var contentEl = s.contentElement;
-    if (!contentEl.isConnected) {
-      console.log(LOG_PREFIX, "  -> need new: contentElement not in DOM");
-      return { needNew: true, preferLargerPaper: false };
-    }
-    var writingAreaHeight = contentEl.clientHeight;
-    if (!writingAreaHeight && s.writingAreaHeight > 0) writingAreaHeight = s.writingAreaHeight;
-    if (!writingAreaHeight) {
-      console.log(LOG_PREFIX, "  -> need new: writingAreaHeight is 0");
-      return { needNew: true, preferLargerPaper: false };
-    }
 
-    var bounds = NoteLayout.getCurrentTextBounds(contentEl, side);
-    var baselineBottom = bounds ? bounds.top + bounds.height : 0;
-    var usedHeight = (s && typeof s.usedHeight === "number") ? s.usedHeight : 0;
-    if (!usedHeight && contentEl.children.length > 0) {
-      usedHeight = getContentUsedHeight(contentEl);
-    }
-    var currentBottom = Math.max(baselineBottom, usedHeight);
-    var paddingPx = NoteLayout.NOTE_BOX_PADDING_PX;
-    var spaceAfterBox = currentBottom + paddingPx;
-    var fitsCurrent = spaceAfterBox + estimatedNext <= writingAreaHeight;
+    var fitsCurrent = fitsOnCurrentNote(spaceInfo, estimatedNext);
+    console.log(LOG_PREFIX, "  writingAreaHeight:", spaceInfo.writingAreaHeight, "spaceAfterBox:", spaceInfo.spaceAfterBox, "estimatedNext:", estimatedNext, "fits:", fitsCurrent);
+    var areaBounds = getMinMaxPaperWritingArea(side);
 
-    console.log(LOG_PREFIX, "  writingAreaHeight:", writingAreaHeight, "baselineBottom:", baselineBottom, "usedHeight:", usedHeight, "padding:", paddingPx, "spaceAfterBox:", spaceAfterBox, "estimatedNext:", estimatedNext, "fits:", fitsCurrent);
-    var papers = getPaperImages();
-    var minArea = Infinity;
-    var maxArea = 0;
-    for (var pj = 0; pj < papers.length; pj++) {
-      var ha = NoteLayout.getPaperWritingAreaHeight(papers[pj], side);
-      if (ha < minArea) minArea = ha;
-      if (ha > maxArea) maxArea = ha;
-    }
-
-    // Long-note heuristic: even if the text technically fits on the current
-    // note, very long notes should prefer starting on a larger/emptier sheet
-    // when the current paper is small or nearly full.
-    var isLongText = nextText != null && String(nextText).length >= LONG_NOTE_THRESHOLD;
-    if (fitsCurrent && isLongText) {
-      var spaceRemaining = writingAreaHeight - spaceAfterBox; // px remaining before this chunk
+    // #region agent log
+    if (isDevDebugMode() && nextText != null) {
       var textLen = String(nextText).length;
-      var heightPerChar = estimatedNext > 0 && textLen > 0 ? (estimatedNext / textLen) : 0;
-      var remainingCharsApprox = heightPerChar > 0 ? spaceRemaining / heightPerChar : Infinity;
-      var remainingFraction = writingAreaHeight > 0 ? (spaceRemaining / writingAreaHeight) : 0;
-      var isCurrentSmallerThanMax = maxArea > 0 && writingAreaHeight < maxArea;
-      var isPageNearlyFull = remainingFraction < 0.25;
-      var remainingCharsLow = remainingCharsApprox < LONG_NOTE_THRESHOLD * 0.5;
-
-      if (isCurrentSmallerThanMax || isPageNearlyFull || remainingCharsLow) {
-        console.log(LOG_PREFIX, "  -> long note prefers new larger paper even though it fits", {
-          writingAreaHeight: writingAreaHeight,
-          spaceRemaining: spaceRemaining,
-          estimatedNext: estimatedNext,
-          remainingCharsApprox: remainingCharsApprox,
-          minArea: minArea,
-          maxArea: maxArea,
-        });
-        return { needNew: true, preferLargerPaper: true };
-      }
+      var lineHeightPx = (cfg && cfg.getEstimatedLineHeightPx) ? cfg.getEstimatedLineHeightPx(side) : 40;
+      var charsPerLineUsed = (cfg && cfg.getEstimateCharsPerLine) ? cfg.getEstimateCharsPerLine(side) : null;
+      var currentPaperUrl = getCurrentPaperUrl(side);
+      var charsPerLineCurrentPaper = (currentPaperUrl && cfg && cfg.estimateCharsPerLineForPaper)
+        ? cfg.estimateCharsPerLineForPaper(currentPaperUrl, side)
+        : null;
+      var linesUsed = charsPerLineUsed > 0 ? Math.max(1, Math.ceil(textLen / charsPerLineUsed)) : null;
+      var spaceRemaining = spaceInfo.writingAreaHeight - spaceInfo.spaceAfterBox;
+      debugLogFit("notePages.js:need_new_note", "fit decision", {
+        side: side,
+        textLen: textLen,
+        estimatedNextPx: estimatedNext,
+        writingAreaHeight: spaceInfo.writingAreaHeight,
+        spaceAfterBox: spaceInfo.spaceAfterBox,
+        spaceRemaining: spaceRemaining,
+        fitsCurrent: fitsCurrent,
+        needNew: !fitsCurrent,
+        charsPerLineUsed: charsPerLineUsed,
+        charsPerLineCurrentPaper: charsPerLineCurrentPaper,
+        lineHeightPx: lineHeightPx,
+        linesUsed: linesUsed,
+        expectedHeightFromEstimate: linesUsed != null && lineHeightPx != null ? linesUsed * lineHeightPx : null,
+        currentPaperUrl: currentPaperUrl,
+        longNotePrefersNewSheet: fitsCurrent && longNotePrefersNewSheet(nextText, estimatedNext, spaceInfo, areaBounds.maxArea),
+      });
     }
+    // #endregion
 
+    if (fitsCurrent && longNotePrefersNewSheet(nextText, estimatedNext, spaceInfo, areaBounds.maxArea)) {
+      console.log(LOG_PREFIX, "  -> long note prefers new larger paper even though it fits", {
+        writingAreaHeight: spaceInfo.writingAreaHeight,
+        spaceRemaining: spaceInfo.writingAreaHeight - spaceInfo.spaceAfterBox,
+        estimatedNext: estimatedNext,
+        minArea: areaBounds.minArea,
+        maxArea: areaBounds.maxArea,
+      });
+      return { needNew: true, preferLargerPaper: true };
+    }
     if (fitsCurrent) return { needNew: false };
 
-    var preferLargerPaper = papers.length > 1 && estimatedNext > minArea;
-
+    var preferLargerPaper = getPaperImages().length > 1 && estimatedNext > areaBounds.minArea;
     console.log(LOG_PREFIX, "  -> need new", preferLargerPaper ? "(prefer larger paper)" : "");
     return { needNew: true, preferLargerPaper: preferLargerPaper };
   }
@@ -303,17 +439,17 @@
     return (wrapper && wrapper.dataset && wrapper.dataset.paperUrl) || null;
   }
 
-  function write_new_note(side, options) {
+  /**
+   * Choose paper URL for a new note. Options: avoidPaperUrl, paperUrl (hint from allocator), preferLargerPaper.
+   * Paper selection is primarily done by NoteQueueManager's allocator; this is fallback when paperUrl is not provided.
+   */
+  function choosePaperUrlForNewNote(side, options) {
     options = options || {};
-    var region = getOrCreateRegion(side);
-    if (!region) return null;
-
     var avoidPaperUrl = options.avoidPaperUrl || getCurrentPaperUrl(side);
     var paperUrl = options.paperUrl;
     if (paperUrl) {
-      if (paperUrl === avoidPaperUrl) {
-        paperUrl = null;
-      } else {
+      if (paperUrl === avoidPaperUrl) paperUrl = null;
+      else {
         var available = getPaperImages();
         if (available.indexOf(paperUrl) === -1) {
           console.warn(LOG_PREFIX, "write_new_note request for unknown paper", paperUrl, "falling back to random selection");
@@ -326,11 +462,11 @@
       if (!papers.length) papers = getPaperImages();
       var bestUrl = papers[0];
       var bestArea = 0;
-      for (var pi = 0; pi < papers.length; pi++) {
-        var area = NoteLayout.getPaperWritingAreaHeight(papers[pi], side);
+      for (var i = 0; i < papers.length; i++) {
+        var area = NoteLayout.getPaperWritingAreaHeight(papers[i], side);
         if (area > bestArea) {
           bestArea = area;
-          bestUrl = papers[pi];
+          bestUrl = papers[i];
         }
       }
       paperUrl = bestUrl;
@@ -338,19 +474,11 @@
       var list = getPaperImages().filter(function (p) { return p !== avoidPaperUrl; });
       paperUrl = (list.length ? list[Math.floor(Math.random() * list.length)] : getPaperImages()[0]) || randomPaperUrl();
     }
+    return paperUrl;
+  }
 
-    var rotationDeg = NoteLayout.randomRotationDeg();
-    var size = getPaperSize(paperUrl);
-    var noteWidth = size.width;
-    var noteHeight = size.height;
-    var noteIndex = region.querySelectorAll(".note-page").length;
-
-    // Default: stacked layout inside the philosopher panel.
+  function computeNotePosition(region, side, rotationDeg, noteWidth, noteHeight, noteIndex) {
     var pos = NoteLayout.stackedPositionInRegion(region, side, rotationDeg, noteWidth, noteHeight, noteIndex);
-
-    // On large desktop, once the chat content has started scrolling, try to
-    // anchor NEW notes near the user's most recent entry, offset by a
-    // configurable amount with jitter.
     if (isLargeViewport() && chatHasStartedScrolling()) {
       var anchorEl = getLastUserMessageElement();
       if (anchorEl && typeof anchorEl.getBoundingClientRect === "function") {
@@ -358,14 +486,11 @@
         var anchorRect = anchorEl.getBoundingClientRect();
         var aabb = NoteLayout.rotatedNoteAABB(rotationDeg, noteWidth, noteHeight);
         var regionHeight = region.clientHeight;
-
         var topMin = Math.max(0, -aabb.minY);
         var topMax = Math.min(regionHeight, regionHeight - aabb.maxY);
-
         var baseOffset = DYNAMIC_ANCHOR_BASE_OFFSET_PX + randomJitterPx();
         var idealTop = (anchorRect.bottom - regionRect.top) + baseOffset;
         var anchoredTop = Math.max(topMin, Math.min(topMax, idealTop));
-
         var regionWidth = region.clientWidth;
         if (side === "left") {
           var leftMin = Math.max(0, -aabb.minX);
@@ -384,10 +509,38 @@
         }
       }
     }
+    return pos;
+  }
+
+  function write_new_note(side, options) {
+    options = options || {};
+    var layer = getOrCreateNotesLayer();
+    if (!layer) return null;
+    var zoneBounds = getZoneBoundsInLayer(side);
+    if (!zoneBounds) return null;
+
+    var paperUrl = choosePaperUrlForNewNote(side, options);
+    var rotationDeg = NoteLayout.randomRotationDeg();
+    var size = getPaperSize(paperUrl);
+    var noteWidth = size.width;
+    var noteHeight = size.height;
+    var noteIndex = layer.querySelectorAll('.note-page[data-note-side="' + side + '"]').length;
+    var zoneEl = getPanel(side);
+    var pos = computeNotePosition(zoneEl, side, rotationDeg, noteWidth, noteHeight, noteIndex);
 
     var created = NoteElement.createNoteElement(side, paperUrl, pos, rotationDeg, size);
     applyNoteFormatStyles(created.contentEl, side);
     var sizing = applyPaperSizing(created.wrapper, side, paperUrl, size) || { noteWidth: noteWidth, noteHeight: noteHeight, writingAreaHeight: 0 };
+
+    var zoneOffsetLeft = pos.left != null ? pos.left : (zoneBounds.width - pos.right - noteWidth);
+    var zoneOffsetTop = pos.top;
+    var leftInLayer = zoneBounds.left + zoneOffsetLeft;
+    var topInLayer = zoneBounds.top + zoneOffsetTop;
+    created.wrapper.style.left = leftInLayer + "px";
+    created.wrapper.style.right = "";
+    created.wrapper.style.top = topInLayer + "px";
+    created.wrapper.dataset.zoneOffsetLeft = String(zoneOffsetLeft);
+    created.wrapper.dataset.zoneOffsetTop = String(zoneOffsetTop);
 
     if (NOTE_DEBUG) {
       var debugBox = document.createElement("div");
@@ -404,12 +557,23 @@
       created.wrapper.appendChild(debugBox);
     }
 
-    region.appendChild(created.wrapper);
+    layer.appendChild(created.wrapper);
+    addEntranceAnimation(created.wrapper);
     NoteElement.registerNoteInteractions(created.wrapper, side, {
       onDestroy: function (w, s) {
         NoteElement.destroyNoteElement(w, s, function () {
           if (state[s] && state[s].currentNote === w) clearStateFor(s);
         });
+      },
+      onDragEnd: function (w, s) {
+        var zone = getZoneBoundsInLayer(s);
+        if (!zone) return;
+        var left = parseFloat(w.style.left, 10);
+        var top = parseFloat(w.style.top, 10);
+        if (!isNaN(left) && !isNaN(top)) {
+          w.dataset.zoneOffsetLeft = String(left - zone.left);
+          w.dataset.zoneOffsetTop = String(top - zone.top);
+        }
       },
     });
     NoteElement.bringNoteToFront(created.wrapper, side);
@@ -492,6 +656,17 @@
       }
     }
 
+    if (cfg && typeof cfg.getShortNoteRotationDeg === "function") {
+      var rotationDeg = cfg.getShortNoteRotationDeg(text);
+      if (rotationDeg != null) {
+        options.shortNoteRotationDeg = rotationDeg;
+        if (typeof cfg.getShortNoteLeadingSpacesCount === "function") {
+          var leadingSpaces = cfg.getShortNoteLeadingSpacesCount(text);
+          if (leadingSpaces > 0) text = Array(leadingSpaces + 1).join(" ") + text;
+        }
+      }
+    }
+
     return handwriter.appendText(contentEl, text, options).then(function () {
       if (state[side] && state[side].contentElement === contentEl) {
         var prev = state[side].usedHeight;
@@ -544,6 +719,12 @@
     cfg.onResponsiveScaleChange(handleResponsiveScaleUpdate);
   }
 
+  if (typeof window !== "undefined" && window.addEventListener) {
+    window.addEventListener("resize", function () {
+      updateNotePositionsInLayer();
+    });
+  }
+
   global.notePages = {
     need_new_note: need_new_note,
     getCurrentPaperUrl: getCurrentPaperUrl,
@@ -556,6 +737,10 @@
     NOTE_STACK_JITTER_PCT: NoteLayout.NOTE_STACK_JITTER_PCT,
     getPanel: getPanel,
     getOrCreateRegion: getOrCreateRegion,
+    getOrCreateNotesLayer: getOrCreateNotesLayer,
+    getZoneBoundsInLayer: getZoneBoundsInLayer,
+    updateNotePositionsInLayer: updateNotePositionsInLayer,
+    addEntranceAnimation: addEntranceAnimation,
     bring_note_to_front: bringNoteToFront,
     destroy_note: destroyNoteElement,
   };

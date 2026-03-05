@@ -13,10 +13,12 @@
   var DESTROY_ANIMATION_MS = 450;
 
   var noteZIndex = 0;
+  /** When non-null, a drag is active; used to force-end on window blur/visibility so grab never stays stuck. */
+  var activeDragRef = null;
 
-  function clearActiveIndicators(region, active) {
-    if (!region) return;
-    var siblings = region.querySelectorAll(".note-page");
+  function clearActiveIndicators(container, active) {
+    if (!container) return;
+    var siblings = container.querySelectorAll(".note-page, .margin-item");
     for (var i = 0; i < siblings.length; i++) {
       if (siblings[i] !== active) {
         siblings[i].classList.remove(NOTE_ACTIVE_CLASS);
@@ -28,11 +30,11 @@
     if (!wrapper) return;
     noteZIndex += 1;
     wrapper.style.zIndex = String(noteZIndex);
-    var region = wrapper.parentNode;
-    if (region && region.lastElementChild !== wrapper) {
-      region.appendChild(wrapper);
+    var container = wrapper.parentNode;
+    if (container && container.lastElementChild !== wrapper) {
+      container.appendChild(wrapper);
     }
-    clearActiveIndicators(region, wrapper);
+    clearActiveIndicators(container, wrapper);
     wrapper.classList.add(NOTE_ACTIVE_CLASS);
   }
 
@@ -83,19 +85,26 @@
     });
   }
 
-  function enableNoteDragging(wrapper, side) {
+  /**
+   * In-region drag only; transform-origin–based so rotated notes don't jump.
+   * No overlay reparent. Optional: replace with @neodrag/vanilla (ESM) when using a bundler.
+   */
+  function enableNoteDragging(wrapper, side, callbacks) {
     if (!wrapper) return;
+    callbacks = callbacks || {};
     var activePointerId = null;
     var dragState = null;
 
     function endDrag(event) {
       if (activePointerId == null || event.pointerId !== activePointerId) return;
+      if (activeDragRef && activeDragRef.wrapper === wrapper) activeDragRef = null;
       if (wrapper.releasePointerCapture) {
         wrapper.releasePointerCapture(activePointerId);
       }
       activePointerId = null;
       dragState = null;
       wrapper.classList.remove(NOTE_DRAG_CLASS);
+      if (typeof callbacks.onDragEnd === "function") callbacks.onDragEnd(wrapper, side);
     }
 
     wrapper.addEventListener("pointerdown", function (event) {
@@ -103,16 +112,26 @@
       if (event.target && event.target.closest && event.target.closest(".note-page__controls")) {
         return;
       }
-      // Prevent text selection/image drag that can cause jumpy drag starts.
+      if (activeDragRef && activeDragRef.wrapper !== wrapper) {
+        cancelActiveDragIfAny();
+      }
       if (event.preventDefault) event.preventDefault();
-      var region = wrapper.parentNode;
-      if (!region) return;
-      var noteRect = wrapper.getBoundingClientRect();
+      var layer = wrapper.parentNode;
+      if (!layer) return;
+      // Use transform-origin position (not AABB) so rotated notes don't jump.
+      var originX = layer.getBoundingClientRect().left + wrapper.offsetLeft;
+      var originY = layer.getBoundingClientRect().top + wrapper.offsetTop;
+      if (wrapper.offsetParent !== layer) {
+        var noteRect = wrapper.getBoundingClientRect();
+        originX = noteRect.left;
+        originY = noteRect.top;
+      }
       activePointerId = event.pointerId;
       dragState = {
-        pointerOffsetX: event.clientX - noteRect.left,
-        pointerOffsetY: event.clientY - noteRect.top,
+        pointerOffsetX: event.clientX - originX,
+        pointerOffsetY: event.clientY - originY,
       };
+      activeDragRef = { wrapper: wrapper, pointerId: event.pointerId };
       if (wrapper.setPointerCapture) {
         wrapper.setPointerCapture(activePointerId);
       }
@@ -122,11 +141,12 @@
 
     wrapper.addEventListener("pointermove", function (event) {
       if (activePointerId == null || event.pointerId !== activePointerId || !dragState) return;
-      var region = wrapper.parentNode;
-      if (!region) return;
-      var regionRect = region.getBoundingClientRect();
-      var nextLeft = event.clientX - regionRect.left - dragState.pointerOffsetX;
-      var nextTop = event.clientY - regionRect.top - dragState.pointerOffsetY;
+      if (event.preventDefault) event.preventDefault();
+      var layer = wrapper.parentNode;
+      if (!layer) return;
+      var layerRect = layer.getBoundingClientRect();
+      var nextLeft = event.clientX - layerRect.left - dragState.pointerOffsetX;
+      var nextTop = event.clientY - layerRect.top - dragState.pointerOffsetY;
       wrapper.style.left = nextLeft + "px";
       wrapper.style.right = "";
       wrapper.style.top = nextTop + "px";
@@ -135,9 +155,34 @@
     wrapper.addEventListener("pointerup", endDrag);
     wrapper.addEventListener("pointercancel", endDrag);
     wrapper.addEventListener("lostpointercapture", function () {
+      if (activeDragRef && activeDragRef.wrapper === wrapper) activeDragRef = null;
       activePointerId = null;
       dragState = null;
       wrapper.classList.remove(NOTE_DRAG_CLASS);
+      /* onDragEnd only from pointerup/pointercancel to avoid double persist */
+    });
+  }
+
+  function cancelActiveDragIfAny() {
+    if (!activeDragRef) return;
+    var ref = activeDragRef;
+    activeDragRef = null;
+    if (!ref.wrapper.isConnected) return;
+    ref.wrapper.dispatchEvent(new PointerEvent("pointercancel", {
+      bubbles: true,
+      cancelable: true,
+      pointerId: ref.pointerId,
+      pointerType: "mouse",
+      isPrimary: true,
+    }));
+  }
+
+  if (typeof window !== "undefined") {
+    window.addEventListener("blur", cancelActiveDragIfAny);
+  }
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "hidden") cancelActiveDragIfAny();
     });
   }
 
@@ -149,10 +194,11 @@
   function registerNoteInteractions(wrapper, side, callbacks) {
     if (!wrapper) return;
     wrapper.dataset.noteSide = side;
-    var onDestroy = callbacks && typeof callbacks.onDestroy === "function" ? callbacks.onDestroy : function () {};
+    callbacks = callbacks || {};
+    var onDestroy = typeof callbacks.onDestroy === "function" ? callbacks.onDestroy : function () {};
     attachNoteControls(wrapper, side, onDestroy);
     enableKeyboardDeletion(wrapper, side, onDestroy);
-    enableNoteDragging(wrapper, side);
+    enableNoteDragging(wrapper, side, callbacks);
     wrapper.addEventListener("focus", function () {
       bringNoteToFront(wrapper, side);
     });
@@ -180,6 +226,7 @@
     wrapper.dataset.paperUrl = paperUrl;
     wrapper.style.zIndex = String(noteZIndex);
     wrapper.style.transformOrigin = "top left";
+    wrapper.style.setProperty("--note-rotation", rotationDeg + "deg");
     wrapper.style.transform = "rotate(" + rotationDeg + "deg)";
     if (pos.left != null) wrapper.style.left = pos.left + "px";
     if (pos.right != null) wrapper.style.right = pos.right + "px";

@@ -14,9 +14,9 @@ const DATA_DIR = path.join(__dirname, "data");
 const dailyUsageStore = shared.createFileDailyUsageStore(DATA_DIR);
 
 const apiKey = process.env.OPENAI_API_KEY;
-if (!apiKey && !shared.DEV_MODE) {
+if (!apiKey && !shared.OFFLINE) {
   console.error(
-    "Missing OPENAI_API_KEY. Set it in .env or the environment (or use MODE=dev to skip the AI)."
+    "Missing OPENAI_API_KEY. Set it in .env or the environment (or use OFFLINE=1 to skip the AI)."
   );
   process.exit(1);
 }
@@ -45,6 +45,10 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
+app.get("/notedebug", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "notedebug.html"));
+});
+
 app.get("*", (req, res, next) => {
   if (req.path.startsWith("/api/")) return next();
   if (req.method !== "GET") return next();
@@ -53,17 +57,19 @@ app.get("*", (req, res, next) => {
 });
 
 app.get("/api/config", (req, res) => {
-  res.json({ devMode: !!shared.DEV_MODE });
+  res.json({ devMode: !!shared.DEV });
 });
 
 app.get("/api/debug", (req, res) => {
-  if (!shared.DEBUG) return res.status(404).end();
+  if (!shared.DEBUG_LOGS) return res.status(404).end();
   const sessionId = getOrCreateSessionId(req, res);
   const userExchangeCount = shared.userExchangeCounts.get(sessionId) ?? 0;
   const dailyCount = dailyUsageStore.readDailyUsage();
   const promptPreview = shared.getPromptFirstLines(5);
   res.json({
-    devMode: shared.DEV_MODE,
+    devMode: shared.DEV,
+    offline: shared.OFFLINE,
+    debugLogs: true,
     model: shared.MODEL,
     serviceTier: shared.SERVICE_TIER || "(default)",
     promptPreview,
@@ -90,7 +96,7 @@ app.post("/api/chat", async (req, res) => {
   const result = await shared.handleChatRequest(sessionId, trimmed, {
     openaiClient: client,
     dailyUsageStore,
-    debug: shared.DEBUG,
+    debug: shared.DEBUG_LOGS,
     contentWidthChars,
   });
   const status = result.status;
@@ -105,7 +111,7 @@ app.post("/api/philosopher-dialog", async (req, res) => {
   const sessionId = getOrCreateSessionId(req, res);
   const result = await shared.handlePhilosopherDialogRequest(sessionId, req.body || {}, {
     openaiClient: client,
-    debug: shared.DEBUG,
+    debug: shared.DEBUG_LOGS,
   });
   const status = result.status;
   const body = result.body;
@@ -118,16 +124,16 @@ app.listen(PORT, () => {
   console.log(
     `  prompt.md: ${fs.existsSync(shared.PROMPT_FILE) ? "found" : "NOT FOUND"}`,
     `| closers.md: ${fs.existsSync(shared.CLOSERS_FILE) ? "found" : "NOT FOUND"}`,
-    `| phil_annotations.json: ${fs.existsSync(shared.PHIL_ANNOTATIONS_FILE) ? "found" : "NOT FOUND"}`
+    `| phil_annotations.json: ${shared.resolvePhilAnnotationsFilePath() ? "found" : "NOT FOUND"}`
   );
-  if (shared.DEV_MODE) {
-    console.log("MODE=dev: AI backend disabled, returning generic replies.");
+  if (shared.OFFLINE) {
+    console.log("OFFLINE=1: AI backend disabled, returning generic replies.");
   } else {
     console.log(`Model: ${shared.MODEL}`);
     if (shared.SERVICE_TIER)
       console.log(`Service tier: ${shared.SERVICE_TIER}`);
   }
-  if (shared.DEBUG) {
+  if (shared.DEBUG_LOGS) {
     console.log(
       "[DEBUG] Service tier:",
       shared.SERVICE_TIER || "(default)"

@@ -4,6 +4,20 @@ This document is the single place to see how to change prompts, data files, note
 
 ---
 
+## Environment (DEV, OFFLINE, DEBUG_LOGS)
+
+Backend and API behavior are controlled by optional env vars. See `frontend/.env.example` for the full list.
+
+| Env var | Purpose |
+|--------|---------|
+| `DEV=1` | Enables dev-only UI and advanced tools (philosopher panels, note debug boxes, etc.). Does **not** disable the AI or skip the API key. |
+| `OFFLINE=1` | Disables LLM calls: no API key required, chat and philosopher-dialog return dummy responses. |
+| `DEBUG_LOGS=1` | Verbose logging: enables `/api/debug`, server startup logs, per-request logs (e.g. full message sent to the LLM), and debug info in chat responses. |
+
+These are independent: e.g. `DEV=1` with real LLM shows dev UI; `OFFLINE=1` without `DEV` returns dummies with normal UI.
+
+---
+
 ## 1. Prompts (API only)
 
 **Rule:** Prompt files and annotation rules live in `frontend/api/prompts/`.
@@ -13,13 +27,30 @@ This document is the single place to see how to change prompts, data files, note
 | `prompt.md` | Main agent system prompt |
 | `closers.md` | Conversation closing lines |
 | `easter_egg_prompt.md` | Easter egg prompt |
-| `left_philospher_user_res.md` | Left philosopher persona and instructions when addressing the user (produces `left_philosopher_user_response` and `left_philosopher_notes`) |
-| `left_philospher_other_res.md` | Left philosopher persona and instructions when responding to the right philosopher (produces `left_philosopher_other_response`) |
-| `right_philospher_user_res.md` | Right philosopher persona and instructions when addressing the user (produces `right_philosopher_user_response` and `right_philosopher_notes`) |
-| `right_philospher_other_res.md` | Right philosopher persona and instructions when responding to the left philosopher (produces `right_philosopher_other_response`) |
+| `left_philosopher_user_res.md` | Left philosopher persona and instructions when addressing the user (produces `left_philosopher_user_response` and `left_philosopher_notes`) |
+| `left_philosopher_other_res.md` | Left philosopher persona and instructions when responding to the right philosopher (produces `left_philosopher_other_response`) |
+| `right_philosopher_user_res.md` | Right philosopher persona and instructions when addressing the user (produces `right_philosopher_user_response` and `right_philosopher_notes`) |
+| `right_philosopher_other_res.md` | Right philosopher persona and instructions when responding to the left philosopher (produces `right_philosopher_other_response`) |
 | `phil_annotations.json` | Rules for notes/annotations (same format as `public/data/phil_annotations.json`); used by the API when deployed so annotations load without `public/data` |
 
 Edit these files to change what the agent and philosophers are told to do. The backend (Express and Azure API) reads from this directory (or from `PROMPTS_DIR` if set).
+
+---
+
+## 1b. Philosopher–philosopher dialog (when needed)
+
+**What it is:** After each main chat response, the frontend may send an optional second request (`POST /api/philosopher-dialog`) so the left and right philosophers can respond to each other’s notes. This request uses a different context (user+detective conversation plus all philosopher outputs so far) and a focused task: **other_response only** (no user-facing response, no callouts).
+
+**When it runs:** “When needed” is controlled by **two separate probabilities**, one for each side. Each time the main chat returns, the frontend waits a short delay then rolls the dice: should the left philosopher respond to the right? Should the right respond to the left? Left and right have different rates so you can make one side chattier than the other.
+
+**Where to change the probabilities:**
+
+| Variable | File | Meaning |
+|----------|------|---------|
+| `LEFT_PHILOSOPHER_INTERACTION_RATE` | `frontend/public/js/chatSend.js` | Probability (0–1) that the left philosopher will respond to the right in the follow-up dialog. Default 0.4. |
+| `RIGHT_PHILOSOPHER_INTERACTION_RATE` | `frontend/public/js/chatSend.js` | Probability (0–1) that the right philosopher will respond to the left in the follow-up dialog. Default 0.6. |
+
+Adjust these to make philosopher–philosopher exchanges more or less frequent, or to bias one side.
 
 ---
 
@@ -123,6 +154,7 @@ Edit these files to change what the agent and philosophers are told to do. The b
 | Chat markup mode → RoughNotation type | `js/annotationConfig.js` | `ANNOTATION_MODE_TO_TYPES` |
 | Main chat column colors, margins, editor, cursor, divider | `js/chatConfig.js` | `CHAT_STYLE` (then call `applyChatStyle()`) |
 | Detective typing speed and behavior | `js/typingConfig.js` | `TYPING_CONFIG.assistantCharsPerTick`, `.assistantTickMs`, `.assistantMaxChars`, `.respectReducedMotion` |
+| How often left/right philosophers respond to each other | `js/chatSend.js` | `LEFT_PHILOSOPHER_INTERACTION_RATE`, `RIGHT_PHILOSOPHER_INTERACTION_RATE` (0–1) |
 | Agent or philosopher instructions | `api/prompts/*.md` | Edit the corresponding `.md` file |
 
 ---

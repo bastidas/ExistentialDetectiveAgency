@@ -26,6 +26,35 @@
   pointer-events: auto;
 }
 
+/* Single notes layer: one stacking context for all notes (left + right). Sibling to panels inside .app-layout. */
+.notes-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 31;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.notes-layer > * {
+  pointer-events: auto;
+}
+
+/* Debug: philosopher zone bounding boxes (left and right). Visible only in dev mode. */
+body[data-dev-mode="true"] #left-philosopher-content {
+  outline: 2px dashed rgba(100, 180, 255, 0.7);
+  outline-offset: 2px;
+}
+
+body[data-dev-mode="true"] #right-philosopher-content {
+  outline: 2px dashed rgba(255, 180, 100, 0.7);
+  outline-offset: 2px;
+}
+
+body[data-dev-mode="true"] #mobile-shared-notes-content {
+  outline: 2px dashed rgba(150, 255, 150, 0.6);
+  outline-offset: 2px;
+}
+
 .note-page {
   position: absolute;
   z-index: 1;
@@ -54,6 +83,8 @@
   height: 100%;
   object-fit: contain;
   filter: drop-shadow(4px 4px 5px rgba(0, 0, 0, 0.5));
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 .margin-item:hover .note-page__close {
@@ -130,9 +161,27 @@
   cursor: grabbing;
   /* Keep container transparent; rely on paper image's own shadow. */
   z-index: 100; /* above chat when dragged over */
+  touch-action: none; /* prevent scroll/zoom while dragging (notes and margin items) */
 }
 
 /* Selected note: no extra box-shadow; paper keeps its drop-shadow via .note-page__paper */
+
+/* Entrance: note/margin item appears like a dropped piece of paper (rotation preserved via --note-rotation). */
+.note-page--entering,
+.margin-item--entering {
+  animation: note-enter 0.28s ease-out forwards;
+}
+
+@keyframes note-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) rotate(var(--note-rotation, 0deg));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) rotate(var(--note-rotation, 0deg));
+  }
+}
 
 .note-page--destroying {
   pointer-events: none;

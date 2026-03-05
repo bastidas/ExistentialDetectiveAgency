@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <base href="/">
+  <title>Note placement debug | EDA</title>
+  <link rel="icon" type="image/webp" sizes="32x32" href="imgs/eye32.webp">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cutive+Mono&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/theme.css">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="css/left-philosopher.css">
+  <link rel="stylesheet" href="css/right-philosopher.css">
+  <link rel="stylesheet" href="css/note-pages.css">
+  <link rel="stylesheet" href="css/chat-paper.css">
+  <style>
+    .note-debug-controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 1rem;
+      padding: 0.75rem 0;
+      margin-bottom: 0.5rem;
+      border-bottom: 1px solid rgba(255,255,255,0.15);
+    }
+    .note-debug-controls label { display: flex; align-items: center; gap: 0.5rem; }
+    .note-debug-controls input[type="number"] { width: 4ch; }
+    .note-debug-fake-chat { min-height: 120px; }
+  </style>
+</head>
+<body data-viewport="large">
+  <div class="menu-bar cyan-menu-bar visible">
+    <a class="eda-logo-small small-glitch-title glitch-effect" href="/">Note debug</a>
+  </div>
+  <div class="app-layout">
+    <aside id="left-philosopher" class="philosopher-notes left-philosopher">
+      <h2 class="philosopher-notes-title">Left philosopher</h2>
+      <div id="left-philosopher-content" class="philosopher-notes-content"></div>
+    </aside>
+    <div id="notes-layer" class="notes-layer" aria-hidden="true"></div>
+    <main>
+      <div class="note-debug-controls">
+        <label>
+          <input type="checkbox" id="note-debug-toggle" checked> Fake feed on
+        </label>
+        <label>
+          Interval (s): <input type="number" id="note-debug-interval" value="3" min="1" max="60" step="1">
+        </label>
+        <button type="button" id="note-debug-fire-once">Fire once</button>
+      </div>
+      <div id="messages" class="messages note-debug-fake-chat"></div>
+    </main>
+    <aside id="right-philosopher" class="philosopher-notes right-philosopher">
+      <h2 class="philosopher-notes-title">Right philosopher</h2>
+      <div id="right-philosopher-content" class="philosopher-notes-content"></div>
+    </aside>
+  </div>
+  <div id="mobile-shared-notes" class="mobile-shared-notes" aria-live="polite">
+    <div id="mobile-shared-notes-content" class="philosopher-notes-content"></div>
+  </div>
+
+  <script src="js/utils.js"></script>
+  <script src="js/noteFormatConfig.js"></script>
+  <script src="js/noteLayout.js"></script>
+  <script src="js/noteElement.js"></script>
+  <script src="js/noteCapacity.js"></script>
+  <script src="js/handwriter.js"></script>
+  <script src="js/notePages.js"></script>
+  <script src="js/noteQueueManager.js"></script>
+  <script src="js/philosopherRules.js"></script>
+  <script src="https://unpkg.com/rough-notation@0.5.1/lib/rough-notation.iife.js"></script>
+  <script src="js/annotationConfig.js"></script>
+  <script src="js/annotation.js"></script>
+  <script src="js/viewportNotes.js"></script>
+  <script>
+(function () {
+  "use strict";
+
+  var LOREM_USER = [
+    "Lorem ipsum dolor sit amet.",
+    "Consectetur adipiscing elit.",
+    "Sed do eiusmod tempor incididunt.",
+    "I think about love and death.",
+    "The rhizome and myth of meaning.",
+    "Something about transcendence and the sublime.",
+  ];
+  var LOREM_ASSISTANT = [
+    "Ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.",
+    "Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident.",
+    "Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis.",
+  ];
+  var LOREM_NOTE = [
+    "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.",
+    "Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.",
+    "At vero eos et accusamus et iusto odio dignissimos ducimus qui blanditiis praesentium voluptatum deleniti atque corrupti quos dolores et quas molestias excepturi sint occaecati cupiditate non provident.",
+    "here today gone tomorrow",
+    "simulacrum",
+    "alpha beta gamma",
+    "aether",
+    "transcendence",
+    "sublime",
+    "sublimation",
+    "alpha_beta_gamma_alpha_beta_gamma_alpha",
+  ];
+
+  function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+  function appendFakeMessage(role, text) {
+    var messages = document.getElementById("messages");
+    if (!messages) return;
+    var div = document.createElement("div");
+    div.className = "message " + role;
+    var label = document.createElement("span");
+    label.className = "label " + (role === "assistant" ? "label--detective" : "label--querent");
+    label.textContent = role === "user" ? "QUERENT" : "DETECTIVE";
+    var content = document.createElement("div");
+    content.className = "content typewriter";
+    if (role === "user" && window.EDAAnnotation && typeof EDAAnnotation.wrapAnnotationKeywords === "function") {
+      content.innerHTML = EDAAnnotation.wrapAnnotationKeywords(text);
+      if (typeof EDAAnnotation.applyRoughNotationToKeywordSpans === "function") {
+        EDAAnnotation.applyRoughNotationToKeywordSpans(content, "left");
+      }
+    } else {
+      content.textContent = text;
+    }
+    div.appendChild(label);
+    div.appendChild(content);
+    messages.appendChild(div);
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  var FAST_WRITE_OPTS = {
+    left: { baseDelayMs: 0, variationMs: 0 },
+    right: { baseDelayMs: 0, variationMs: 0, useLinedLayout: true, disableScroll: true },
+  };
+
+  function fireOneTick() {
+    appendFakeMessage("user", pick(LOREM_USER));
+    appendFakeMessage("assistant", pick(LOREM_ASSISTANT));
+    if (window.EDARules && typeof EDARules.queueNoteWrite === "function") {
+      EDARules.queueNoteWrite("left", pick(LOREM_NOTE), FAST_WRITE_OPTS.left).catch(function (e) { console.warn("[note-debug] left:", e); });
+      EDARules.queueNoteWrite("right", pick(LOREM_NOTE), FAST_WRITE_OPTS.right).catch(function (e) { console.warn("[note-debug] right:", e); });
+    }
+  }
+
+  var intervalId = null;
+
+  function startFeed() {
+    if (intervalId) return;
+    var input = document.getElementById("note-debug-interval");
+    var sec = Math.max(1, parseInt(input && input.value ? input.value : 3, 10) || 3);
+    intervalId = setInterval(fireOneTick, sec * 1000);
+    console.log("[note-debug] Fake feed started, interval", sec, "s");
+  }
+
+  function stopFeed() {
+    if (intervalId) {
+      clearInterval(intervalId);
+      intervalId = null;
+      console.log("[note-debug] Fake feed stopped");
+    }
+  }
+
+  function onToggleChange() {
+    var cb = document.getElementById("note-debug-toggle");
+    if (cb && cb.checked) startFeed(); else stopFeed();
+  }
+
+  function applyDevModeFlag() {
+    return fetch("/api/config", { credentials: "same-origin" })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (d) {
+        if (d && document.body) {
+          document.body.dataset.devMode = d.devMode ? "true" : "false";
+        }
+      })
+      .catch(function () {});
+  }
+
+  function init() {
+    applyDevModeFlag().then(runInit).catch(function () { runInit(); });
+  }
+
+  function runInit() {
+    var cfg = window.NoteFormatConfig;
+    if (cfg && typeof cfg.applyNoteFormatToPanels === "function") {
+      cfg.applyNoteFormatToPanels();
+    }
+    if (typeof window.initViewportNotes === "function") {
+      window.initViewportNotes();
+    }
+    var q = window.NoteQueueManager;
+    if (q && typeof q.init === "function") {
+      q.init({ pauseMs: 2000 });
+    }
+    var rulesPromise = (window.EDARules && typeof EDARules.loadRules === "function")
+      ? EDARules.loadRules()
+      : Promise.resolve();
+
+    rulesPromise.then(function () {
+      var toggle = document.getElementById("note-debug-toggle");
+      var intervalInput = document.getElementById("note-debug-interval");
+      var fireOnce = document.getElementById("note-debug-fire-once");
+
+      if (toggle) {
+        toggle.addEventListener("change", onToggleChange);
+      }
+      if (intervalInput) {
+        intervalInput.addEventListener("change", function () {
+          if (toggle && toggle.checked && intervalId) {
+            stopFeed();
+            startFeed();
+          }
+        });
+      }
+      if (fireOnce) {
+        fireOnce.addEventListener("click", fireOneTick);
+      }
+
+      if (toggle && toggle.checked) {
+        startFeed();
+      }
+    });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
+})();
+  </script>
+</body>
+</html>

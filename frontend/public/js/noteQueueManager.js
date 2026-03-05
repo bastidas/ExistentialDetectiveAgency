@@ -1,13 +1,6 @@
 (function (global) {
   "use strict";
 
-  // Shared runtime config for note heuristics (also read by notePages).
-  var NOTE_RUNTIME_CONFIG = global.EDANoteConfig || (global.EDANoteConfig = {});
-  var LONG_NOTE_THRESHOLD = typeof NOTE_RUNTIME_CONFIG.LONG_NOTE_THRESHOLD === "number"
-    ? NOTE_RUNTIME_CONFIG.LONG_NOTE_THRESHOLD
-    : 350;
-  NOTE_RUNTIME_CONFIG.LONG_NOTE_THRESHOLD = LONG_NOTE_THRESHOLD;
-
   var LOG_PREFIX = "[note-queue]";
   // When preferLargerPaper is true, prefer papers whose capacity is at
   // least this multiple of the required characters, if available.
@@ -23,39 +16,49 @@
   }
 
   function createAllocator() {
-    var available = { left: [], right: [] };
-    var spent = { left: [], right: [] };
+    // Single shared pool: left and right both draw from the same available/spent
+    // so one philosopher cannot use a paper image until it comes back into the pool.
+    var available = [];
+    var spent = [];
 
-    function hydrateside(side) {
+    function hydrate() {
       var papers = (cfg && typeof cfg.getPaperImages === "function") ? cfg.getPaperImages() : [];
       if (!papers || !papers.length) {
-        available[side] = [];
-        spent[side] = [];
+        available = [];
+        spent = [];
         return;
       }
-      available[side] = papers.map(function (paperUrl) {
-        return buildEntry(paperUrl, side);
-      });
-      spent[side] = [];
-      console.log(LOG_PREFIX, "reset paper stack", side, "count:", available[side].length);
+      available = papers.map(buildEntryShared);
+      spent = [];
+      console.log(LOG_PREFIX, "reset paper stack (shared pool) count:", available.length);
     }
 
-    function ensure(side) {
-      if (!available[side] || !available[side].length) hydrateside(side);
-      if (!spent[side]) spent[side] = [];
+    function ensure() {
+      if (!available || !available.length) hydrate();
     }
 
-    function buildEntry(paperUrl, side) {
-      var metrics = capacityApi && typeof capacityApi.getCapacity === "function"
-        ? capacityApi.getCapacity(paperUrl, side)
+    function buildEntryShared(paperUrl) {
+      var leftM = capacityApi && typeof capacityApi.getCapacity === "function"
+        ? capacityApi.getCapacity(paperUrl, "left")
+        : null;
+      var rightM = capacityApi && typeof capacityApi.getCapacity === "function"
+        ? capacityApi.getCapacity(paperUrl, "right")
         : null;
       return {
         paperUrl: paperUrl,
-        side: side,
-        capacity: metrics ? metrics.capacity : Infinity,
-        lines: metrics ? metrics.lines : null,
-        charsPerLine: metrics ? metrics.charsPerLine : null,
+        capacityLeft: leftM && typeof leftM.capacity === "number" ? leftM.capacity : Infinity,
+        capacityRight: rightM && typeof rightM.capacity === "number" ? rightM.capacity : Infinity,
+        linesLeft: leftM && leftM.lines,
+        linesRight: rightM && rightM.lines,
+        charsPerLineLeft: leftM && leftM.charsPerLine,
+        charsPerLineRight: rightM && rightM.charsPerLine,
       };
+    }
+
+    function capacityForSide(entry, side) {
+      return side === "right"
+        ? (entry.capacityRight != null ? entry.capacityRight : entry.capacity)
+        : (entry.capacityLeft != null ? entry.capacityLeft : entry.capacity);
     }
 
     function removeEntry(list, entry) {
@@ -71,20 +74,23 @@
       if (idx >= 0) list.splice(idx, 1);
     }
 
-    function pickFromList(list, requiredChars, preferLarger, avoidPaperUrl, strictCapacity) {
+    function pickFromList(list, side, requiredChars, preferLarger, avoidPaperUrl, strictCapacity) {
       if (!list || !list.length) return null;
       var filtered = list.filter(function (entry) {
-        return typeof entry.capacity === "number" && entry.capacity >= requiredChars;
+        var cap = capacityForSide(entry, side);
+        return typeof cap === "number" && cap >= requiredChars;
       });
       var candidates;
       if (filtered.length) {
         candidates = filtered;
       } else if (strictCapacity) {
-        // When strictCapacity is true, don't fall back to undersized papers;
-        // signal failure so we can search other pools (spent, rehydrated).
         return null;
       } else {
-        candidates = list.slice();
+        candidates = list.filter(function (entry) {
+          var cap = capacityForSide(entry, side);
+          return typeof cap === "number" || cap === Infinity;
+        });
+        if (!candidates.length) candidates = list.slice();
       }
       if (avoidPaperUrl) {
         candidates = candidates.filter(function (e) { return e.paperUrl !== avoidPaperUrl; });
@@ -92,7 +98,8 @@
           if (filtered.length && !strictCapacity) {
             candidates = filtered;
           } else if (!strictCapacity) {
-            candidates = list.slice();
+            candidates = list.slice().filter(function (e) { return e.paperUrl !== avoidPaperUrl; });
+            if (!candidates.length) candidates = list.slice();
           } else {
             return null;
           }
@@ -100,16 +107,14 @@
       }
       if (!candidates.length) return null;
       if (preferLarger) {
-        // First, try to find papers with significantly more capacity than the
-        // current text requires, so long notes land on comfortably large pages
-        // when the pool still has variety.
         var targetChars = requiredChars * PREFERRED_CAPACITY_RATIO;
         var oversize = candidates.filter(function (entry) {
-          return typeof entry.capacity === "number" && entry.capacity >= targetChars;
+          var cap = capacityForSide(entry, side);
+          return typeof cap === "number" && cap >= targetChars;
         });
         var pool = oversize.length ? oversize : candidates;
         pool.sort(function (a, b) {
-          return (b.capacity || 0) - (a.capacity || 0);
+          return (capacityForSide(b, side) || 0) - (capacityForSide(a, side) || 0);
         });
         return pool[0];
       }
@@ -122,64 +127,61 @@
       var avoidPaperUrl = options.avoidPaperUrl || null;
       var sideKey = side === "right" ? "right" : "left";
       var needChars = Math.max(1, requiredChars || 0);
-      ensure(sideKey);
-      // For larger-paper requests, be strict about capacity in the current
-      // pool so we can fall back to spent/rehydrated pools when only very
-      // small notes remain.
+      ensure();
       var entry = pickFromList(
-        available[sideKey],
+        available,
+        sideKey,
         needChars,
         preferLargerPaper,
         avoidPaperUrl,
         !!preferLargerPaper
       );
       if (entry) {
-        removeEntry(available[sideKey], entry);
-        spent[sideKey].push(entry);
-        if (!available[sideKey].length) {
-          hydrateside(sideKey);
-        }
+        removeEntry(available, entry);
+        spent.push(entry);
+        if (!available.length) hydrate();
         return entry;
       }
-      // Try spent pool next; allow best-available even if slightly undersized.
-      entry = pickFromList(spent[sideKey], needChars, true, avoidPaperUrl, false);
+      entry = pickFromList(spent, sideKey, needChars, true, avoidPaperUrl, false);
       if (entry) {
+        removeEntry(spent, entry);
         console.log(LOG_PREFIX, "reusing spent paper", entry.paperUrl, sideKey);
         return entry;
       }
-      hydrateside(sideKey);
-      // Final fallback: pick the best from a freshly hydrated pool.
-      return pickFromList(available[sideKey], needChars, true, avoidPaperUrl, false);
+      hydrate();
+      entry = pickFromList(available, sideKey, needChars, true, avoidPaperUrl, false);
+      if (entry) {
+        removeEntry(available, entry);
+        spent.push(entry);
+        if (!available.length) hydrate();
+      }
+      return entry;
     }
 
     function snapshot(list) {
-      return list.map(function (entry) {
+      return (list || []).map(function (entry) {
         return {
           paperUrl: entry.paperUrl,
-          capacity: entry.capacity,
-          lines: entry.lines,
-          charsPerLine: entry.charsPerLine,
+          capacity: capacityForSide(entry, "left"),
+          lines: entry.linesLeft,
+          charsPerLine: entry.charsPerLineLeft,
         };
       });
     }
 
     function getState() {
+      var snap = snapshot(available);
+      var spentSnap = snapshot(spent);
       return {
-        available: {
-          left: snapshot(available.left || []),
-          right: snapshot(available.right || []),
-        },
-        spent: {
-          left: snapshot(spent.left || []),
-          right: snapshot(spent.right || []),
-        },
+        available: { left: snap, right: snap },
+        spent: { left: spentSnap, right: spentSnap },
       };
     }
 
     return {
       reserve: reserve,
       getState: getState,
-      reset: hydrateside,
+      reset: hydrate,
     };
   }
 
@@ -245,21 +247,46 @@
     var side = job.side === "right" ? "right" : "left";
     var text = String(job.text);
     if (!text.trim()) return Promise.resolve();
-    if (text.length > LONG_NOTE_THRESHOLD) {
+    var longNoteThreshold = (cfg && typeof cfg.getLongNoteThreshold === "function") ? cfg.getLongNoteThreshold() : 350;
+    if (text.length > longNoteThreshold) {
       console.info(LOG_PREFIX, "Long note candidate", { side: side, length: text.length });
     }
     var decision = notePages.need_new_note(side, text) || { needNew: true };
     var writeStep = Promise.resolve();
     if (decision.needNew) {
+      // Paper selection: allocator is the single source when config is loaded (enqueue is gated by whenPaperConfigLoaded).
+      // When allocator returns no selection, notePages uses preferLargerPaper/avoidPaperUrl with the same policy.
       var currentPaperUrl = (notePages.getCurrentPaperUrl && notePages.getCurrentPaperUrl(side)) || null;
       var selection = allocator.reserve(side, text.length, !!decision.preferLargerPaper, { avoidPaperUrl: currentPaperUrl });
       var noteOptions = { avoidPaperUrl: currentPaperUrl };
       if (selection && selection.paperUrl) {
-        noteOptions.paperUrl = selection.paperUrl;
+        var textLen = text.length;
+        var longThreshold = (cfg && typeof cfg.getLongNoteThreshold === "function") ? cfg.getLongNoteThreshold() : 350;
+        var isLongText = textLen > Math.min(200, longThreshold);
+        if (isLongText) {
+          var NoteLayout = global.NoteLayout;
+          var estimatedH = NoteLayout && typeof NoteLayout.estimateHeightForText === "function"
+            ? NoteLayout.estimateHeightForText(text, side, selection.paperUrl)
+            : 0;
+          var writingAreaH = NoteLayout && typeof NoteLayout.getPaperWritingAreaHeight === "function"
+            ? NoteLayout.getPaperWritingAreaHeight(selection.paperUrl, side)
+            : Infinity;
+          if (writingAreaH > 0 && estimatedH > writingAreaH * 0.95) {
+            noteOptions.preferLargerPaper = true;
+          } else {
+            noteOptions.paperUrl = selection.paperUrl;
+          }
+        } else {
+          noteOptions.paperUrl = selection.paperUrl;
+        }
       } else if (decision.preferLargerPaper) {
         noteOptions.preferLargerPaper = true;
       }
-      writeStep = Promise.resolve(notePages.write_new_note(side, noteOptions));
+      var newNoteResult = notePages.write_new_note(side, noteOptions);
+      if (newNoteResult == null) {
+        return Promise.reject(new Error("write_new_note failed: no region for side " + side));
+      }
+      writeStep = Promise.resolve(newNoteResult);
     }
     return writeStep.then(function () {
       return notePages.write_on_current_note(side, text, job.writeOptions || {});

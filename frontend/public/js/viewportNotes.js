@@ -1,6 +1,14 @@
+/**
+ * Viewport-based note layout: on mobile, move the single notes layer into the shared area;
+ * on desktop/medium, restore the layer to app-layout. All note nodes stay in #notes-layer.
+ * getPanel(side) in notePages returns the zone element (left/right content or shared content),
+ * so note positions are updated via updateNotePositionsInLayer when viewport or zone changes.
+ * Init order: load notePages.js before viewportNotes.js; call initViewportNotes() from app init (e.g. app.js).
+ */
 (function () {
   "use strict";
 
+  var appLayoutEl = null;
   var leftContentEl = null;
   var rightContentEl = null;
   var mobileSharedContentEl = null;
@@ -11,60 +19,41 @@
     medium: null,
   };
 
-  function ensureNotesRegion(container, modifier) {
-    if (!container) return null;
-    var region = container.querySelector(".notes-region");
-    if (region) return region;
-    region = document.createElement("div");
-    region.className = "notes-region" + (modifier ? " notes-region--" + modifier : "");
-    container.appendChild(region);
-    return region;
-  }
-
-  function moveNotesIntoSharedArea() {
-    if (!mobileSharedContentEl) return;
-    var sharedRegion = ensureNotesRegion(mobileSharedContentEl, "shared");
-    if (!sharedRegion) return;
-    [
-      { panel: leftContentEl },
-      { panel: rightContentEl },
-    ].forEach(function (entry) {
-      if (!entry.panel) return;
-      var region = entry.panel.querySelector(".notes-region");
-      if (!region) return;
-      while (region.firstChild) {
-        sharedRegion.appendChild(region.firstChild);
-      }
-      region.remove();
-    });
-  }
-
-  function restoreNotesFromSharedArea() {
-    if (!mobileSharedContentEl) return;
-    var sharedRegion = mobileSharedContentEl.querySelector(".notes-region");
-    if (!sharedRegion) return;
-    var node = sharedRegion.firstChild;
-    while (node) {
-      var next = node.nextSibling;
-      var side = node.dataset && node.dataset.noteSide === "right" ? "right" : "left";
-      var targetPanel = side === "right" ? rightContentEl : leftContentEl;
-      var targetRegion = ensureNotesRegion(targetPanel, side);
-      if (targetRegion) {
-        targetRegion.appendChild(node);
-      }
-      node = next;
+  function moveNotesLayerToShared() {
+    var layer = document.getElementById("notes-layer");
+    if (!layer || !mobileSharedContentEl) return;
+    if (layer.parentNode === mobileSharedContentEl) return;
+    mobileSharedContentEl.appendChild(layer);
+    var notePages = typeof window !== "undefined" ? window.notePages : null;
+    if (notePages && typeof notePages.updateNotePositionsInLayer === "function") {
+      notePages.updateNotePositionsInLayer();
     }
-    sharedRegion.remove();
+  }
+
+  function restoreNotesLayerToLayout() {
+    var layer = document.getElementById("notes-layer");
+    if (!layer || !appLayoutEl) return;
+    if (layer.parentNode === appLayoutEl) return;
+    var main = appLayoutEl.querySelector("main");
+    if (main) {
+      appLayoutEl.insertBefore(layer, main);
+    } else {
+      appLayoutEl.appendChild(layer);
+    }
+    var notePages = typeof window !== "undefined" ? window.notePages : null;
+    if (notePages && typeof notePages.updateNotePositionsInLayer === "function") {
+      notePages.updateNotePositionsInLayer();
+    }
   }
 
   function handleViewportNotesMode(nextViewport) {
     if (!bodyEl) return;
     if (nextViewport === "mobile") {
       bodyEl.dataset.mobileNotesMode = "shared";
-      moveNotesIntoSharedArea();
+      moveNotesLayerToShared();
     } else {
       delete bodyEl.dataset.mobileNotesMode;
-      restoreNotesFromSharedArea();
+      restoreNotesLayerToLayout();
     }
   }
 
@@ -99,11 +88,12 @@
 
   function initViewportNotes() {
     bodyEl = document.body;
+    appLayoutEl = document.querySelector(".app-layout");
     leftContentEl = document.getElementById("left-philosopher-content");
     rightContentEl = document.getElementById("right-philosopher-content");
     mobileSharedContentEl = document.getElementById("mobile-shared-notes-content");
 
-    if (!bodyEl || !leftContentEl || !rightContentEl || !mobileSharedContentEl) {
+    if (!bodyEl || !appLayoutEl || !leftContentEl || !rightContentEl || !mobileSharedContentEl) {
       console.warn("[viewportNotes] Required elements not found; skipping viewport/notes init.");
       return;
     }

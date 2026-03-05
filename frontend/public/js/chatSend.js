@@ -15,6 +15,9 @@
   /** Prevents double-send when submit fires twice (e.g. easter-egg path or fast double Enter). */
   var sending = false;
 
+  /** Last user message text sent (for applying AI callouts when response arrives). */
+  var lastSentUserMessage = "";
+
   /** Returns display string for chat error response (data.reply absent, data.error present). */
   function chatErrorToMessage(data) {
     var kind = data.errorKind || "bad_request";
@@ -54,6 +57,32 @@
       data.rightPhilosopherOtherResponse ||
       (Array.isArray(data.rightPhilosopherNotes) && data.rightPhilosopherNotes.length)
     );
+  }
+
+  /**
+   * Normalize either API response shape (main chat: 7 philosopher fields; philosopher-dialog: 2 other_response fields)
+   * into a single full shape so toPhilosopherPayload and hasPhilosopherContent work unchanged.
+   * Missing keys become "" or [].
+   */
+  function normalizePhilosopherResponse(data) {
+    if (!data || typeof data !== "object") {
+      return {
+        leftPhilosopherUserResponse: "",
+        rightPhilosopherUserResponse: "",
+        leftPhilosopherOtherResponse: "",
+        rightPhilosopherOtherResponse: "",
+        leftPhilosopherNotes: [],
+        rightPhilosopherNotes: [],
+      };
+    }
+    return {
+      leftPhilosopherUserResponse: data.leftPhilosopherUserResponse != null ? String(data.leftPhilosopherUserResponse) : "",
+      rightPhilosopherUserResponse: data.rightPhilosopherUserResponse != null ? String(data.rightPhilosopherUserResponse) : "",
+      leftPhilosopherOtherResponse: data.leftPhilosopherOtherResponse != null ? String(data.leftPhilosopherOtherResponse) : "",
+      rightPhilosopherOtherResponse: data.rightPhilosopherOtherResponse != null ? String(data.rightPhilosopherOtherResponse) : "",
+      leftPhilosopherNotes: Array.isArray(data.leftPhilosopherNotes) ? data.leftPhilosopherNotes : [],
+      rightPhilosopherNotes: Array.isArray(data.rightPhilosopherNotes) ? data.rightPhilosopherNotes : [],
+    };
   }
 
   /** Normalize API response to payload { left: { response, notes }, right: { response, notes } }.
@@ -163,21 +192,22 @@
           return res.ok ? res.json() : res.json().then(function (j) { throw new Error(j.error || res.statusText); });
         })
         .then(function (dialogData) {
-          handlePhilosopherDialogResponse(dialogData, requestLeft, requestRight);
+          handlePhilosopherDialogResponse(normalizePhilosopherResponse(dialogData), requestLeft, requestRight);
         })
         .catch(function (err) {
-          console.warn("[chatSend] Philosopher dialog request failed:", err.message);
+          console.warn("Margins still thinking marginally.", err.message);
         });
     }, PHILOSOPHER_SELF_DIALOG_TIME);
   }
 
   function handlePhilosopherContent(data) {
-    if (!hasPhilosopherContent(data)) {
+    var normalized = normalizePhilosopherResponse(data);
+    if (!hasPhilosopherContent(normalized)) {
       leftPhilosopherHistory.push({ response: "", notes: [] });
       rightPhilosopherHistory.push({ response: "", notes: [] });
       return;
     }
-    var payload = toPhilosopherPayload(data);
+    var payload = toPhilosopherPayload(normalized);
     applyPhilosopherResponse(payload, { pushHistory: true, appendLeft: true, appendRight: true });
     schedulePhilosopherDialog();
   }
@@ -200,12 +230,53 @@
         data.debug.dailyUsage + "/" + data.debug.maxDailyUsage
       );
     }
-    console.log("[DEBUG] Main chat response received; philosopher fields present:", hasPhilosopherContent(data));
+    var philNormalized = normalizePhilosopherResponse(data);
+    console.log("[DEBUG] Main chat response received; philosopher fields present:", hasPhilosopherContent(philNormalized));
     EDAMessageUI.addMessage("assistant", data.reply || "(No reply)", editorRef);
     handlePhilosopherContent(data);
+
+    var leftCallouts = Array.isArray(data.leftPhilosopherCallouts) ? data.leftPhilosopherCallouts : [];
+    var rightCallouts = Array.isArray(data.rightPhilosopherCallouts) ? data.rightPhilosopherCallouts : [];
+    if ((leftCallouts.length || rightCallouts.length) && lastSentUserMessage) {
+      var merged = [];
+      var seenWord = {};
+      function addCallout(word, mode) {
+        var key = (word || "").toLowerCase();
+        if (!key || seenWord[key]) return;
+        seenWord[key] = true;
+        merged.push({ userText: word, mode: mode });
+      }
+      leftCallouts.forEach(function (entry) {
+        if (Array.isArray(entry) && entry.length >= 2) {
+          addCallout(String(entry[0]).trim(), String(entry[1]).toLowerCase());
+        }
+      });
+      rightCallouts.forEach(function (entry) {
+        if (Array.isArray(entry) && entry.length >= 2) {
+          addCallout(String(entry[0]).trim(), String(entry[1]).toLowerCase());
+        }
+      });
+      if (merged.length) {
+        var messagesEl = document.getElementById("messages");
+        if (messagesEl) {
+          var userBlocks = messagesEl.querySelectorAll(".message.user");
+          var lastUser = userBlocks.length ? userBlocks[userBlocks.length - 1] : null;
+          if (lastUser) {
+            var content = lastUser.querySelector(".content");
+            if (content && typeof EDAAnnotation !== "undefined" && EDAAnnotation.wrapAnnotationKeywords) {
+              content.innerHTML = EDAAnnotation.wrapAnnotationKeywords(lastSentUserMessage, { extraCallouts: merged });
+              if (EDAAnnotation.applyRoughNotationToKeywordSpans) {
+                EDAAnnotation.applyRoughNotationToKeywordSpans(content, "left");
+              }
+            }
+          }
+        }
+      }
+    }
+
     if (global.EDARandomMarginItems && typeof global.EDARandomMarginItems.maybeDropRandomItemForUserInput === "function") {
-      var leftHasContent = hasPhilosopherContentForSide(data, "left");
-      var rightHasContent = hasPhilosopherContentForSide(data, "right");
+      var leftHasContent = hasPhilosopherContentForSide(philNormalized, "left");
+      var rightHasContent = hasPhilosopherContentForSide(philNormalized, "right");
       var sideHint = null;
       if (leftHasContent && !rightHasContent) {
         sideHint = "left";
@@ -294,6 +365,7 @@
 
     var submitBtn = document.getElementById("submit");
     var editorRef = EDAMessageUI.getEditorNode && EDAMessageUI.getEditorNode();
+    lastSentUserMessage = messageToSend;
     // Always add user message via addMessage so it gets annotated (keyword/highlight/strike).
     EDAMessageUI.addMessage("user", messageToSend);
     if (EDAChatInput && EDAChatInput.clear && !deferInputClear) {

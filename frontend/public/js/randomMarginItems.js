@@ -48,6 +48,7 @@
     wrapper.dataset.noteSide = side;
     wrapper.style.position = "absolute";
     wrapper.style.transformOrigin = "top left";
+    wrapper.style.setProperty("--note-rotation", rotationDeg + "deg");
     wrapper.style.transform = "rotate(" + rotationDeg + "deg)";
     if (pos.left != null) wrapper.style.left = pos.left + "px";
     if (pos.right != null) wrapper.style.right = pos.right + "px";
@@ -60,6 +61,7 @@
     img.src = imageUrl;
     img.alt = "";
     img.loading = "lazy";
+    img.draggable = false;
     wrapper.appendChild(img);
 
     return wrapper;
@@ -75,24 +77,37 @@
 
     var notePages = global.notePages;
     if (!notePages || !NoteLayout) return;
-    if (typeof notePages.getOrCreateRegion !== "function") return;
+    if (typeof notePages.getOrCreateNotesLayer !== "function") return;
 
     var side = pickSide(opts.side);
-    var region = notePages.getOrCreateRegion(side);
-    if (!region) return;
+    var layer = notePages.getOrCreateNotesLayer();
+    var zoneBounds = notePages.getZoneBoundsInLayer && notePages.getZoneBoundsInLayer(side);
+    if (!layer || !zoneBounds) return;
 
     var imageUrl = consumeRandomItem();
     if (!imageUrl) return;
 
     var rotationDeg = randomRotationDegWide();
 
-    var index = region.querySelectorAll(".note-page, .margin-item").length;
-    var pos = typeof NoteLayout.stackedPositionInRegion === "function"
-      ? NoteLayout.stackedPositionInRegion(region, side, rotationDeg, ITEM_WIDTH_PX, ITEM_HEIGHT_PX, index)
+    var index = layer.querySelectorAll('.note-page[data-note-side="' + side + '"], .margin-item[data-note-side="' + side + '"]').length;
+    var zoneEl = notePages.getPanel(side);
+    var pos = typeof NoteLayout.stackedPositionInRegion === "function" && zoneEl
+      ? NoteLayout.stackedPositionInRegion(zoneEl, side, rotationDeg, ITEM_WIDTH_PX, ITEM_HEIGHT_PX, index)
       : { left: side === "left" ? 0 : undefined, right: side === "right" ? 0 : undefined, top: 0 };
 
     var wrapper = createMarginItemElement(side, imageUrl, pos, rotationDeg);
-    region.appendChild(wrapper);
+    var zoneOffsetLeft = pos.left != null ? pos.left : (zoneBounds.width - pos.right - ITEM_WIDTH_PX);
+    var zoneOffsetTop = pos.top;
+    wrapper.style.left = (zoneBounds.left + zoneOffsetLeft) + "px";
+    wrapper.style.right = "";
+    wrapper.style.top = (zoneBounds.top + zoneOffsetTop) + "px";
+    wrapper.dataset.zoneOffsetLeft = String(zoneOffsetLeft);
+    wrapper.dataset.zoneOffsetTop = String(zoneOffsetTop);
+
+    layer.appendChild(wrapper);
+    if (notePages && typeof notePages.addEntranceAnimation === "function") {
+      notePages.addEntranceAnimation(wrapper);
+    }
 
     if (NoteElement && typeof NoteElement.registerNoteInteractions === "function") {
       NoteElement.registerNoteInteractions(wrapper, side, {
@@ -101,6 +116,16 @@
             NoteElement.destroyNoteElement(w, s);
           } else if (w && w.parentNode) {
             w.parentNode.removeChild(w);
+          }
+        },
+        onDragEnd: function (w, s) {
+          var zone = notePages.getZoneBoundsInLayer && notePages.getZoneBoundsInLayer(s);
+          if (!zone) return;
+          var left = parseFloat(w.style.left, 10);
+          var top = parseFloat(w.style.top, 10);
+          if (!isNaN(left) && !isNaN(top)) {
+            w.dataset.zoneOffsetLeft = String(left - zone.left);
+            w.dataset.zoneOffsetTop = String(top - zone.top);
           }
         },
       });

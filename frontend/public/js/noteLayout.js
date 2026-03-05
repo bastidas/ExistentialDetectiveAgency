@@ -16,6 +16,7 @@
         return fallback[side] || fallback.left || 32;
       };
   var getEstimateCharsPerLine = (cfg && cfg.getEstimateCharsPerLine) ? cfg.getEstimateCharsPerLine : null;
+  var getEstimateCharsPerLineForPaper = (cfg && typeof cfg.estimateCharsPerLineForPaper === "function") ? cfg.estimateCharsPerLineForPaper : null;
 
   var ROTATION_MIN_DEG = -12;
   var ROTATION_MAX_DEG = 15;
@@ -88,18 +89,70 @@
 
   /**
    * Estimated height (px) the next chunk will need.
+   * @param {string} text - Text to measure
+   * @param {string} side - "left" or "right"
+   * @param {string} [paperUrl] - Optional. When provided, use this paper's chars-per-line so the estimate is correct for that note.
    */
-  function estimateHeightForText(text, side) {
+  function estimateHeightForText(text, side, paperUrl) {
     if (!text || !text.length) return 0;
     var lineHeight = getEstimatedLineHeightPx(side);
-    var charsPerLine = getEstimateCharsPerLine ? getEstimateCharsPerLine(side) : ESTIMATE_CHARS_PER_LINE_FALLBACK;
+    var charsPerLine;
+    if (paperUrl && getEstimateCharsPerLineForPaper) {
+      charsPerLine = getEstimateCharsPerLineForPaper(paperUrl, side);
+    }
+    if (charsPerLine == null || charsPerLine <= 0) {
+      charsPerLine = getEstimateCharsPerLine ? getEstimateCharsPerLine(side) : ESTIMATE_CHARS_PER_LINE_FALLBACK;
+    }
+    if (charsPerLine == null || charsPerLine <= 0) charsPerLine = ESTIMATE_CHARS_PER_LINE_FALLBACK;
     var lines = Math.max(1, Math.ceil(text.length / charsPerLine));
-    return lines * lineHeight;
+    var estimatedPx = lines * lineHeight;
+    // #region agent log
+    if (typeof document !== "undefined" && document.body && document.body.dataset && document.body.dataset.devMode === "true") {
+      var payload = {
+        sessionId: "532d40",
+        runId: "fit-debug",
+        location: "noteLayout.js:estimateHeightForText",
+        message: "height estimate",
+        data: {
+          side: side,
+          textLen: text.length,
+          charsPerLine: charsPerLine,
+          lineHeightPx: lineHeight,
+          lines: lines,
+          estimatedPx: estimatedPx,
+          usedFallbackCharsPerLine: !getEstimateCharsPerLine || getEstimateCharsPerLine(side) == null,
+        },
+        timestamp: Date.now(),
+      };
+      fetch("http://127.0.0.1:7889/ingest/ddcd2c66-b2ca-4bb8-8423-b269323dba2a", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "532d40" },
+        body: JSON.stringify(payload),
+      }).catch(function () {});
+    }
+    // #endregion
+    return estimatedPx;
+  }
+
+  /**
+   * Offset of elt from ancestor by walking offsetParent chain. Uses the same layout coordinate
+   * system as position:absolute inside ancestor, so it stays correct when an outer wrapper is rotated.
+   */
+  function getOffsetRelativeTo(elt, ancestor) {
+    var top = 0, left = 0;
+    var node = elt;
+    while (node && node !== ancestor) {
+      top += node.offsetTop;
+      left += node.offsetLeft;
+      node = node.offsetParent;
+    }
+    return node === ancestor ? { top: top, left: left } : null;
   }
 
   /**
    * True bounding box of the current character text (last chunk) in content coordinates.
-   * For the right philosopher: union of .line span rects. Skips debug overlay when finding last chunk.
+   * For the right philosopher: union of .line span rects in layout (offset) coordinates so the
+   * debug box and spaceAfterBox stay correct when the note wrapper is rotated.
    * @returns {{ top: number, left: number, width: number, height: number } | null}
    */
   function getCurrentTextBounds(contentEl, side) {
@@ -115,27 +168,29 @@
     if (side === "right" && last.classList && last.classList.contains("container")) {
       var spans = last.querySelectorAll(".line span");
       if (spans.length > 0) {
-        var containerRect = last.getBoundingClientRect();
         var minTop = Infinity, minLeft = Infinity, maxBottom = -Infinity, maxRight = -Infinity;
         for (var si = 0; si < spans.length; si++) {
-          var r = spans[si].getBoundingClientRect();
-          if (r.width > 0 || r.height > 0) {
-            var relLeft = r.left - containerRect.left;
-            var relTop = r.top - containerRect.top;
-            var relRight = r.right - containerRect.left;
-            var relBottom = r.bottom - containerRect.top;
-            if (relLeft < minLeft) minLeft = relLeft;
-            if (relTop < minTop) minTop = relTop;
-            if (relRight > maxRight) maxRight = relRight;
-            if (relBottom > maxBottom) maxBottom = relBottom;
+          var span = spans[si];
+          if (span.offsetWidth > 0 || span.offsetHeight > 0) {
+            var off = getOffsetRelativeTo(span, contentEl);
+            if (off) {
+              var sTop = off.top;
+              var sLeft = off.left;
+              var sBottom = sTop + span.offsetHeight;
+              var sRight = sLeft + span.offsetWidth;
+              if (sLeft < minLeft) minLeft = sLeft;
+              if (sTop < minTop) minTop = sTop;
+              if (sRight > maxRight) maxRight = sRight;
+              if (sBottom > maxBottom) maxBottom = sBottom;
+            }
           }
         }
         if (minTop !== Infinity) {
           var trimBottomPx = 24;
           var boxHeight = maxBottom - minTop;
           if (boxHeight > trimBottomPx) boxHeight -= trimBottomPx;
-          topPx = last.offsetTop + minTop;
-          leftPx = last.offsetLeft + minLeft;
+          topPx = minTop;
+          leftPx = minLeft;
           widthPx = maxRight - minLeft;
           heightPx = boxHeight;
         }

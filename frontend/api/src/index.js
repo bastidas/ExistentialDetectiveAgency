@@ -13,7 +13,7 @@ app.http("debug", {
   authLevel: "anonymous",
   route: "debug",
   handler: async (request, context) => {
-    if (!shared.DEBUG) {
+    if (!shared.DEBUG_LOGS) {
       return { status: 404 };
     }
     const sessionId = shared.getOrCreateSessionId(request);
@@ -21,7 +21,9 @@ app.http("debug", {
     const dailyCount = dailyUsageStore.readDailyUsage();
     const promptPreview = shared.getPromptFirstLines(5);
     const body = {
-      devMode: shared.DEV_MODE,
+      devMode: shared.DEV,
+      offline: shared.OFFLINE,
+      debugLogs: true,
       model: shared.MODEL,
       serviceTier: shared.SERVICE_TIER || "(default)",
       promptPreview,
@@ -51,7 +53,7 @@ app.http("config", {
   route: "config",
   handler: async (request, context) => {
     const body = {
-      devMode: !!shared.DEV_MODE,
+      devMode: !!shared.DEV,
       model: shared.MODEL || null,
       serviceTier: shared.SERVICE_TIER || null,
     };
@@ -90,7 +92,7 @@ app.http("chat", {
       ? { "Set-Cookie": shared.sessionCookieHeader(sessionId) }
       : {};
 
-    if (!client && !shared.DEV_MODE) {
+    if (!client && !shared.OFFLINE) {
       return {
         status: 500,
         jsonBody: {
@@ -106,7 +108,7 @@ app.http("chat", {
     const result = await shared.handleChatRequest(sessionId, trimmed, {
       openaiClient: client,
       dailyUsageStore,
-      debug: shared.DEBUG,
+      debug: shared.DEBUG_LOGS,
       contentWidthChars: contentWidthChars ?? undefined,
     });
 
@@ -136,7 +138,7 @@ app.http("philosopherDialog", {
     } catch (_) {}
     const result = await shared.handlePhilosopherDialogRequest(sessionId, body, {
       openaiClient: client,
-      debug: shared.DEBUG,
+      debug: shared.DEBUG_LOGS,
     });
     return {
       status: result.status,

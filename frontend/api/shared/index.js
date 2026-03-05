@@ -45,30 +45,31 @@ const PHIL_ANNOTATIONS_FILE =
 // User-facing responses
 const LEFT_PHILOSOPHER_USER_PROMPT_FILE = path.join(
   PROMPTS_DIR,
-  "left_philospher_user_res.md"
+  "left_philosopher_user_res.md"
 );
 const RIGHT_PHILOSOPHER_USER_PROMPT_FILE = path.join(
   PROMPTS_DIR,
-  "right_philospher_user_res.md"
+  "right_philosopher_user_res.md"
 );
 // Philosopher-to-philosopher responses
 const LEFT_PHILOSOPHER_OTHER_PROMPT_FILE = path.join(
   PROMPTS_DIR,
-  "left_philospher_other_res.md"
+  "left_philosopher_other_res.md"
 );
 const RIGHT_PHILOSOPHER_OTHER_PROMPT_FILE = path.join(
   PROMPTS_DIR,
-  "right_philospher_other_res.md"
+  "right_philosopher_other_res.md"
 );
 
 const MODEL = process.env.OPENAI_MODEL || "gpt-4o";
 const SERVICE_TIER = process.env.OPENAI_SERVICE_TIER || null;
 const MAX_USER_EXCHANGES = parseInt(process.env.MAX_USER_EXCHANGES, 10) || 5;
 const MAX_DAILY_USAGE = parseInt(process.env.MAX_DAILY_USAGE, 10) || 100;
-const DEBUG = /^(1|true|yes)$/i.test(process.env.DEBUG || "");
-const DEV_MODE = process.env.MODE === "dev";
-const DEV_MODE_REPLY =
-  "This is a dev-mode reply. The AI backend is disabled. Set MODE to something other than 'dev' to use the real model.";
+const DEV = /^(1|true|yes)$/i.test(process.env.DEV || "");
+const OFFLINE = /^(1|true|yes)$/i.test(process.env.OFFLINE || "");
+const DEBUG_LOGS = /^(1|true|yes)$/i.test(process.env.DEBUG_LOGS || "");
+const OFFLINE_REPLY =
+  "This is an offline-mode reply. The AI backend is disabled. Set OFFLINE to 0 or unset it to use the real model.";
 
 const FRIENDLY_API_KEY_MESSAGE =
   "The keys to this universe are in your hand, but where is the lock?";
@@ -141,7 +142,8 @@ function getOrCreateSessionHistory(sessionId) {
   return h;
 }
 
-function getStructuredOutputSchema() {
+/** Main chat structured output: 7 keys only (no other_response; philosopher-dialog has its own schema). */
+function getMainChatStructuredOutputSchema() {
   return {
     type: "object",
     properties: {
@@ -154,16 +156,6 @@ function getStructuredOutputSchema() {
         type: "string",
         description: "In-character response from the right philosopher, addressed to the user.",
       },
-      left_philosopher_other_response: {
-        type: "string",
-        description:
-          "In-character response from the left philosopher addressed to or about the other philosopher.",
-      },
-      right_philosopher_other_response: {
-        type: "string",
-        description:
-          "In-character response from the right philosopher addressed to or about the other philosopher.",
-      },
       left_philosopher_notes: {
         type: "array",
         items: { type: "string" },
@@ -174,18 +166,100 @@ function getStructuredOutputSchema() {
         items: { type: "string" },
         description: "Words or phrases the right philosopher jots down.",
       },
+      left_philosopher_callouts: {
+        type: "array",
+        items: {
+          type: "array",
+          items: { type: "string" },
+        },
+        description: "Optional callouts: [[word_or_phrase, mode], ...] with mode one of keyword, highlight, strike. Terms from the user message to annotate.",
+      },
+      right_philosopher_callouts: {
+        type: "array",
+        items: {
+          type: "array",
+          items: { type: "string" },
+        },
+        description: "Optional callouts: [[word_or_phrase, mode], ...] with mode one of keyword, highlight, strike. Terms from the user message to annotate.",
+      },
     },
-required: [
-  "agent_response",
-  "left_philosopher_user_response",
-  "right_philosopher_user_response",
-  "left_philosopher_other_response",
-  "right_philosopher_other_response",
-  "left_philosopher_notes",
-  "right_philosopher_notes",
-],
+    required: [
+      "agent_response",
+      "left_philosopher_user_response",
+      "right_philosopher_user_response",
+      "left_philosopher_notes",
+      "right_philosopher_notes",
+      "left_philosopher_callouts",
+      "right_philosopher_callouts",
+    ],
     additionalProperties: false,
   };
+}
+
+/** Inter-philosopher dialog schema: 2 keys only (other_response per side). */
+function getInterPhilosopherDialogSchema() {
+  return {
+    type: "object",
+    properties: {
+      left_philosopher_other_response: {
+        type: "string",
+        description: "In-character response from the left philosopher to or about the right philosopher.",
+      },
+      right_philosopher_other_response: {
+        type: "string",
+        description: "In-character response from the right philosopher to or about the left philosopher.",
+      },
+    },
+    required: [
+      "left_philosopher_other_response",
+      "right_philosopher_other_response",
+    ],
+    additionalProperties: false,
+  };
+}
+
+/**
+ * Build the combined context used for inter-philosopher dialog: user+detective conversation
+ * plus all left and right philosopher outputs, formatted and organized.
+ * Use this when building the philosopher-dialog request. If we ever want the detective (main call)
+ * to see philosopher history, we can inject the returned sections into the main call context.
+ *
+ * @param {{ messages: Array<{ role: string, content: string }> }} history - Session history with user/assistant messages
+ * @param {Array<{ response?: string, notes?: string[] }>} leftTurns - Left philosopher turn history
+ * @param {Array<{ response?: string, notes?: string[] }>} rightTurns - Right philosopher turn history
+ * @returns {{ conversationText: string, leftHistoryText: string, rightHistoryText: string, combinedForInject: string }}
+ */
+function buildConversationPlusPhilosopherHistoriesContext(history, leftTurns, rightTurns) {
+  const conversationText =
+    (history.messages || [])
+      .map((m) => (m.role === "user" ? "User: " : "Assistant: ") + (m.content || ""))
+      .join("\n\n") || "(No conversation yet.)";
+
+  const leftHistoryText =
+    (leftTurns || [])
+      .map((t, i) => {
+        const r = (t.response || "").trim();
+        const n = Array.isArray(t.notes) ? t.notes.filter(Boolean).join("; ") : "";
+        return `Turn ${i + 1}: ${r}${r && n ? " | Notes: " + n : n ? "Notes: " + n : ""}`;
+      })
+      .join("\n") || "(No left philosopher history yet.)";
+
+  const rightHistoryText =
+    (rightTurns || [])
+      .map((t, i) => {
+        const r = (t.response || "").trim();
+        const n = Array.isArray(t.notes) ? t.notes.filter(Boolean).join("; ") : "";
+        return `Turn ${i + 1}: ${r}${r && n ? " | Notes: " + n : n ? "Notes: " + n : ""}`;
+      })
+      .join("\n") || "(No right philosopher history yet.)";
+
+  const combinedForInject = [
+    "## User–detective conversation\n\n" + conversationText,
+    "## Left philosopher history\n\n" + leftHistoryText,
+    "## Right philosopher history\n\n" + rightHistoryText,
+  ].join("\n\n");
+
+  return { conversationText, leftHistoryText, rightHistoryText, combinedForInject };
 }
 
 function loadAgentPrompt() {
@@ -307,7 +381,7 @@ function loadClosers() {
 
 const VALID_MODES = ["note", "rewrite", "keyword", "strike", "highlight"];
 
-function loadPhilAnnotations() {
+function getPhilAnnotationsCandidates() {
   const publicDataFile = path.resolve(__dirname, "..", "..", "public", "data", "phil_annotations.json");
   const candidates = [
     publicDataFile,
@@ -327,18 +401,25 @@ function loadPhilAnnotations() {
       path.join(path.resolve(process.env.PROMPTS_DIR), "phil_annotations.json")
     );
   }
-  if (DEBUG) {
+  return candidates;
+}
+
+function resolvePhilAnnotationsFilePath() {
+  const candidates = getPhilAnnotationsCandidates();
+  for (const p of candidates) {
+    if (p && fs.existsSync(p)) return p;
+  }
+  return null;
+}
+
+function loadPhilAnnotations() {
+  const candidates = getPhilAnnotationsCandidates();
+  if (DEBUG_LOGS) {
     console.log("[phil-annotations] PHIL_ANNOTATIONS_FILE:", PHIL_ANNOTATIONS_FILE);
     console.log("[phil-annotations] PROMPTS_DIR:", PROMPTS_DIR);
     console.log("[phil-annotations] phil_annotations.json candidates:", candidates);
   }
-  let filePath = null;
-  for (const p of candidates) {
-    if (p && fs.existsSync(p)) {
-      filePath = p;
-      break;
-    }
-  }
+  const filePath = resolvePhilAnnotationsFilePath();
   if (!filePath) {
     console.log("[phil-annotations] File not found. Tried:", candidates);
     return [];
@@ -442,12 +523,21 @@ async function handleBonusTurn(client, history, userCount, dailyUsageStore, debu
     },
     ...realMessages.map((m) => ({ type: "message", role: m.role, content: m.content })),
   ];
+  const createParams = { model: MODEL, input: bonusInput, ...(SERVICE_TIER === "flex" && { service_tier: "flex" }) };
   if (debug) {
     console.log("[DEBUG] Easter egg: using easter_egg_prompt, history has", realMessages.length, "messages (real Q&A only, no closers)");
-    console.log("[DEBUG] Sending to OpenAI (bonus turn):");
-    console.log(JSON.stringify(bonusInput, null, 2));
+    console.log("[DEBUG] Full messages sent to LLM (bonus turn):");
+    console.log(JSON.stringify(createParams.input, null, 2));
+    console.log("[DEBUG] Full createParams (bonus turn):");
+    console.log(JSON.stringify(createParams, null, 2));
   }
-  const createParams = { model: MODEL, input: bonusInput, ...(SERVICE_TIER === "flex" && { service_tier: "flex" }) };
+  if (OFFLINE) {
+    history.messages.push({ role: "assistant", content: OFFLINE_REPLY });
+    history.bonusResponseGiven = true;
+    const body = { reply: OFFLINE_REPLY };
+    if (debug) body.debug = buildDebugBody(userCount, dailyUsageStore.readDailyUsage());
+    return { status: 200, body };
+  }
   const requestOptions = SERVICE_TIER === "flex" ? { timeout: 15 * 60 * 1000 } : undefined;
   const response = await client.responses.create(createParams, requestOptions);
   const replyText = extractOutputText(response) || "(No text in response.)";
@@ -461,21 +551,25 @@ async function handleBonusTurn(client, history, userCount, dailyUsageStore, debu
   return { status: 200, body };
 }
 
+
+// buildChatDeveloperContent builds the developer / system content for the main chat request only 
+// (the single packed call: detective reply + both philosophers’ user-facing response 
+//   + notes + callouts). It’s not used for the philosopher-dialog request.
 function buildChatDeveloperContent(contentWidthChars) {
-  const structuredOutputInstruction = [
+  const mainChatOutputInstruction = [
     "You must respond with a single JSON object with exactly these seven keys (no extra keys):",
-    "agent_response, left_philosopher_user_response, right_philosopher_user_response, left_philosopher_other_response, right_philosopher_other_response, left_philosopher_notes, right_philosopher_notes.",
+    "agent_response, left_philosopher_user_response, right_philosopher_user_response, left_philosopher_notes, right_philosopher_notes, left_philosopher_callouts, right_philosopher_callouts.",
     "agent_response: your reply in character as the existential detective (main reply to the user).",
     "left_philosopher_user_response: a short in-character response from the left philosopher persona, addressed to the user.",
     "right_philosopher_user_response: a short in-character response from the right philosopher persona, addressed to the user.",
-    "left_philosopher_other_response: a short in-character response from the left philosopher persona addressed to or about the right philosopher. On main user turns, leave this as an empty string.",
-    "right_philosopher_other_response: a short in-character response from the right philosopher persona addressed to or about the left philosopher. On main user turns, leave this as an empty string.",
-    "left_philosopher_notes: array of words or phrases the left philosopher jots down.",
-    "right_philosopher_notes: array of words or phrases the right philosopher jots down.",
+    "left_philosopher_notes: array of words or phrases the left philosopher jots down. Use empty array [] if none.",
+    "right_philosopher_notes: array of words or phrases the right philosopher jots down. Use empty array [] if none.",
+    "left_philosopher_callouts: optional array of [word_or_phrase, mode] for terms in the user's last message to annotate. mode is one of: keyword, highlight, strike. Use empty array [] if none.",
+    "right_philosopher_callouts: optional array of [word_or_phrase, mode] for terms in the user's last message to annotate. mode is one of: keyword, highlight, strike. Use empty array [] if none.",
   ].join("\n");
-  const developerParts = [structuredOutputInstruction];
+  const mainChatDeveloperParts = [mainChatOutputInstruction];
   if (typeof contentWidthChars === "number" && contentWidthChars > 0) {
-    developerParts.push(
+    mainChatDeveloperParts.push(
       "## Note paper\n\nThe philosopher note paper has approximately " +
         contentWidthChars +
         " characters per line. Use the full width when helpful—phrases and marginal notes may be longer when the paper is larger."
@@ -484,18 +578,18 @@ function buildChatDeveloperContent(contentWidthChars) {
   const agentPrompt = loadAgentPrompt();
   const leftPhilosopherPrompt = loadLeftPhilosopherPrompt();
   const rightPhilosopherPrompt = loadRightPhilosopherPrompt();
-  if (agentPrompt) developerParts.push("## Agent (existential detective)\n\n" + agentPrompt);
-  if (leftPhilosopherPrompt) developerParts.push("## Left philosopher\n\n" + leftPhilosopherPrompt);
-  if (rightPhilosopherPrompt) developerParts.push("## Right philosopher\n\n" + rightPhilosopherPrompt);
-  return developerParts.join("\n\n---\n\n");
+  if (agentPrompt) mainChatDeveloperParts.push("## Agent (existential detective)\n\n" + agentPrompt);
+  if (leftPhilosopherPrompt) mainChatDeveloperParts.push("## Left philosopher\n\n" + leftPhilosopherPrompt);
+  if (rightPhilosopherPrompt) mainChatDeveloperParts.push("## Right philosopher\n\n" + rightPhilosopherPrompt);
+  return mainChatDeveloperParts.join("\n\n---\n\n");
 }
 
-function parseStructuredResponse(rawText, logPrefix) {
+function parseMainChatResponse(rawText, logPrefix) {
   let parsed;
   try {
     parsed = JSON.parse(rawText || "{}");
   } catch (parseErr) {
-    console.error((logPrefix || "[structured-output]") + " JSON parse failed:", parseErr.message, "raw:", rawText?.slice(0, 200));
+    console.error((logPrefix || "[structured-output]") + " The model left us a note we couldn't decipher:", parseErr.message, "raw:", rawText?.slice(0, 200));
     parsed = {};
   }
   const replyText = parsed.agent_response != null && String(parsed.agent_response).trim()
@@ -509,6 +603,41 @@ function parseStructuredResponse(rawText, logPrefix) {
     parsed.right_philosopher_user_response != null
       ? String(parsed.right_philosopher_user_response)
       : "";
+  const leftPhilosopherNotes = Array.isArray(parsed.left_philosopher_notes)
+    ? parsed.left_philosopher_notes.map((s) => String(s))
+    : [];
+  const rightPhilosopherNotes = Array.isArray(parsed.right_philosopher_notes)
+    ? parsed.right_philosopher_notes.map((s) => String(s))
+    : [];
+  const VALID_CALLOUT_MODES = new Set(["keyword", "highlight", "strike"]);
+  function normalizeCallouts(arr) {
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .filter((entry) => Array.isArray(entry) && entry.length >= 2)
+      .map((entry) => [String(entry[0]).trim(), String(entry[1]).toLowerCase()])
+      .filter(([word, mode]) => word && VALID_CALLOUT_MODES.has(mode));
+  }
+  const leftPhilosopherCallouts = normalizeCallouts(parsed.left_philosopher_callouts);
+  const rightPhilosopherCallouts = normalizeCallouts(parsed.right_philosopher_callouts);
+  return {
+    replyText,
+    leftPhilosopherUserResponse,
+    rightPhilosopherUserResponse,
+    leftPhilosopherNotes,
+    rightPhilosopherNotes,
+    leftPhilosopherCallouts,
+    rightPhilosopherCallouts,
+  };
+}
+
+function parsePhilosopherDialogResponse(rawText, logPrefix) {
+  let parsed;
+  try {
+    parsed = JSON.parse(rawText || "{}");
+  } catch (parseErr) {
+    console.error((logPrefix || "[philosopher-dialog]") + " Parse error:", parseErr.message, "raw:", rawText?.slice(0, 200));
+    parsed = {};
+  }
   const leftPhilosopherOtherResponse =
     parsed.left_philosopher_other_response != null
       ? String(parsed.left_philosopher_other_response)
@@ -517,21 +646,7 @@ function parseStructuredResponse(rawText, logPrefix) {
     parsed.right_philosopher_other_response != null
       ? String(parsed.right_philosopher_other_response)
       : "";
-  const leftPhilosopherNotes = Array.isArray(parsed.left_philosopher_notes)
-    ? parsed.left_philosopher_notes.map((s) => String(s))
-    : [];
-  const rightPhilosopherNotes = Array.isArray(parsed.right_philosopher_notes)
-    ? parsed.right_philosopher_notes.map((s) => String(s))
-    : [];
-  return {
-    replyText,
-    leftPhilosopherUserResponse,
-    rightPhilosopherUserResponse,
-    leftPhilosopherOtherResponse,
-    rightPhilosopherOtherResponse,
-    leftPhilosopherNotes,
-    rightPhilosopherNotes,
-  };
+  return { leftPhilosopherOtherResponse, rightPhilosopherOtherResponse };
 }
 
 function normalizeOpenAIError(err) {
@@ -557,15 +672,6 @@ async function handleChatRequest(sessionId, trimmed, options) {
   const userCount = userExchangeCounts.get(sessionId) ?? 0;
   const history = getOrCreateSessionHistory(sessionId);
   let dailyCount = dailyUsageStore.readDailyUsage();
-
-  if (DEV_MODE) {
-    history.messages.push({ role: "user", content: trimmed });
-    history.messages.push({ role: "assistant", content: DEV_MODE_REPLY });
-    userExchangeCounts.set(sessionId, userCount + 1);
-    const body = { reply: DEV_MODE_REPLY };
-    if (debug) body.debug = buildDebugBody(userCount + 1, dailyCount);
-    return { status: 200, body };
-  }
 
   if (debug) {
     console.log("[DEBUG] user exchanges:", userCount + "/" + MAX_USER_EXCHANGES);
@@ -598,7 +704,7 @@ async function handleChatRequest(sessionId, trimmed, options) {
     try {
       return await handleBonusTurn(client, history, userCount, dailyUsageStore, debug);
     } catch (err) {
-      console.error("OpenAI error (bonus):", err.status ?? 500, err.code || null, err.message);
+      console.error("The final answer remained just out of reach.", err.status ?? 500, err.code || null, err.message);
       return normalizeOpenAIError(err);
     }
   }
@@ -619,24 +725,44 @@ async function handleChatRequest(sessionId, trimmed, options) {
         { type: "message", role: "user", content: trimmed },
       ];
 
-  if (debug) {
-    console.log("[DEBUG] Sending to OpenAI (structured output):");
-    console.log(JSON.stringify(input, null, 2));
-  }
-
-  const schema = getStructuredOutputSchema();
+  const schema = getMainChatStructuredOutputSchema();
   const createParams = {
     model: MODEL,
     input,
     text: { format: { type: "json_schema", name: "existential_detective_response", strict: true, schema } },
     ...(SERVICE_TIER === "flex" && { service_tier: "flex" }),
   };
+  if (debug) {
+    console.log(
+      "[DEBUG] Main chat" + (OFFLINE ? " [NOT SENT - OFFLINE]:" : ":")
+    );
+    console.log("[DEBUG] Full messages sent to LLM (main chat):");
+    console.log(JSON.stringify(createParams.input, null, 2));
+    console.log("[DEBUG] Full createParams (main chat):");
+    console.log(JSON.stringify(createParams, null, 2));
+  }
+  if (OFFLINE) {
+    history.messages.push({ role: "user", content: trimmed });
+    history.messages.push({ role: "assistant", content: OFFLINE_REPLY });
+    userExchangeCounts.set(sessionId, userCount + 1);
+    const body = {
+      reply: OFFLINE_REPLY,
+      leftPhilosopherUserResponse: "",
+      rightPhilosopherUserResponse: "",
+      leftPhilosopherNotes: [],
+      rightPhilosopherNotes: [],
+      leftPhilosopherCallouts: [],
+      rightPhilosopherCallouts: [],
+    };
+    if (debug) body.debug = buildDebugBody(userCount + 1, dailyCount);
+    return { status: 200, body };
+  }
   const requestOptions = SERVICE_TIER === "flex" ? { timeout: 15 * 60 * 1000 } : undefined;
 
   try {
     const response = await client.responses.create(createParams, requestOptions);
     const rawText = extractOutputText(response);
-    const parsed = parseStructuredResponse(rawText, "[structured-output]");
+    const parsed = parseMainChatResponse(rawText, "[structured-output]");
     history.messages.push({ role: "user", content: trimmed });
     history.messages.push({ role: "assistant", content: parsed.replyText });
     userExchangeCounts.set(sessionId, userCount + 1);
@@ -646,16 +772,16 @@ async function handleChatRequest(sessionId, trimmed, options) {
       reply: parsed.replyText,
       leftPhilosopherUserResponse: parsed.leftPhilosopherUserResponse,
       rightPhilosopherUserResponse: parsed.rightPhilosopherUserResponse,
-      leftPhilosopherOtherResponse: parsed.leftPhilosopherOtherResponse,
-      rightPhilosopherOtherResponse: parsed.rightPhilosopherOtherResponse,
       leftPhilosopherNotes: parsed.leftPhilosopherNotes,
       rightPhilosopherNotes: parsed.rightPhilosopherNotes,
+      leftPhilosopherCallouts: parsed.leftPhilosopherCallouts,
+      rightPhilosopherCallouts: parsed.rightPhilosopherCallouts,
     };
     if (debug) body.debug = buildDebugBody(userCount + 1, dailyCount);
     return { status: 200, body };
   } catch (err) {
-    console.error("OpenAI error:", err.status ?? 500, err.code || null, err.message);
-    if (err.status === 400 && err.error) console.error("OpenAI 400 body:", JSON.stringify(err.error, null, 2));
+    console.error("OpenAI (main chat) — the plot thickens:", err.status ?? 500, err.code || null, err.message);
+    if (debug && err.status === 400 && err.error) console.error("OpenAI 400 body:", JSON.stringify(err.error, null, 2));
     return { ...normalizeOpenAIError(err) };
   }
 }
@@ -674,25 +800,10 @@ async function handlePhilosopherDialogRequest(sessionId, body, options) {
     };
   }
 
-  if (!client && !DEV_MODE) {
+  if (!client && !OFFLINE) {
     return {
       status: 500,
       body: { error: FRIENDLY_API_KEY_MESSAGE, errorKind: "server_error" },
-    };
-  }
-
-  if (DEV_MODE) {
-    if (debug) console.log("[DEBUG] Philosopher-dialog: DEV_MODE, returning empty philosopher content.");
-    return {
-      status: 200,
-      body: {
-        leftPhilosopherUserResponse: "",
-        rightPhilosopherUserResponse: "",
-        leftPhilosopherOtherResponse: "",
-        rightPhilosopherOtherResponse: "",
-        leftPhilosopherNotes: [],
-        rightPhilosopherNotes: [],
-      },
     };
   }
 
@@ -702,113 +813,100 @@ async function handlePhilosopherDialogRequest(sessionId, body, options) {
   const leftPhilosopherOtherPrompt = loadLeftPhilosopherOtherPrompt();
   const rightPhilosopherOtherPrompt = loadRightPhilosopherOtherPrompt();
 
-  const conversationText =
-    history.messages
-      .map((m) => (m.role === "user" ? "User: " : "Assistant: ") + (m.content || ""))
-      .join("\n\n") || "(No conversation yet.)";
+  const { conversationText, leftHistoryText, rightHistoryText } =
+    buildConversationPlusPhilosopherHistoriesContext(history, leftTurns, rightTurns);
 
-  const leftHistoryText =
-    leftTurns
-      .map((t, i) => {
-        const r = (t.response || "").trim();
-        const n = Array.isArray(t.notes) ? t.notes.filter(Boolean).join("; ") : "";
-        return `Turn ${i + 1}: ${r}${r && n ? " | Notes: " + n : n ? "Notes: " + n : ""}`;
-      })
-      .join("\n") || "(No left philosopher history yet.)";
-
-  const rightHistoryText =
-    rightTurns
-      .map((t, i) => {
-        const r = (t.response || "").trim();
-        const n = Array.isArray(t.notes) ? t.notes.filter(Boolean).join("; ") : "";
-        return `Turn ${i + 1}: ${r}${r && n ? " | Notes: " + n : n ? "Notes: " + n : ""}`;
-      })
-      .join("\n") || "(No right philosopher history yet.)";
-
-  const taskParts = [];
-  if (requestLeft) taskParts.push("Left philosopher: respond to the right philosopher's recent notes/response (take your holistic metaphysical perspective).");
-  if (requestRight) taskParts.push("Right philosopher: respond to the left philosopher's recent notes/response (take your reductionist metaphysical perspective).");
-  const outputInstruction = [
-    "You must respond with a single JSON object with exactly these seven keys: agent_response, left_philosopher_user_response, right_philosopher_user_response, left_philosopher_other_response, right_philosopher_other_response, left_philosopher_notes, right_philosopher_notes.",
-    "agent_response: leave empty string (this is a philosopher-only turn).",
-    "left_philosopher_user_response and right_philosopher_user_response: leave empty strings (you are not addressing the user on this turn).",
-    "For the philosopher side(s) NOT requested above, use empty string for *_other_response and empty array for notes.",
-    "For the requested side(s): fill the corresponding *_other_response and *_philosopher_notes (short in-character response and list of words/phrases).",
+  const interPhilTaskParts = [];
+  if (requestLeft) interPhilTaskParts.push("Left philosopher: respond to the right philosopher's recent notes/response (take your holistic metaphysical perspective).");
+  if (requestRight) interPhilTaskParts.push("Right philosopher: respond to the left philosopher's recent notes/response (take your reductionist metaphysical perspective).");
+  const interPhilOutputInstruction = [
+    "You must respond with a single JSON object with exactly these two keys: left_philosopher_other_response, right_philosopher_other_response.",
+    "For the philosopher side(s) NOT requested above, use empty string for that key.",
+    "For the requested side(s): fill the corresponding *_other_response with a short in-character response to or about the other philosopher.",
   ].join("\n");
 
-  const developerParts = [
+  const interPhilDeveloperParts = [
     "## Philosopher self-dialog (no main agent reply)",
     "Below is the user–detective conversation, then the left philosopher's history, then the right philosopher's history.",
-    "Your task: " + taskParts.join(" "),
-    outputInstruction,
+    "Your task: " + interPhilTaskParts.join(" "),
+    interPhilOutputInstruction,
     "## User–detective conversation\n\n" + conversationText,
     "## Left philosopher history\n\n" + leftHistoryText,
     "## Right philosopher history\n\n" + rightHistoryText,
   ];
-  if (leftPhilosopherPrompt) developerParts.push("## Left philosopher persona\n\n" + leftPhilosopherPrompt);
-  if (rightPhilosopherPrompt) developerParts.push("## Right philosopher persona\n\n" + rightPhilosopherPrompt);
+  if (leftPhilosopherPrompt) interPhilDeveloperParts.push("## Left philosopher persona\n\n" + leftPhilosopherPrompt);
+  if (rightPhilosopherPrompt) interPhilDeveloperParts.push("## Right philosopher persona\n\n" + rightPhilosopherPrompt);
   if (leftPhilosopherOtherPrompt)
-    developerParts.push(
+    interPhilDeveloperParts.push(
       "## Left philosopher (responding to right philosopher)\n\n" +
         leftPhilosopherOtherPrompt
     );
   if (rightPhilosopherOtherPrompt)
-    developerParts.push(
+    interPhilDeveloperParts.push(
       "## Right philosopher (responding to left philosopher)\n\n" +
         rightPhilosopherOtherPrompt
     );
 
-  const developerContent = developerParts.join("\n\n---\n\n");
+  const developerContent = interPhilDeveloperParts.join("\n\n---\n\n");
   const input = [
     { type: "message", role: "developer", content: developerContent },
   ];
 
-  if (debug) {
-    console.log("[DEBUG] Philosopher-dialog: requestLeft=", requestLeft, "requestRight=", requestRight);
-    console.log("[DEBUG] Philosopher-dialog prompt preview (first 500 chars):", developerContent.slice(0, 500));
-  }
-
-  const schema = getStructuredOutputSchema();
+  const schema = getInterPhilosopherDialogSchema();
   const createParams = {
     model: MODEL,
     input,
     text: {
       format: {
         type: "json_schema",
-        name: "existential_detective_response",
+        name: "philosopher_dialog_response",
         strict: true,
         schema,
       },
     },
     ...(SERVICE_TIER === "flex" && { service_tier: "flex" }),
   };
+  if (debug) {
+    console.log(
+      "[DEBUG] Philosopher-dialog: requestLeft=",
+      requestLeft,
+      "requestRight=",
+      requestRight,
+      OFFLINE ? " [NOT SENT - OFFLINE]" : ""
+    );
+    console.log("[DEBUG] Full messages sent to LLM (philosopher-dialog):");
+    console.log(JSON.stringify(createParams.input, null, 2));
+    console.log("[DEBUG] Full createParams (philosopher-dialog):");
+    console.log(JSON.stringify(createParams, null, 2));
+  }
+  if (OFFLINE) {
+    return {
+      status: 200,
+      body: {
+        leftPhilosopherOtherResponse: "",
+        rightPhilosopherOtherResponse: "",
+      },
+    };
+  }
   const requestOptions = SERVICE_TIER === "flex" ? { timeout: 15 * 60 * 1000 } : undefined;
 
   try {
     const response = await client.responses.create(createParams, requestOptions);
     const rawText = extractOutputText(response);
-    const parsed = parseStructuredResponse(rawText, "[philosopher-dialog]");
+    const parsed = parsePhilosopherDialogResponse(rawText, "[philosopher-dialog]");
     const bodyOut = {
-      leftPhilosopherUserResponse: parsed.leftPhilosopherUserResponse,
-      rightPhilosopherUserResponse: parsed.rightPhilosopherUserResponse,
       leftPhilosopherOtherResponse: parsed.leftPhilosopherOtherResponse,
       rightPhilosopherOtherResponse: parsed.rightPhilosopherOtherResponse,
-      leftPhilosopherNotes: parsed.leftPhilosopherNotes,
-      rightPhilosopherNotes: parsed.rightPhilosopherNotes,
     };
     if (debug) {
       console.log("[DEBUG] Philosopher-dialog response:", {
-        leftUserLen: parsed.leftPhilosopherUserResponse.length,
         leftOtherLen: parsed.leftPhilosopherOtherResponse.length,
-        leftNotes: parsed.leftPhilosopherNotes.length,
-        rightUserLen: parsed.rightPhilosopherUserResponse.length,
         rightOtherLen: parsed.rightPhilosopherOtherResponse.length,
-        rightNotes: parsed.rightPhilosopherNotes.length,
       });
     }
     return { status: 200, body: bodyOut };
   } catch (err) {
-    console.error("OpenAI error (philosopher-dialog):", err.status ?? 500, err.code || null, err.message);
+    console.warn("Margins still thinking marginally (philosopher-dialog).", err.status ?? 500, err.code || null, err.message);
     return normalizeOpenAIError(err);
   }
 }
@@ -827,16 +925,19 @@ module.exports = {
   SERVICE_TIER,
   MAX_USER_EXCHANGES,
   MAX_DAILY_USAGE,
-  DEBUG,
-  DEV_MODE,
-  DEV_MODE_REPLY,
+  DEV,
+  OFFLINE,
+  DEBUG_LOGS,
+  OFFLINE_REPLY,
   FRIENDLY_API_KEY_MESSAGE,
   userExchangeCounts,
   sessionHistories,
   getOrCreateSessionHistory,
   createFileDailyUsageStore,
   createMemoryDailyUsageStore,
-  getStructuredOutputSchema,
+  getMainChatStructuredOutputSchema,
+  getInterPhilosopherDialogSchema,
+  buildConversationPlusPhilosopherHistoriesContext,
   loadAgentPrompt,
   loadLeftPhilosopherPrompt,
   loadRightPhilosopherPrompt,
@@ -844,6 +945,7 @@ module.exports = {
   loadRightPhilosopherOtherPrompt,
   getPromptFirstLines,
   loadClosers,
+  resolvePhilAnnotationsFilePath,
   loadPhilAnnotations,
   loadPhilosopherNotes: loadPhilAnnotations,
   loadEasterEggPrompt,

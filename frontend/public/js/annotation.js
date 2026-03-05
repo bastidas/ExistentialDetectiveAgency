@@ -29,11 +29,12 @@
     return types[Math.floor(Math.random() * types.length)];
   }
 
-  function wrapAnnotationKeywords(text) {
+  function wrapAnnotationKeywords(text, options) {
     if (!text) return "";
     var escaped = EDAUtils.escapeHtml(text);
     var rules = EDARules.getAnnotationRules();
-    if (!rules.length) return escaped;
+    var extraCallouts = (options && options.extraCallouts) || [];
+    if (!rules.length && !extraCallouts.length) return escaped;
 
     var matches = rules.reduce(function (acc, rule) {
       var userText = rule.userText && rule.userText.trim();
@@ -53,6 +54,47 @@
       }
       return acc;
     }, []);
+
+    var staticEnds = matches.map(function (m) {
+      return { start: m.index, end: m.index + m.length };
+    });
+    function rangeOverlaps(start, end) {
+      return staticEnds.some(function (r) {
+        return start < r.end && end > r.start;
+      });
+    }
+
+    extraCallouts.forEach(function (entry) {
+      var userText = (entry && entry.userText != null)
+        ? String(entry.userText).trim()
+        : (Array.isArray(entry) && entry.length >= 2)
+          ? String(entry[0]).trim()
+          : "";
+      var mode = (entry && entry.mode != null)
+        ? String(entry.mode).toLowerCase()
+        : (Array.isArray(entry) && entry.length >= 2)
+          ? String(entry[1]).toLowerCase()
+          : "";
+      if (!userText || !mode) return;
+      if (mode !== "keyword" && mode !== "highlight" && mode !== "strike") return;
+      var re = new RegExp(
+        "\\b(" + EDAUtils.escapeRegex(userText) + ")\\b",
+        "gi"
+      );
+      var match;
+      while ((match = re.exec(escaped)) !== null) {
+        var start = match.index;
+        var end = match.index + match[0].length;
+        if (!rangeOverlaps(start, end)) {
+          matches.push({
+            index: match.index,
+            length: match[0].length,
+            text: match[1],
+            mode: mode,
+          });
+        }
+      }
+    });
 
     matches.sort(function (a, b) {
       if (a.index !== b.index) return a.index - b.index;

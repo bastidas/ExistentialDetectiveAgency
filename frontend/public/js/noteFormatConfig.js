@@ -32,9 +32,9 @@
     left: {
       lineHeight: 1.45,
       paddingTop: "5%",
-      paddingRight: "10%",
+      paddingRight: "5%",
       paddingBottom: "5%",
-      paddingLeft: "8%",
+      paddingLeft: "6%",
       opacity: 0.98,
       color: "#202024",
       fontSize: "1.05rem",
@@ -46,7 +46,7 @@
       paddingTop: "5%",
       paddingRight: "10%",
       paddingBottom: "11%",
-      paddingLeft: "4%",
+      paddingLeft: "7%",
       opacity: 0.93,
       color: "#284283",
       fontSize: "1.12rem",
@@ -57,7 +57,11 @@
   /**
    * Scaling for getContentUsedHeight: raw sum of child offsetHeights is multiplied by
    * base * (side === "right" ? right : left). Tune how "tall" each philosopher's content counts for fitting.
-   */
+//   Used only in getContentHeightScale(side) → notePages.getContentUsedHeight().
+// When we measure how much of the current note is “used,” we sum the children’s offsetHeight and multiply by this scale (base * left or base * right).
+// So it only affects how tall we think the existing content is, not the estimated height of the next chunk.
+// With left: 1, right: 1 it’s effectively a no-op; you’d change it if one side’s content “counts” differently for fitting. 
+//   */
   var CONTENT_HEIGHT_SCALING = {
     base: 1,
     left: 1,
@@ -68,9 +72,13 @@
    * Estimated line height in px for height estimation (need_new_note, estimateHeightForText).
    * Must match the actual visual line height so we don't underestimate and draw new text on top of existing.
    * Right: .line height + padding-bottom = 3rem + 24px + 1.5em (see note-pages.css .right-philosopher .note-page__content .line).
-   */
+  Used in getEstimatedLineHeightPx(side), which is used by:
+NoteLayout.estimateHeightForText() (and thus need_new_note) to estimate how many pixels the next text will need.
+noteCapacity.js for capacity.
+if we use 0 the code doesn't use this constant; it fell back to fontSize × lineHeight from NOTE_FORMAT (~29.57 px). 
+  */
   var ESTIMATE_LINE_HEIGHT_PX = {
-    left: 40,
+    left:  0,
     right: 0,
   };
 
@@ -78,6 +86,66 @@
   var DEFAULT_PAPER_PADDING = { top: 17.5, right: 17.5, bottom: 17.5, left: 17.5 };
 
   var DEFAULT_PAPER_SCALE = 1;
+
+  /** Shared runtime config for note heuristics (notePages, noteQueueManager). Single source of truth. */
+  var NOTE_RUNTIME_CONFIG = global.EDANoteConfig || (global.EDANoteConfig = {});
+  var LONG_NOTE_THRESHOLD = typeof NOTE_RUNTIME_CONFIG.LONG_NOTE_THRESHOLD === "number"
+    ? NOTE_RUNTIME_CONFIG.LONG_NOTE_THRESHOLD
+    : 350;
+  NOTE_RUNTIME_CONFIG.LONG_NOTE_THRESHOLD = LONG_NOTE_THRESHOLD;
+
+  function getLongNoteThreshold() {
+    return LONG_NOTE_THRESHOLD;
+  }
+
+  /**
+   * Short-note (1–3 word) text rotation: random angle applied to philosopher jots.
+   * Easy to find and change. Override via EDANoteConfig (e.g. SINGLE_WORD_ROTATION_ANGLE_MIN).
+   */
+  var SINGLE_WORD_ROTATION_ANGLE_MIN = typeof NOTE_RUNTIME_CONFIG.SINGLE_WORD_ROTATION_ANGLE_MIN === "number"
+    ? NOTE_RUNTIME_CONFIG.SINGLE_WORD_ROTATION_ANGLE_MIN
+    : -6;
+  var SINGLE_WORD_ROTATION_ANGLE_MAX = typeof NOTE_RUNTIME_CONFIG.SINGLE_WORD_ROTATION_ANGLE_MAX === "number"
+    ? NOTE_RUNTIME_CONFIG.SINGLE_WORD_ROTATION_ANGLE_MAX
+    : 6;
+  var SHORT_NOTE_MAX_WORDS = typeof NOTE_RUNTIME_CONFIG.SHORT_NOTE_MAX_WORDS === "number"
+    ? NOTE_RUNTIME_CONFIG.SHORT_NOTE_MAX_WORDS
+    : 3;
+  /** Max number of leading spaces to add to short notes (0..this value inclusive). Override via EDANoteConfig.SHORT_NOTE_LEADING_SPACES_MAX. */
+  var SHORT_NOTE_LEADING_SPACES_MAX = typeof NOTE_RUNTIME_CONFIG.SHORT_NOTE_LEADING_SPACES_MAX === "number"
+    ? NOTE_RUNTIME_CONFIG.SHORT_NOTE_LEADING_SPACES_MAX
+    : 7;
+
+  /**
+   * If text is 1–SHORT_NOTE_MAX_WORDS words (by space count), return a random rotation in
+   * [SINGLE_WORD_ROTATION_ANGLE_MIN, SINGLE_WORD_ROTATION_ANGLE_MAX] degrees; otherwise null.
+   */
+  function getShortNoteRotationDeg(text) {
+    if (text == null || typeof text !== "string") return null;
+    var trimmed = text.trim();
+    if (!trimmed.length) return null;
+    var spaceCount = (trimmed.match(/\s/g) || []).length;
+    var wordCount = spaceCount + 1;
+    if (wordCount > SHORT_NOTE_MAX_WORDS) return null;
+    var min = SINGLE_WORD_ROTATION_ANGLE_MIN;
+    var max = SINGLE_WORD_ROTATION_ANGLE_MAX;
+    return min + Math.random() * (max - min);
+  }
+
+  /**
+   * If text is a short note (1–SHORT_NOTE_MAX_WORDS words), return random 0..SHORT_NOTE_LEADING_SPACES_MAX
+   * (number of spaces to prepend); otherwise return 0.
+   */
+  function getShortNoteLeadingSpacesCount(text) {
+    if (text == null || typeof text !== "string") return 0;
+    var trimmed = text.trim();
+    if (!trimmed.length) return 0;
+    var spaceCount = (trimmed.match(/\s/g) || []).length;
+    var wordCount = spaceCount + 1;
+    if (wordCount > SHORT_NOTE_MAX_WORDS) return 0;
+    var maxSpaces = SHORT_NOTE_LEADING_SPACES_MAX >= 0 ? SHORT_NOTE_LEADING_SPACES_MAX : 0;
+    return maxSpaces === 0 ? 0 : Math.floor(Math.random() * (maxSpaces + 1));
+  }
 
   /**
    * Paper image path -> { padding %, widthFactor, heightFactor, scale }.
@@ -211,11 +279,19 @@
     return s.base * (side === "right" ? s.right : s.left);
   }
 
+  /**
+   * Per-line height (px) for height estimation. Right philosopher uses a fixed .line box in CSS:
+   * height 3rem + padding-bottom calc(24px + 1.5em), so we must match that here to avoid underestimating.
+   */
   function getEstimatedLineHeightPx(side) {
     var explicit = ESTIMATE_LINE_HEIGHT_PX[side];
     if (typeof explicit === "number" && explicit > 0) return explicit;
     var format = NOTE_FORMAT[side] || NOTE_FORMAT.left || {};
     var fontSizePx = parseFontSizePx(format.fontSize);
+    if (side === "right") {
+      var remPx = 16;
+      return 3 * remPx + 24 + 1.5 * fontSizePx;
+    }
     var lineHeight = typeof format.lineHeight === "number" ? format.lineHeight : parseFloat(format.lineHeight);
     if (!lineHeight || !isFinite(lineHeight)) lineHeight = 1.4;
     var computed = fontSizePx * lineHeight;
@@ -402,6 +478,15 @@
     }, 150);
   }
 
+  /** Promise that resolves when paper config has been loaded. Use before first note enqueue. */
+  var paperConfigReady = null;
+
+  function whenPaperConfigLoaded() {
+    if (paperConfigReady) return paperConfigReady;
+    paperConfigReady = loadPaperConfigJson();
+    return paperConfigReady;
+  }
+
   global.NoteFormatConfig = {
     NOTE_FORMAT: NOTE_FORMAT,
     CONTENT_HEIGHT_SCALING: CONTENT_HEIGHT_SCALING,
@@ -421,11 +506,19 @@
     getResponsiveFontScale: getResponsiveFontScale,
     onResponsiveScaleChange: onResponsiveScaleChange,
     loadPaperConfigJson: loadPaperConfigJson,
+    whenPaperConfigLoaded: whenPaperConfigLoaded,
+    getLongNoteThreshold: getLongNoteThreshold,
+    SINGLE_WORD_ROTATION_ANGLE_MIN: SINGLE_WORD_ROTATION_ANGLE_MIN,
+    SINGLE_WORD_ROTATION_ANGLE_MAX: SINGLE_WORD_ROTATION_ANGLE_MAX,
+    SHORT_NOTE_MAX_WORDS: SHORT_NOTE_MAX_WORDS,
+    SHORT_NOTE_LEADING_SPACES_MAX: SHORT_NOTE_LEADING_SPACES_MAX,
+    getShortNoteRotationDeg: getShortNoteRotationDeg,
+    getShortNoteLeadingSpacesCount: getShortNoteLeadingSpacesCount,
     applyNoteFormatToPanels: applyNoteFormatToPanels,
   };
 
   if (typeof window !== "undefined") {
-    loadPaperConfigJson();
+    whenPaperConfigLoaded();
     applyResponsiveViewportScales();
     window.addEventListener("resize", handleViewportResize);
   }

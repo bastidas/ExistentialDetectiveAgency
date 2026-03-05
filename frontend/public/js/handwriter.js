@@ -26,11 +26,12 @@
    * Append and reveal text with a handwriter effect.
    * @param {HTMLElement} containerElement - Parent to append into (#left-philosopher-content or #right-philosopher-content)
    * @param {string} rawText - Plain text to reveal
-   * @param {Object} options - { baseDelayMs, variationMs, useLinedLayout, keywords }
+   * @param {Object} options - { baseDelayMs, variationMs, useLinedLayout, keywords, shortNoteRotationDeg }
    *   - baseDelayMs: base delay per character (e.g. 90)
    *   - variationMs: random 0..variationMs added per character (e.g. 30)
    *   - useLinedLayout: if true, use right-panel lined layout (no keyword underlining in philosopher notes)
    *   - keywords: optional array; if useLinedLayout and keywords.length > 0, underline those words in the note (not used for philosopher notes; only user chat is annotated)
+   *   - shortNoteRotationDeg: optional number; if set, rotate the text block (e.g. for 1–3 word jots)
    * @returns {Promise} Resolves when full text has been revealed
    */
   function appendText(containerElement, rawText, options) {
@@ -46,7 +47,7 @@
     var keywordsForRight = (useLinedLayout && Array.isArray(keywords)) ? keywords : [];
 
     if (!useRight) {
-      return appendTextLeft(containerElement, rawText, baseDelayMs, variationMs);
+      return appendTextLeft(containerElement, rawText, baseDelayMs, variationMs, options);
     }
     return appendTextRight(containerElement, rawText, baseDelayMs, variationMs, keywordsForRight, options);
   }
@@ -55,9 +56,15 @@
     return baseMs + Math.random() * (variationMs || 0);
   }
 
-  function appendTextLeft(container, text, baseDelayMs, variationMs) {
+  function appendTextLeft(container, text, baseDelayMs, variationMs, options) {
+    options = options || {};
     var div = document.createElement("div");
     div.className = "handwritten";
+    if (options.shortNoteRotationDeg != null) {
+      div.style.transform = "rotate(" + options.shortNoteRotationDeg + "deg)";
+      div.style.transformOrigin = "top left";
+      div.style.whiteSpace = "pre-wrap"; /* preserve leading spaces */
+    }
     container.appendChild(div);
     var i = 0;
     return new Promise(function (resolve) {
@@ -84,6 +91,11 @@
     wrap.className = "container";
     if (options.startBelowMarginPx != null && options.startBelowMarginPx !== 0) {
       wrap.style.marginTop = options.startBelowMarginPx + "px";
+    }
+    if (options.shortNoteRotationDeg != null) {
+      wrap.style.transform = "rotate(" + options.shortNoteRotationDeg + "deg)";
+      wrap.style.transformOrigin = "top left";
+      wrap.style.whiteSpace = "pre-wrap"; /* preserve leading spaces */
     }
     container.appendChild(wrap);
 

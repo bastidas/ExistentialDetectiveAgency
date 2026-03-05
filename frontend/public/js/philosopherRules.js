@@ -1,6 +1,11 @@
 (function (global) {
   "use strict";
 
+  // var LEFT_WRITING_SPEED_MS = 0;
+  // var LEFT_WRITING_VARIATION_MS =  0;
+  // var RIGHT_WRITING_SPEED_MS = 0;
+  // var RIGHT_WRITING_VARIATION_MS = 0;
+
   var LEFT_WRITING_SPEED_MS = 15;
   var LEFT_WRITING_VARIATION_MS =  20;
   var RIGHT_WRITING_SPEED_MS = 10;
@@ -31,7 +36,14 @@
     var normalizedSide = side === "right" ? "right" : "left";
     if (noteQueueManager && typeof noteQueueManager.enqueue === "function" && typeof notePages !== "undefined") {
       var writeOptions = Object.assign({}, opts || {});
-      return noteQueueManager.enqueue({ side: normalizedSide, text: text, writeOptions: writeOptions });
+      var job = { side: normalizedSide, text: text, writeOptions: writeOptions };
+      var noteFormatConfig = global.NoteFormatConfig;
+      if (noteFormatConfig && typeof noteFormatConfig.whenPaperConfigLoaded === "function") {
+        return noteFormatConfig.whenPaperConfigLoaded().then(function () {
+          return noteQueueManager.enqueue(job);
+        });
+      }
+      return noteQueueManager.enqueue(job);
     }
     return fallbackHandwriterWrite(normalizedSide, text, opts);
   }
@@ -227,8 +239,7 @@
         philosopherRules = raw.map(createRule);
         console.log(
           "[phil-annotations] Loaded rules (from data/phil_annotations.json):",
-          philosopherRules.length,
-          philosopherRules.length ? philosopherRules : "(none)"
+          philosopherRules.length
         );
       })
       .catch(function (err) {
@@ -252,6 +263,7 @@
     applyRewriteFirst: applyRewriteFirst,
     appendPhilosopherNoteToBothPanels: appendPhilosopherNoteToBothPanels,
     appendPhilosopherContent: appendPhilosopherContent,
+    queueNoteWrite: queueNoteWrite,
     loadRules: loadRules,
     getRulesCount: getRulesCount,
   };
