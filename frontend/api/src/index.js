@@ -92,7 +92,9 @@ app.http("chat", {
       return {
         status: 500,
         jsonBody: {
-          error: "OpenAI API key not configured.",
+          error:
+            shared.FRIENDLY_API_KEY_MESSAGE ||
+            "The keys to this universe are in your hand, but where is the lock?",
           errorKind: "server_error",
         },
         headers,

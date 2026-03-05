@@ -52,6 +52,9 @@ const DEV_MODE = process.env.MODE === "dev";
 const DEV_MODE_REPLY =
   "This is a dev-mode reply. The AI backend is disabled. Set MODE to something other than 'dev' to use the real model.";
 
+const FRIENDLY_API_KEY_MESSAGE =
+  "The keys to this universe are in your hand, but where is the lock?";
+
 const userExchangeCounts = new Map();
 const sessionHistories = new Map();
 
@@ -246,6 +249,11 @@ function loadPhilAnnotations() {
       path.join(path.resolve(process.env.PROMPTS_DIR), "phil_annotations.json")
     );
   }
+  if (DEBUG) {
+    console.log("[phil-annotations] PHIL_ANNOTATIONS_FILE:", PHIL_ANNOTATIONS_FILE);
+    console.log("[phil-annotations] PROMPTS_DIR:", PROMPTS_DIR);
+    console.log("[phil-annotations] phil_annotations.json candidates:", candidates);
+  }
   let filePath = null;
   for (const p of candidates) {
     if (p && fs.existsSync(p)) {
@@ -423,7 +431,14 @@ function parseStructuredResponse(rawText, logPrefix) {
 function normalizeOpenAIError(err) {
   const status = err.status ?? 500;
   const apiCode = err.code || null;
-  const message = err.message || "Something went wrong talking to the model.";
+  let message = err.message || "Something went wrong talking to the model.";
+  if (
+    status === 401 ||
+    (typeof apiCode === "string" && /api_key|auth|authentication/i.test(apiCode)) ||
+    (typeof message === "string" && /api key|authentication/i.test(message))
+  ) {
+    message = FRIENDLY_API_KEY_MESSAGE;
+  }
   let errorKind = "server_error";
   if (status === 400 || status === 422) errorKind = "bad_request";
   else if (status === 429) errorKind = apiCode === "resource_unavailable" ? "flex_busy" : "rate_limit";
@@ -554,7 +569,7 @@ async function handlePhilosopherDialogRequest(sessionId, body, options) {
   if (!client && !DEV_MODE) {
     return {
       status: 500,
-      body: { error: "OpenAI API key not configured.", errorKind: "server_error" },
+      body: { error: FRIENDLY_API_KEY_MESSAGE, errorKind: "server_error" },
     };
   }
 
@@ -686,6 +701,7 @@ module.exports = {
   DEBUG,
   DEV_MODE,
   DEV_MODE_REPLY,
+  FRIENDLY_API_KEY_MESSAGE,
   userExchangeCounts,
   sessionHistories,
   getOrCreateSessionHistory,
