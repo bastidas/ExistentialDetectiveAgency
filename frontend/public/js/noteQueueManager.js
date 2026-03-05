@@ -1,8 +1,17 @@
 (function (global) {
   "use strict";
 
-  var LONG_NOTE_THRESHOLD = 350;
+  // Shared runtime config for note heuristics (also read by notePages).
+  var NOTE_RUNTIME_CONFIG = global.EDANoteConfig || (global.EDANoteConfig = {});
+  var LONG_NOTE_THRESHOLD = typeof NOTE_RUNTIME_CONFIG.LONG_NOTE_THRESHOLD === "number"
+    ? NOTE_RUNTIME_CONFIG.LONG_NOTE_THRESHOLD
+    : 350;
+  NOTE_RUNTIME_CONFIG.LONG_NOTE_THRESHOLD = LONG_NOTE_THRESHOLD;
+
   var LOG_PREFIX = "[note-queue]";
+  // When preferLargerPaper is true, prefer papers whose capacity is at
+  // least this multiple of the required characters, if available.
+  var PREFERRED_CAPACITY_RATIO = 1.5;
 
   var notePages = global.notePages || null;
   var capacityApi = global.NoteCapacity || null;
@@ -62,22 +71,47 @@
       if (idx >= 0) list.splice(idx, 1);
     }
 
-    function pickFromList(list, requiredChars, preferLarger, avoidPaperUrl) {
+    function pickFromList(list, requiredChars, preferLarger, avoidPaperUrl, strictCapacity) {
       if (!list || !list.length) return null;
       var filtered = list.filter(function (entry) {
         return typeof entry.capacity === "number" && entry.capacity >= requiredChars;
       });
-      var candidates = filtered.length ? filtered : list.slice();
+      var candidates;
+      if (filtered.length) {
+        candidates = filtered;
+      } else if (strictCapacity) {
+        // When strictCapacity is true, don't fall back to undersized papers;
+        // signal failure so we can search other pools (spent, rehydrated).
+        return null;
+      } else {
+        candidates = list.slice();
+      }
       if (avoidPaperUrl) {
         candidates = candidates.filter(function (e) { return e.paperUrl !== avoidPaperUrl; });
-        if (!candidates.length) candidates = filtered.length ? filtered : list.slice();
+        if (!candidates.length) {
+          if (filtered.length && !strictCapacity) {
+            candidates = filtered;
+          } else if (!strictCapacity) {
+            candidates = list.slice();
+          } else {
+            return null;
+          }
+        }
       }
       if (!candidates.length) return null;
       if (preferLarger) {
-        candidates.sort(function (a, b) {
+        // First, try to find papers with significantly more capacity than the
+        // current text requires, so long notes land on comfortably large pages
+        // when the pool still has variety.
+        var targetChars = requiredChars * PREFERRED_CAPACITY_RATIO;
+        var oversize = candidates.filter(function (entry) {
+          return typeof entry.capacity === "number" && entry.capacity >= targetChars;
+        });
+        var pool = oversize.length ? oversize : candidates;
+        pool.sort(function (a, b) {
           return (b.capacity || 0) - (a.capacity || 0);
         });
-        return candidates[0];
+        return pool[0];
       }
       var idx = Math.floor(Math.random() * candidates.length);
       return candidates[idx];
@@ -89,7 +123,16 @@
       var sideKey = side === "right" ? "right" : "left";
       var needChars = Math.max(1, requiredChars || 0);
       ensure(sideKey);
-      var entry = pickFromList(available[sideKey], needChars, preferLargerPaper, avoidPaperUrl);
+      // For larger-paper requests, be strict about capacity in the current
+      // pool so we can fall back to spent/rehydrated pools when only very
+      // small notes remain.
+      var entry = pickFromList(
+        available[sideKey],
+        needChars,
+        preferLargerPaper,
+        avoidPaperUrl,
+        !!preferLargerPaper
+      );
       if (entry) {
         removeEntry(available[sideKey], entry);
         spent[sideKey].push(entry);
@@ -98,13 +141,15 @@
         }
         return entry;
       }
-      entry = pickFromList(spent[sideKey], needChars, true, avoidPaperUrl);
+      // Try spent pool next; allow best-available even if slightly undersized.
+      entry = pickFromList(spent[sideKey], needChars, true, avoidPaperUrl, false);
       if (entry) {
         console.log(LOG_PREFIX, "reusing spent paper", entry.paperUrl, sideKey);
         return entry;
       }
       hydrateside(sideKey);
-      return pickFromList(available[sideKey], needChars, true, avoidPaperUrl);
+      // Final fallback: pick the best from a freshly hydrated pool.
+      return pickFromList(available[sideKey], needChars, true, avoidPaperUrl, false);
     }
 
     function snapshot(list) {
@@ -139,38 +184,50 @@
   }
 
   function createQueue(executor) {
-    var pending = [];
-    var running = false;
-    var pauseMs = 0;
+    var queues = {
+      left: { pending: [], running: false, pauseMs: 0 },
+      right: { pending: [], running: false, pauseMs: 0 },
+    };
 
     function setPause(ms) {
-      pauseMs = Math.max(0, Number(ms) || 0);
+      var m = Math.max(0, Number(ms) || 0);
+      queues.left.pauseMs = m;
+      queues.right.pauseMs = m;
     }
 
     function enqueue(job) {
       return new Promise(function (resolve, reject) {
-        pending.push({ job: job, resolve: resolve, reject: reject });
-        drain();
+        var side = job && job.side === "right" ? "right" : "left";
+        queues[side].pending.push({ job: job, resolve: resolve, reject: reject });
+        if (LOG_PREFIX) console.log(LOG_PREFIX, "enqueue -> side:", side, "pending:", queues[side].pending.length, "textLen:", job && job.text ? String(job.text).length : 0);
+        drain(side);
       });
     }
 
-    function drain() {
-      if (running) return;
-      var next = pending.shift();
+    function drain(side) {
+      var q = queues[side];
+      if (q.running) return;
+      var next = q.pending.shift();
       if (!next) return;
-      running = true;
+      q.running = true;
+      try {
+        if (LOG_PREFIX) console.log(LOG_PREFIX, "start job -> side:", side, "textLen:", next.job && next.job.text ? String(next.job.text).length : 0);
+      } catch (e) {}
       executor(next.job)
         .then(function (result) {
           next.resolve(result);
-          return delay(pauseMs);
+          if (LOG_PREFIX) console.log(LOG_PREFIX, "job done -> side:", side);
+          return delay(q.pauseMs);
         })
         .catch(function (err) {
           next.reject(err);
-          return delay(pauseMs);
+          if (LOG_PREFIX) console.log(LOG_PREFIX, "job error -> side:", side, err && err.message ? err.message : err);
+          return delay(q.pauseMs);
         })
         .then(function () {
-          running = false;
-          drain();
+          q.running = false;
+          if (LOG_PREFIX) console.log(LOG_PREFIX, "drain continue -> side:", side, "pending:", q.pending.length);
+          drain(side);
         });
     }
 

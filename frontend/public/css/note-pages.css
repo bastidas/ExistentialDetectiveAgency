@@ -104,7 +104,7 @@
 
 .note-page--dragging {
   cursor: grabbing;
-  box-shadow: 0 24px 40px rgba(0, 0, 0, 0.45);
+  /* Keep container transparent; rely on paper image's own shadow. */
   z-index: 100; /* above chat when dragged over */
 }
 
@@ -112,21 +112,17 @@
 
 .note-page--destroying {
   pointer-events: none;
-  animation: note-page-blur-fade 5s ease-out forwards;
+  animation: note-page-fade-out 0.45s ease-out forwards;
 }
 
-@keyframes note-page-blur-fade {
+@keyframes note-page-fade-out {
   0% {
     opacity: 1;
-    filter: blur(0);
-  }
-  85% {
-    opacity: 1;
-    filter: blur(8px);
+    transform: scale(1);
   }
   100% {
     opacity: 0;
-    filter: blur(8px);
+    transform: scale(0.97);
   }
 }
 
@@ -163,9 +159,31 @@ body:not([data-dev-mode="true"]) .note-page__content.note-page__content--debug-o
   overflow: visible;
 }
 
-/* Non-dev: hide note bounding box + label and text-character-region box */
+/* Dev-only overlays: bounding box, text-region box, and padding box */
+.note-page__debug-padding-box {
+  position: absolute;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  box-sizing: border-box;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.note-page__debug-padding-box > span {
+  position: absolute;
+  top: -14px;
+  left: 0;
+  padding: 1px 4px;
+  font-size: 10px;
+  font-family: sans-serif;
+  background: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  white-space: nowrap;
+}
+
+/* Non-dev: hide note bounding box + label, text-character-region box, and padding box */
 body:not([data-dev-mode="true"]) .note-page__debug-box,
-body:not([data-dev-mode="true"]) .note-page__debug-text-box {
+body:not([data-dev-mode="true"]) .note-page__debug-text-box,
+body:not([data-dev-mode="true"]) .note-page__debug-padding-box {
   display: none !important;
 }
 

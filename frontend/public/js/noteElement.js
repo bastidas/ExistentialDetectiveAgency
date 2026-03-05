@@ -9,7 +9,8 @@
   var NOTE_ACTIVE_CLASS = "note-page--active";
   var NOTE_DRAG_CLASS = "note-page--dragging";
   var NOTE_DESTROY_CLASS = "note-page--destroying";
-  var DESTROY_ANIMATION_MS = 2000;
+  // Keep in sync with CSS animation duration in note-pages.css
+  var DESTROY_ANIMATION_MS = 450;
 
   var noteZIndex = 0;
 
@@ -102,6 +103,8 @@
       if (event.target && event.target.closest && event.target.closest(".note-page__controls")) {
         return;
       }
+      // Prevent text selection/image drag that can cause jumpy drag starts.
+      if (event.preventDefault) event.preventDefault();
       var region = wrapper.parentNode;
       if (!region) return;
       var regionRect = region.getBoundingClientRect();

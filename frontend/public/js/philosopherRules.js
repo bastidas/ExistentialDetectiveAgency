@@ -160,16 +160,32 @@
         : ""
     );
     var seen = {};
-    var chain = Promise.resolve();
+    var leftNotes = [];
+    var rightNotes = [];
+
     noteRules.forEach(function (rule) {
       if (seen[rule.respondText]) return;
       seen[rule.respondText] = true;
-      chain = chain.then(function () {
-        console.log("[phil-annotations] Appending note:", rule.respondText);
-        return appendPhilosopherNoteToBothPanels(rule.respondText);
-      });
+      var writeLeft = Math.random() < LEFT_RIGHT_BIAS;
+      if (writeLeft) leftNotes.push(rule.respondText);
+      else rightNotes.push(rule.respondText);
     });
-    return chain;
+
+    function chainNotesForSide(side, notes) {
+      if (!notes || !notes.length) return Promise.resolve();
+      var baseOpts = SIDE_OPTS[side] || {};
+      var labelPrefix = side === "right" ? "R" : "L";
+      return notes.reduce(function (p, text, idx) {
+        return p.then(function () {
+          console.log("[phil-annotations]", side, "Appending note:", text);
+          var opts = Object.assign({}, baseOpts, { debugLabel: labelPrefix + " " + (idx + 1) + "/" + notes.length });
+          return queueNoteWrite(side, text, opts);
+        });
+      }, Promise.resolve());
+    }
+
+    // Run left and right chains concurrently so different philosophers can write simultaneously.
+    return Promise.all([chainNotesForSide("left", leftNotes), chainNotesForSide("right", rightNotes)]).then(function () { return null; });
   }
 
   function applyRewriteFirst(message) {
@@ -192,11 +208,13 @@
   }
 
   function loadRules() {
-    return fetch("/api/philosopher-notes", { credentials: "same-origin" })
+    // Load directly from public data, similar to paper-config.json.
+    // This avoids backend deployment/file-layout issues.
+    return fetch("data/phil_annotations.json")
       .then(function (res) {
         if (!res.ok) {
           console.log(
-            "[phil-annotations] Fetch failed:",
+            "[phil-annotations] data/phil_annotations.json fetch failed:",
             res.status,
             res.statusText
           );
@@ -204,11 +222,11 @@
         }
         return res.json();
       })
-      .then(function (d) {
-        var raw = d && Array.isArray(d.rules) ? d.rules : [];
+      .then(function (data) {
+        var raw = Array.isArray(data) ? data : [];
         philosopherRules = raw.map(createRule);
         console.log(
-          "[phil-annotations] Loaded rules:",
+          "[phil-annotations] Loaded rules (from data/phil_annotations.json):",
           philosopherRules.length,
           philosopherRules.length ? philosopherRules : "(none)"
         );
@@ -216,7 +234,7 @@
       .catch(function (err) {
         philosopherRules = [];
         console.log(
-          "[phil-annotations] Fetch error:",
+          "[phil-annotations] data/phil_annotations.json fetch error:",
           err && err.message ? err.message : err
         );
       });

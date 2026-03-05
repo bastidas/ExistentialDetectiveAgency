@@ -76,16 +76,6 @@ app.get("/api/debug", (req, res) => {
   });
 });
 
-app.get("/api/philosopher-notes", (req, res) => {
-  const rules = shared.loadPhilAnnotations();
-  console.log(
-    "[phil-annotations] GET /api/philosopher-notes →",
-    rules.length,
-    "rules"
-  );
-  res.json({ rules });
-});
-
 app.post("/api/chat", async (req, res) => {
   const sessionId = getOrCreateSessionId(req, res);
   const message = req.body?.message;

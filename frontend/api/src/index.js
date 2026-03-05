@@ -45,21 +45,6 @@ app.http("debug", {
   },
 });
 
-app.http("philosopherNotes", {
-  methods: ["GET"],
-  authLevel: "anonymous",
-  route: "philosopher-notes",
-  handler: async (request, context) => {
-    const rules = shared.loadPhilAnnotations();
-    context.log(
-      "[phil-annotations] GET /api/philosopher-notes →",
-      rules.length,
-      "rules"
-    );
-    return { status: 200, jsonBody: { rules } };
-  },
-});
-
 app.http("chat", {
   methods: ["POST"],
   authLevel: "anonymous",

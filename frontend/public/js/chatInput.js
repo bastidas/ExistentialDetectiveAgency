@@ -174,11 +174,12 @@
   }
 
   function shouldAllowBlur(target) {
-    return !!(
-      target &&
-      typeof target.closest === "function" &&
-      target.closest(BLUR_BYPASS_SELECTOR)
-    );
+    if (!target || typeof target.closest !== "function") return false;
+    // Allow blur/selection inside regions explicitly marked, or in the chat
+    // transcript area so users can select text from user/assistant messages.
+    if (target.closest(BLUR_BYPASS_SELECTOR)) return true;
+    if (target.closest(".messages")) return true;
+    return false;
   }
 
   function shouldForceFocus() {
@@ -221,6 +222,23 @@
       cancelAnimationFrame(focusRestoreRaf);
       focusRestoreRaf = null;
     }
+  }
+
+  function insertNewlineAtCursor() {
+    if (!editor) return;
+    var text = editor.textContent || editor.innerText || "";
+    var offset =
+      EDAUtils && typeof EDAUtils.getCursorOffset === "function"
+        ? EDAUtils.getCursorOffset(editor)
+        : text.length;
+    var nextText = text.slice(0, offset) + "\n" + text.slice(offset);
+    setValue(nextText);
+    if (EDAUtils && typeof EDAUtils.setCursorOffset === "function") {
+      EDAUtils.setCursorOffset(editor, offset + 1);
+    } else {
+      placeCaretAtEnd(editor);
+    }
+    rememberCursorOffset();
   }
 
   function setupFocusKeeper() {
@@ -272,28 +290,24 @@
 
     var wrapper = editor.parentNode;
     if (wrapper) {
-      cursorEl = document.createElement("div");
-      cursorEl.className = "chat-cursor";
-      cursorEl.setAttribute("aria-hidden", "true");
-      wrapper.style.position = "relative";
-      wrapper.appendChild(cursorEl);
-      /* Click anywhere in the chat area (including padding) to focus editor and show cursor */
+      /* Click anywhere in the chat area (including padding) to focus editor */
       wrapper.addEventListener("click", function (e) {
         if (e.target === editor || editor.contains(e.target)) return;
         editor.focus();
         placeCaretAtEnd(editor);
-        scheduleCursorUpdate();
       });
     }
 
     var form = document.getElementById("form");
     editor.addEventListener("keydown", function (e) {
       if (e.key === "Enter") {
-        e.preventDefault();
         if (e.shiftKey) {
-          document.execCommand("insertLineBreak");
-          applyLiveTypewriter();
+          e.preventDefault();
+          if (!e.repeat) {
+            insertNewlineAtCursor();
+          }
         } else {
+          e.preventDefault();
           var val = getValue();
           if (val.length > 0 && form) {
             if (typeof form.requestSubmit === "function") {

@@ -153,6 +153,9 @@ h1 {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  /* Anchor conversation at the bottom when there are only a few messages,
+     then let the container scroll naturally as it fills. */
+  justify-content: flex-end;
   gap: 1rem;
 }
 

@@ -1,7 +1,11 @@
 (function (global) {
   "use strict";
 
-  /* DEBUG: Set to true only in dev to show bounding box and label on each note. Remove this feature before release. */
+  /* DEBUG: Create bounding box + label on each note.
+   * Visibility is controlled purely by CSS:
+   *   - In dev:  body[data-dev-mode="true"] ...  -> visible
+   *   - Non-dev: body:not([data-dev-mode="true"]) ...  -> hidden
+   */
   var NOTE_DEBUG = true;
 
   var cfg = global.NoteFormatConfig;
@@ -10,8 +14,22 @@
   var getNoteFormat = cfg ? cfg.getNoteFormat : function () { return {}; };
   var getContentHeightScale = cfg ? cfg.getContentHeightScale : function () { return 1; };
 
+  // Shared runtime config for note heuristics (also read by noteQueueManager).
+  var NOTE_RUNTIME_CONFIG = global.EDANoteConfig || (global.EDANoteConfig = {});
+  var LONG_NOTE_THRESHOLD = typeof NOTE_RUNTIME_CONFIG.LONG_NOTE_THRESHOLD === "number"
+    ? NOTE_RUNTIME_CONFIG.LONG_NOTE_THRESHOLD
+    : 350;
+  NOTE_RUNTIME_CONFIG.LONG_NOTE_THRESHOLD = LONG_NOTE_THRESHOLD;
+
   var NoteLayout = global.NoteLayout;
   var NoteElement = global.NoteElement;
+
+  // When viewport is large (desktop >1440px) and the chat has begun scrolling,
+  // new notes can be positioned near the user's most recent message.
+  // Base vertical offset from the last user entry (px).
+  var DYNAMIC_ANCHOR_BASE_OFFSET_PX = 40;
+  // Random jitter added to the base offset for each note (±px).
+  var DYNAMIC_ANCHOR_JITTER_PX = 40;
 
   var state = {
     left: { currentNote: null, contentElement: null, usedHeight: 0, writingAreaHeight: 0 },
@@ -19,6 +37,36 @@
   };
 
   var paperListFallbackWarned = false;
+
+  function isLargeViewport() {
+    if (typeof document === "undefined") return false;
+    var body = document.body;
+    return !!(body && body.dataset && body.dataset.viewport === "large");
+  }
+
+  function getLastUserMessageElement() {
+    if (typeof document === "undefined") return null;
+    var messages = document.getElementById("messages");
+    if (!messages) return null;
+    // Prefer the last explicit user chat bubble; fall back to any user block.
+    var userMessages = messages.querySelectorAll(".message.user");
+    if (userMessages.length > 0) return userMessages[userMessages.length - 1];
+    var userBlocks = messages.querySelectorAll(".chat-user-block");
+    if (userBlocks.length > 0) return userBlocks[userBlocks.length - 1];
+    return null;
+  }
+
+  function chatHasStartedScrolling() {
+    if (typeof document === "undefined") return false;
+    // Treat "started scrolling" as: overall document taller than viewport.
+    var docEl = document.documentElement;
+    if (!docEl) return false;
+    return docEl.scrollHeight > docEl.clientHeight + 1;
+  }
+
+  function randomJitterPx() {
+    return (Math.random() * 2 - 1) * DYNAMIC_ANCHOR_JITTER_PX;
+  }
 
   function getPaperImages() {
     if (cfg && typeof cfg.getPaperImages === "function") {
@@ -116,6 +164,40 @@
     var writingAreaWidth = noteWidth * (1 - (padding.left + padding.right) / 100);
     contentEl.style.height = writingAreaHeight + "px";
     contentEl.style.width = writingAreaWidth + "px";
+
+    if (NOTE_DEBUG) {
+      // Visualize paper padding and computed writing area in dev mode only.
+      var debugBox = paperEl.querySelector(".note-page__debug-padding-box");
+      if (!debugBox) {
+        debugBox = document.createElement("div");
+        debugBox.className = "note-page__debug-padding-box";
+        debugBox.setAttribute("aria-hidden", "true");
+        paperEl.appendChild(debugBox);
+      }
+
+      var topPx = noteHeight * (padding.top / 100);
+      var bottomPx = noteHeight * (padding.bottom / 100);
+      var leftPx = noteWidth * (padding.left / 100);
+      var rightPx = noteWidth * (padding.right / 100);
+      var boxWidth = noteWidth - leftPx - rightPx;
+      var boxHeight = noteHeight - topPx - bottomPx;
+
+      debugBox.style.top = topPx + "px";
+      debugBox.style.left = leftPx + "px";
+      debugBox.style.width = boxWidth + "px";
+      debugBox.style.height = boxHeight + "px";
+
+      var label = debugBox.querySelector("span");
+      if (!label) {
+        label = document.createElement("span");
+        debugBox.appendChild(label);
+      }
+      label.textContent =
+        "pad T:" + padding.top + " R:" + padding.right +
+        " B:" + padding.bottom + " L:" + padding.left +
+        " | area " + Math.round(boxWidth) + "x" + Math.round(boxHeight);
+    }
+
     return { noteWidth: noteWidth, noteHeight: noteHeight, writingAreaHeight: writingAreaHeight };
   }
 
@@ -171,9 +253,6 @@
     var fitsCurrent = spaceAfterBox + estimatedNext <= writingAreaHeight;
 
     console.log(LOG_PREFIX, "  writingAreaHeight:", writingAreaHeight, "baselineBottom:", baselineBottom, "usedHeight:", usedHeight, "padding:", paddingPx, "spaceAfterBox:", spaceAfterBox, "estimatedNext:", estimatedNext, "fits:", fitsCurrent);
-
-    if (fitsCurrent) return { needNew: false };
-
     var papers = getPaperImages();
     var minArea = Infinity;
     var maxArea = 0;
@@ -182,6 +261,36 @@
       if (ha < minArea) minArea = ha;
       if (ha > maxArea) maxArea = ha;
     }
+
+    // Long-note heuristic: even if the text technically fits on the current
+    // note, very long notes should prefer starting on a larger/emptier sheet
+    // when the current paper is small or nearly full.
+    var isLongText = nextText != null && String(nextText).length >= LONG_NOTE_THRESHOLD;
+    if (fitsCurrent && isLongText) {
+      var spaceRemaining = writingAreaHeight - spaceAfterBox; // px remaining before this chunk
+      var textLen = String(nextText).length;
+      var heightPerChar = estimatedNext > 0 && textLen > 0 ? (estimatedNext / textLen) : 0;
+      var remainingCharsApprox = heightPerChar > 0 ? spaceRemaining / heightPerChar : Infinity;
+      var remainingFraction = writingAreaHeight > 0 ? (spaceRemaining / writingAreaHeight) : 0;
+      var isCurrentSmallerThanMax = maxArea > 0 && writingAreaHeight < maxArea;
+      var isPageNearlyFull = remainingFraction < 0.25;
+      var remainingCharsLow = remainingCharsApprox < LONG_NOTE_THRESHOLD * 0.5;
+
+      if (isCurrentSmallerThanMax || isPageNearlyFull || remainingCharsLow) {
+        console.log(LOG_PREFIX, "  -> long note prefers new larger paper even though it fits", {
+          writingAreaHeight: writingAreaHeight,
+          spaceRemaining: spaceRemaining,
+          estimatedNext: estimatedNext,
+          remainingCharsApprox: remainingCharsApprox,
+          minArea: minArea,
+          maxArea: maxArea,
+        });
+        return { needNew: true, preferLargerPaper: true };
+      }
+    }
+
+    if (fitsCurrent) return { needNew: false };
+
     var preferLargerPaper = papers.length > 1 && estimatedNext > minArea;
 
     console.log(LOG_PREFIX, "  -> need new", preferLargerPaper ? "(prefer larger paper)" : "");
@@ -235,7 +344,46 @@
     var noteWidth = size.width;
     var noteHeight = size.height;
     var noteIndex = region.querySelectorAll(".note-page").length;
+
+    // Default: stacked layout inside the philosopher panel.
     var pos = NoteLayout.stackedPositionInRegion(region, side, rotationDeg, noteWidth, noteHeight, noteIndex);
+
+    // On large desktop, once the chat content has started scrolling, try to
+    // anchor NEW notes near the user's most recent entry, offset by a
+    // configurable amount with jitter.
+    if (isLargeViewport() && chatHasStartedScrolling()) {
+      var anchorEl = getLastUserMessageElement();
+      if (anchorEl && typeof anchorEl.getBoundingClientRect === "function") {
+        var regionRect = region.getBoundingClientRect();
+        var anchorRect = anchorEl.getBoundingClientRect();
+        var aabb = NoteLayout.rotatedNoteAABB(rotationDeg, noteWidth, noteHeight);
+        var regionHeight = region.clientHeight;
+
+        var topMin = Math.max(0, -aabb.minY);
+        var topMax = Math.min(regionHeight, regionHeight - aabb.maxY);
+
+        var baseOffset = DYNAMIC_ANCHOR_BASE_OFFSET_PX + randomJitterPx();
+        var idealTop = (anchorRect.bottom - regionRect.top) + baseOffset;
+        var anchoredTop = Math.max(topMin, Math.min(topMax, idealTop));
+
+        var regionWidth = region.clientWidth;
+        if (side === "left") {
+          var leftMin = Math.max(0, -aabb.minX);
+          var leftMax = Math.min(regionWidth, regionWidth - aabb.maxX);
+          var leftRange = Math.max(0, Math.floor(leftMax - leftMin));
+          var left = leftRange > 0 ? leftMin + Math.floor(Math.random() * (leftRange + 1)) : leftMin;
+          left = Math.max(leftMin, Math.min(left, leftMax));
+          pos = { left: left, right: undefined, top: anchoredTop };
+        } else {
+          var rightMin = Math.max(0, aabb.maxX - noteWidth);
+          var rightMax = Math.min(regionWidth, regionWidth - noteWidth + aabb.minX);
+          var rightRange = Math.max(0, Math.floor(rightMax - rightMin));
+          var right = rightRange > 0 ? rightMin + Math.floor(Math.random() * (rightRange + 1)) : rightMin;
+          right = Math.max(rightMin, Math.min(right, rightMax));
+          pos = { left: undefined, right: right, top: anchoredTop };
+        }
+      }
+    }
 
     var created = NoteElement.createNoteElement(side, paperUrl, pos, rotationDeg, size);
     applyNoteFormatStyles(created.contentEl, side);

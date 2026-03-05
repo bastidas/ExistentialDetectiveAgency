@@ -93,7 +93,11 @@
   { "userText": "differance", "respondText": "", "mode": "strike" },
   { "userText": "simulacrum", "respondText": "", "mode": "strike" },
   { "userText": "immanence", "respondText": "", "mode": "keyword" },
+   { "userText": "aether", "respondText": "", "mode": "keyword" },
   { "userText": "transcendence", "respondText": "", "mode": "highlight" },
   { "userText": "sublime", "respondText": "", "mode": "highlight" },
-  { "userText": "sublimation", "respondText": "", "mode": "highlight" }
+  { "userText": "sublimation", "respondText": "", "mode": "highlight" },
+  {"userText": "alpha", "respondText": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Ut sodales posuere fermentum. Morbi sit amet convallis dui, vitae feugiat erat. Donec in odio sed nibh suscipit varius egestas vitae lacus. Maecenas fringilla massa sit amet tellus tincidunt, in volutpat tortor venenatis. Proin ac justo lorem. Quisque nec dui dignissim, ultricies mi eget, convallis felis. Nam magna lectus, pellentesque et porttitor sed, facilisis quis tortor. Integer nunc felis, commodo sit amet sodales eu, eleifend vitae est. Integer id mi vitae sapien varius maximus at nec quam. Donec eu ex id leo euismod pellentesque.", "mode": "note" },
+  { "userText": "beta", "respondText": "Maecenas egestas, nunc sit amet pellentesque laoreet, felis augue volutpat risus, nec maximus arcu sapien efficitur dolor. Maecenas aliquam ante magna, in vehicula eros consequat in.", "mode": "note"},
+  { "userText": "gamma", "respondText": "vitae lacus!", "mode": "note" }
 ]

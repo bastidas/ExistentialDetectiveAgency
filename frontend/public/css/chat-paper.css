@@ -125,10 +125,17 @@ main .visually-hidden {
 /* Editor wrapper and contenteditable: document measure, like a shared letter */
 main .chat-editor-wrapper {
   position: relative;
-  min-height: 2em;
+  min-height: 6em;
   width: 100%;
   max-width: 70ch;
   cursor: text;
+}
+
+/* Dev/debug: highlight the clickable text entry region so it's easy to see
+   where clicks will focus the editor and move the custom cursor. */
+body[data-dev-mode="true"] main .chat-editor-wrapper {
+  outline: 2px solid #00ff66;
+  outline-offset: 4px;
 }
 
 @media (max-width: 640px) {
@@ -143,7 +150,7 @@ main .chat-editor {
   min-height: 2em;
   padding: 0 0 0.25em 0;
   outline: none;
-  caret-color: transparent;
+  caret-color: currentColor;
 }
 
 main .chat-editor:empty::before {
