@@ -37,6 +37,30 @@
   transition: transform 0.25s ease, box-shadow 0.25s ease;
 }
 
+.margin-item {
+  position: absolute;
+  z-index: 0;
+  flex-shrink: 0;
+  border: none;
+  outline: none;
+  box-shadow: none;
+  cursor: grab;
+  pointer-events: auto;
+}
+
+.margin-item__image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(4px 4px 5px rgba(0, 0, 0, 0.5));
+}
+
+.margin-item:hover .note-page__close {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .note-page__paper {
   position: relative;
   background-size: cover;

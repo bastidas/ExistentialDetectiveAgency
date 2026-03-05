@@ -43,7 +43,7 @@ main .messages .chat-editor-wrapper {
 }
 
 main .message.assistant {
-  align-self: flex-end;
+  align-self: flex-start;
 }
 
 main .message .label {
@@ -78,6 +78,7 @@ main .message.assistant .content {
   border: none;
   color: var(--chat-text, #1a1a1a);
 }
+
 
 body[data-dev-mode="true"] main .message.user .content,
 body[data-dev-mode="true"] main .message.assistant .content {

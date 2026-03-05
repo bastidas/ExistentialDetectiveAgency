@@ -174,8 +174,8 @@ h1 {
 }
 
 .message.assistant {
-  align-items: flex-end;
-  align-self: flex-end;
+  align-items: flex-start;
+  align-self: flex-start;
 }
 
 .message .label {
@@ -220,9 +220,9 @@ h1 {
 }
 
 .message.assistant .content {
-  align-self: flex-end;
-  text-align: right;
-  padding-right: 1.5rem;
+  align-self: flex-start;
+  text-align: left;
+  padding-left: 1.5rem;
   background: transparent;
   border: none;
 }

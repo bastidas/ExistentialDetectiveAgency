@@ -75,7 +75,7 @@
   }
 
   function applyDevModeFlag() {
-    fetch("/api/config", { credentials: "same-origin" })
+    return fetch("/api/config", { credentials: "same-origin" })
       .then(function (res) { return res.ok ? res.json() : null; })
       .then(function (d) {
         if (d && document.body) {
@@ -89,8 +89,11 @@
     if (chatRuntimeBound) return;
     chatRuntimeBound = true;
 
-    applyDevModeFlag();
-    debugOnLoad();
+    applyDevModeFlag().then(function () {
+      if (document.body && document.body.dataset.devMode === "true") {
+        debugOnLoad();
+      }
+    });
 
     var form = document.getElementById("form");
     if (!form) {

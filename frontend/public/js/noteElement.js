@@ -107,16 +107,11 @@
       if (event.preventDefault) event.preventDefault();
       var region = wrapper.parentNode;
       if (!region) return;
-      var regionRect = region.getBoundingClientRect();
       var noteRect = wrapper.getBoundingClientRect();
       activePointerId = event.pointerId;
       dragState = {
-        startX: event.clientX,
-        startY: event.clientY,
-        startLeft: noteRect.left - regionRect.left,
-        startTop: noteRect.top - regionRect.top,
-        regionLeft: regionRect.left,
-        regionTop: regionRect.top,
+        pointerOffsetX: event.clientX - noteRect.left,
+        pointerOffsetY: event.clientY - noteRect.top,
       };
       if (wrapper.setPointerCapture) {
         wrapper.setPointerCapture(activePointerId);
@@ -127,10 +122,11 @@
 
     wrapper.addEventListener("pointermove", function (event) {
       if (activePointerId == null || event.pointerId !== activePointerId || !dragState) return;
-      var dx = event.clientX - dragState.startX;
-      var dy = event.clientY - dragState.startY;
-      var nextLeft = dragState.startLeft + dx;
-      var nextTop = dragState.startTop + dy;
+      var region = wrapper.parentNode;
+      if (!region) return;
+      var regionRect = region.getBoundingClientRect();
+      var nextLeft = event.clientX - regionRect.left - dragState.pointerOffsetX;
+      var nextTop = event.clientY - regionRect.top - dragState.pointerOffsetY;
       wrapper.style.left = nextLeft + "px";
       wrapper.style.right = "";
       wrapper.style.top = nextTop + "px";

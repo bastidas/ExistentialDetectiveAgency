@@ -45,6 +45,23 @@ app.http("debug", {
   },
 });
 
+app.http("config", {
+  methods: ["GET"],
+  authLevel: "anonymous",
+  route: "config",
+  handler: async (request, context) => {
+    const body = {
+      devMode: !!shared.DEV_MODE,
+      model: shared.MODEL || null,
+      serviceTier: shared.SERVICE_TIER || null,
+    };
+    return {
+      status: 200,
+      jsonBody: body,
+    };
+  },
+});
+
 app.http("chat", {
   methods: ["POST"],
   authLevel: "anonymous",

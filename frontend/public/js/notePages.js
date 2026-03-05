@@ -554,6 +554,8 @@
     NOTE_BOX_PADDING_PX: NoteLayout.NOTE_BOX_PADDING_PX,
     NOTE_STACK_OFFSET_PCT: NoteLayout.NOTE_STACK_OFFSET_PCT,
     NOTE_STACK_JITTER_PCT: NoteLayout.NOTE_STACK_JITTER_PCT,
+    getPanel: getPanel,
+    getOrCreateRegion: getOrCreateRegion,
     bring_note_to_front: bringNoteToFront,
     destroy_note: destroyNoteElement,
   };

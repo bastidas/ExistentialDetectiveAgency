@@ -74,6 +74,103 @@
   }
 
   /**
+   * Animate assistant text into a container with a typewriter-style reveal.
+   * Uses the existing per-character styling but reveals characters over time
+   * instead of inserting the full string at once.
+   */
+  function animateAssistantText(container, text, options) {
+    if (!container) return;
+    var msg = String(text || "");
+    if (!msg) {
+      container.textContent = "";
+      return;
+    }
+
+    var opts = options || {};
+    var cfg = (global.EDAUtils && global.EDAUtils.TYPING_CONFIG) || {};
+    var charsPerTick =
+      typeof opts.charsPerTick === "number" && opts.charsPerTick > 0
+        ? opts.charsPerTick
+        : (typeof cfg.assistantCharsPerTick === "number" && cfg.assistantCharsPerTick > 0
+            ? cfg.assistantCharsPerTick
+            : 3);
+    var tickMs =
+      typeof opts.tickMs === "number" && opts.tickMs > 0
+        ? opts.tickMs
+        : (typeof cfg.assistantTickMs === "number" && cfg.assistantTickMs > 0
+            ? cfg.assistantTickMs
+            : 20);
+    var maxChars =
+      typeof cfg.assistantMaxChars === "number" && cfg.assistantMaxChars > 0
+        ? cfg.assistantMaxChars
+        : 0;
+
+    // Respect reduced motion preferences by disabling the animation and
+    // falling back to an instant render.
+    var prefersReducedMotion = false;
+    try {
+      if (typeof window !== "undefined" && window.matchMedia) {
+        prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      }
+    } catch (e) {}
+
+    var respectReduced = cfg.respectReducedMotion !== false;
+
+    if ((respectReduced && prefersReducedMotion) || opts.instant === true) {
+      container.innerHTML = typewriterWrapText(msg);
+      return;
+    }
+
+    container.innerHTML = "";
+    var index = 0;
+    var total = msg.length;
+
+    if (maxChars && total > maxChars) {
+      container.innerHTML = typewriterWrapText(msg);
+      return;
+    }
+
+    function appendChunk() {
+      if (index >= total) {
+        return;
+      }
+      var end = index + charsPerTick;
+      if (end > total) end = total;
+
+      var fragment = document.createDocumentFragment();
+      for (var i = index; i < end; i++) {
+        var spanHtml = typewriterWrapChar(msg[i]);
+        var tmp = document.createElement("span");
+        tmp.innerHTML = spanHtml;
+        while (tmp.firstChild) {
+          fragment.appendChild(tmp.firstChild);
+        }
+      }
+      container.appendChild(fragment);
+
+      var messages = document.getElementById("messages");
+      if (messages) {
+        messages.scrollTop = messages.scrollHeight;
+      }
+
+      index = end;
+      if (index < total) {
+        var variation =
+          typeof cfg.assistantTickVariationMs === "number" && cfg.assistantTickVariationMs > 0
+            ? cfg.assistantTickVariationMs
+            : 0;
+        var delay = tickMs;
+        if (variation > 0) {
+          delay = tickMs + Math.floor(Math.random() * variation);
+        }
+        setTimeout(appendChunk, delay);
+      }
+    }
+
+    appendChunk();
+  }
+
+  /**
    * Returns the character offset (0-based index) before the cursor.
    * Walks all nodes in document order so text nodes inserted by the browser are counted.
    */
@@ -151,6 +248,7 @@
     typewriterWrapText: typewriterWrapText,
     typewriterWrapTextForEditor: typewriterWrapTextForEditor,
     applyTypewriterToElement: applyTypewriterToElement,
+    animateAssistantText: animateAssistantText,
     getCursorOffset: getCursorOffset,
     setCursorOffset: setCursorOffset,
   };

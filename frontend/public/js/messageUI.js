@@ -49,10 +49,14 @@
         EDAUtils.applyTypewriterToElement(content);
       }
     } else {
-      content.innerHTML =
-        EDAUtils && EDAUtils.typewriterWrapText
-          ? EDAUtils.typewriterWrapText(text)
-          : EDAUtils.escapeHtml(text);
+      if (EDAUtils && EDAUtils.animateAssistantText) {
+        EDAUtils.animateAssistantText(content, text);
+      } else {
+        content.innerHTML =
+          EDAUtils && EDAUtils.typewriterWrapText
+            ? EDAUtils.typewriterWrapText(text)
+            : (EDAUtils && EDAUtils.escapeHtml ? EDAUtils.escapeHtml(text) : text);
+      }
     }
     div.appendChild(label);
     div.appendChild(content);

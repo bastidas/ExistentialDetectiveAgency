@@ -13,8 +13,10 @@ This document is the single place to see how to change prompts, data files, note
 | `prompt.md` | Main agent system prompt |
 | `closers.md` | Conversation closing lines |
 | `easter_egg_prompt.md` | Easter egg prompt |
-| `left_philospher.md` | Left philosopher persona and instructions |
-| `right_philospher.md` | Right philosopher persona and instructions |
+| `left_philospher_user_res.md` | Left philosopher persona and instructions when addressing the user (produces `left_philosopher_user_response` and `left_philosopher_notes`) |
+| `left_philospher_other_res.md` | Left philosopher persona and instructions when responding to the right philosopher (produces `left_philosopher_other_response`) |
+| `right_philospher_user_res.md` | Right philosopher persona and instructions when addressing the user (produces `right_philosopher_user_response` and `right_philosopher_notes`) |
+| `right_philospher_other_res.md` | Right philosopher persona and instructions when responding to the left philosopher (produces `right_philosopher_other_response`) |
 | `phil_annotations.json` | Rules for notes/annotations (same format as `public/data/phil_annotations.json`); used by the API when deployed so annotations load without `public/data` |
 
 Edit these files to change what the agent and philosophers are told to do. The backend (Express and Azure API) reads from this directory (or from `PROMPTS_DIR` if set).
@@ -91,6 +93,23 @@ Edit these files to change what the agent and philosophers are told to do. The b
 
 ---
 
+## 6. Typing config (detective replies)
+
+**What it controls:** How the detective's chat replies are "typed" on screen: speed (characters per step), delay between steps, whether very long replies animate, and whether to respect users' reduced-motion preferences.
+
+**Where:** `public/js/typingConfig.js`
+
+| Key (in `TYPING_CONFIG`) | Meaning |
+|---------------------------|---------|
+| `assistantCharsPerTick` | Number of characters revealed per animation step. Higher = faster typing. |
+| `assistantTickMs` | Delay between animation steps in milliseconds. Lower = faster typing. |
+| `assistantMaxChars` | Maximum reply length (in characters) to animate. If a reply is longer than this, it is rendered instantly instead of typed out. Set to `0` to always animate the full reply. |
+| `respectReducedMotion` | When `true`, skips the typing animation for users who have `prefers-reduced-motion: reduce` enabled, and shows the full reply instantly. |
+
+**Used by:** `js/utils.js` → `EDAUtils.animateAssistantText`, which is called from `js/messageUI.js` when rendering assistant (detective) messages.
+
+---
+
 ## Quick reference: “I want to change…”
 
 | Goal | File | What to edit |
@@ -103,6 +122,7 @@ Edit these files to change what the agent and philosophers are told to do. The b
 | Chat markup colors / duration / stroke per philosopher | `js/annotationConfig.js` | `ANNOTATION_PHILOSOPHER_SETTINGS.left` / `.right` |
 | Chat markup mode → RoughNotation type | `js/annotationConfig.js` | `ANNOTATION_MODE_TO_TYPES` |
 | Main chat column colors, margins, editor, cursor, divider | `js/chatConfig.js` | `CHAT_STYLE` (then call `applyChatStyle()`) |
+| Detective typing speed and behavior | `js/typingConfig.js` | `TYPING_CONFIG.assistantCharsPerTick`, `.assistantTickMs`, `.assistantMaxChars`, `.respectReducedMotion` |
 | Agent or philosopher instructions | `api/prompts/*.md` | Edit the corresponding `.md` file |
 
 ---
@@ -117,6 +137,7 @@ Edit these files to change what the agent and philosophers are told to do. The b
 | `js/annotationConfig.js` | Annotation fallback color, mode→types, per-philosopher settings |
 | `js/noteFormatConfig.js` | Note format, paper config loading, estimation constants, `applyNoteFormatToPanels()` |
 | `js/chatConfig.js` | Chat column style object and `applyChatStyle()` |
+| `js/typingConfig.js` | Typing behavior for detective chat replies (used by `EDAUtils.animateAssistantText()`) |
 | `js/annotation.js` | Uses AnnotationConfig; wraps keywords and applies RoughNotation |
 | `js/notePages.js` | Uses NoteFormatConfig (paper list, padding, size, note format); creates notes and applies `--note-*` to content |
 | `css/note-pages.css` | Uses `--note-*` for `.note-page__content` |

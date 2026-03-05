@@ -30,9 +30,11 @@
   /** True if any philosopher response/notes field is present. */
   function hasPhilosopherContent(data) {
     return !!(
-      data.leftPhilosopherResponse ||
+      data.leftPhilosopherUserResponse ||
+      data.leftPhilosopherOtherResponse ||
       (Array.isArray(data.leftPhilosopherNotes) && data.leftPhilosopherNotes.length > 0) ||
-      data.rightPhilosopherResponse ||
+      data.rightPhilosopherUserResponse ||
+      data.rightPhilosopherOtherResponse ||
       (Array.isArray(data.rightPhilosopherNotes) && data.rightPhilosopherNotes.length > 0)
     );
   }
@@ -41,22 +43,48 @@
   function hasPhilosopherContentForSide(data, side) {
     var s = (side === "right" ? "right" : "left");
     if (s === "left") {
-      return !!(data.leftPhilosopherResponse || (Array.isArray(data.leftPhilosopherNotes) && data.leftPhilosopherNotes.length));
+      return !!(
+        data.leftPhilosopherUserResponse ||
+        data.leftPhilosopherOtherResponse ||
+        (Array.isArray(data.leftPhilosopherNotes) && data.leftPhilosopherNotes.length)
+      );
     }
-    return !!(data.rightPhilosopherResponse || (Array.isArray(data.rightPhilosopherNotes) && data.rightPhilosopherNotes.length));
+    return !!(
+      data.rightPhilosopherUserResponse ||
+      data.rightPhilosopherOtherResponse ||
+      (Array.isArray(data.rightPhilosopherNotes) && data.rightPhilosopherNotes.length)
+    );
   }
 
-  /** Normalize API response to payload { left: { response, notes }, right: { response, notes } }. */
+  /** Normalize API response to payload { left: { response, notes }, right: { response, notes } }.
+   *  Combines user-facing and other-philosopher-facing responses into a single stream per side,
+   *  marking the other-philosopher response so it reads as a distinct marginal remark.
+   */
   function toPhilosopherPayload(data) {
+    function buildSidePayload(userKey, otherKey, notesKey) {
+      var userText = (data[userKey] || "").trim();
+      var otherText = (data[otherKey] || "").trim();
+      var pieces = [];
+      if (userText) pieces.push(userText);
+      if (otherText) {
+        // Visually distinguish philosopher-to-philosopher remarks without changing layout.
+        pieces.push("[To the other philosopher] " + otherText);
+      }
+      var combined = pieces.join("\n\n");
+      var notes = Array.isArray(data[notesKey]) ? data[notesKey] : [];
+      return { response: combined, notes: notes };
+    }
     return {
-      left: {
-        response: data.leftPhilosopherResponse || "",
-        notes: Array.isArray(data.leftPhilosopherNotes) ? data.leftPhilosopherNotes : [],
-      },
-      right: {
-        response: data.rightPhilosopherResponse || "",
-        notes: Array.isArray(data.rightPhilosopherNotes) ? data.rightPhilosopherNotes : [],
-      },
+      left: buildSidePayload(
+        "leftPhilosopherUserResponse",
+        "leftPhilosopherOtherResponse",
+        "leftPhilosopherNotes"
+      ),
+      right: buildSidePayload(
+        "rightPhilosopherUserResponse",
+        "rightPhilosopherOtherResponse",
+        "rightPhilosopherNotes"
+      ),
     };
   }
 
@@ -175,6 +203,17 @@
     console.log("[DEBUG] Main chat response received; philosopher fields present:", hasPhilosopherContent(data));
     EDAMessageUI.addMessage("assistant", data.reply || "(No reply)", editorRef);
     handlePhilosopherContent(data);
+    if (global.EDARandomMarginItems && typeof global.EDARandomMarginItems.maybeDropRandomItemForUserInput === "function") {
+      var leftHasContent = hasPhilosopherContentForSide(data, "left");
+      var rightHasContent = hasPhilosopherContentForSide(data, "right");
+      var sideHint = null;
+      if (leftHasContent && !rightHasContent) {
+        sideHint = "left";
+      } else if (rightHasContent && !leftHasContent) {
+        sideHint = "right";
+      }
+      global.EDARandomMarginItems.maybeDropRandomItemForUserInput({ side: sideHint });
+    }
     if (Array.isArray(data.philosopherNotes) && data.philosopherNotes.length > 0) {
       var seq = Promise.resolve();
       data.philosopherNotes.forEach(function (note) {

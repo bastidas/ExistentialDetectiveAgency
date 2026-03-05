@@ -40,8 +40,26 @@ const EASTER_EGG_PROMPT_FILE =
 const PHIL_ANNOTATIONS_FILE =
   process.env.PHIL_ANNOTATIONS_FILE ||
   path.join(PROMPTS_DIR, "phil_annotations.json");
-const LEFT_PHILOSOPHER_PROMPT_FILE = path.join(PROMPTS_DIR, "left_philospher.md");
-const RIGHT_PHILOSOPHER_PROMPT_FILE = path.join(PROMPTS_DIR, "right_philospher.md");
+
+// Philosopher persona prompts
+// User-facing responses
+const LEFT_PHILOSOPHER_USER_PROMPT_FILE = path.join(
+  PROMPTS_DIR,
+  "left_philospher_user_res.md"
+);
+const RIGHT_PHILOSOPHER_USER_PROMPT_FILE = path.join(
+  PROMPTS_DIR,
+  "right_philospher_user_res.md"
+);
+// Philosopher-to-philosopher responses
+const LEFT_PHILOSOPHER_OTHER_PROMPT_FILE = path.join(
+  PROMPTS_DIR,
+  "left_philospher_other_res.md"
+);
+const RIGHT_PHILOSOPHER_OTHER_PROMPT_FILE = path.join(
+  PROMPTS_DIR,
+  "right_philospher_other_res.md"
+);
 
 const MODEL = process.env.OPENAI_MODEL || "gpt-4o";
 const SERVICE_TIER = process.env.OPENAI_SERVICE_TIER || null;
@@ -128,26 +146,44 @@ function getStructuredOutputSchema() {
     type: "object",
     properties: {
       agent_response: { type: "string", description: "Your reply in character as the existential detective." },
-      left_philosopher_response: { type: "string", description: "In-character response from the left philosopher." },
+      left_philosopher_user_response: {
+        type: "string",
+        description: "In-character response from the left philosopher, addressed to the user.",
+      },
+      right_philosopher_user_response: {
+        type: "string",
+        description: "In-character response from the right philosopher, addressed to the user.",
+      },
+      left_philosopher_other_response: {
+        type: "string",
+        description:
+          "In-character response from the left philosopher addressed to or about the other philosopher.",
+      },
+      right_philosopher_other_response: {
+        type: "string",
+        description:
+          "In-character response from the right philosopher addressed to or about the other philosopher.",
+      },
       left_philosopher_notes: {
         type: "array",
         items: { type: "string" },
         description: "Words or phrases the left philosopher jots down.",
       },
-      right_philosopher_response: { type: "string", description: "In-character response from the right philosopher." },
       right_philosopher_notes: {
         type: "array",
         items: { type: "string" },
         description: "Words or phrases the right philosopher jots down.",
       },
     },
-    required: [
-      "agent_response",
-      "left_philosopher_response",
-      "left_philosopher_notes",
-      "right_philosopher_response",
-      "right_philosopher_notes",
-    ],
+required: [
+  "agent_response",
+  "left_philosopher_user_response",
+  "right_philosopher_user_response",
+  "left_philosopher_other_response",
+  "right_philosopher_other_response",
+  "left_philosopher_notes",
+  "right_philosopher_notes",
+],
     additionalProperties: false,
   };
 }
@@ -165,22 +201,64 @@ function loadAgentPrompt() {
 
 function loadLeftPhilosopherPrompt() {
   try {
-    if (fs.existsSync(LEFT_PHILOSOPHER_PROMPT_FILE)) {
-      return fs.readFileSync(LEFT_PHILOSOPHER_PROMPT_FILE, "utf8").trim();
+    if (fs.existsSync(LEFT_PHILOSOPHER_USER_PROMPT_FILE)) {
+      return fs.readFileSync(LEFT_PHILOSOPHER_USER_PROMPT_FILE, "utf8").trim();
     }
   } catch (err) {
-    console.warn("Could not load left philosopher prompt from", LEFT_PHILOSOPHER_PROMPT_FILE, err.message);
+    console.warn(
+      "Could not load left philosopher prompt from",
+      LEFT_PHILOSOPHER_USER_PROMPT_FILE,
+      err.message
+    );
   }
   return null;
 }
 
 function loadRightPhilosopherPrompt() {
   try {
-    if (fs.existsSync(RIGHT_PHILOSOPHER_PROMPT_FILE)) {
-      return fs.readFileSync(RIGHT_PHILOSOPHER_PROMPT_FILE, "utf8").trim();
+    if (fs.existsSync(RIGHT_PHILOSOPHER_USER_PROMPT_FILE)) {
+      return fs.readFileSync(RIGHT_PHILOSOPHER_USER_PROMPT_FILE, "utf8").trim();
     }
   } catch (err) {
-    console.warn("Could not load right philosopher prompt from", RIGHT_PHILOSOPHER_PROMPT_FILE, err.message);
+    console.warn(
+      "Could not load right philosopher prompt from",
+      RIGHT_PHILOSOPHER_USER_PROMPT_FILE,
+      err.message
+    );
+  }
+  return null;
+}
+
+function loadLeftPhilosopherOtherPrompt() {
+  try {
+    if (fs.existsSync(LEFT_PHILOSOPHER_OTHER_PROMPT_FILE)) {
+      return fs
+        .readFileSync(LEFT_PHILOSOPHER_OTHER_PROMPT_FILE, "utf8")
+        .trim();
+    }
+  } catch (err) {
+    console.warn(
+      "Could not load left philosopher 'other' prompt from",
+      LEFT_PHILOSOPHER_OTHER_PROMPT_FILE,
+      err.message
+    );
+  }
+  return null;
+}
+
+function loadRightPhilosopherOtherPrompt() {
+  try {
+    if (fs.existsSync(RIGHT_PHILOSOPHER_OTHER_PROMPT_FILE)) {
+      return fs
+        .readFileSync(RIGHT_PHILOSOPHER_OTHER_PROMPT_FILE, "utf8")
+        .trim();
+    }
+  } catch (err) {
+    console.warn(
+      "Could not load right philosopher 'other' prompt from",
+      RIGHT_PHILOSOPHER_OTHER_PROMPT_FILE,
+      err.message
+    );
   }
   return null;
 }
@@ -385,12 +463,14 @@ async function handleBonusTurn(client, history, userCount, dailyUsageStore, debu
 
 function buildChatDeveloperContent(contentWidthChars) {
   const structuredOutputInstruction = [
-    "You must respond with a single JSON object with exactly these five keys (no extra keys):",
-    "agent_response, left_philosopher_response, left_philosopher_notes, right_philosopher_response, right_philosopher_notes.",
+    "You must respond with a single JSON object with exactly these seven keys (no extra keys):",
+    "agent_response, left_philosopher_user_response, right_philosopher_user_response, left_philosopher_other_response, right_philosopher_other_response, left_philosopher_notes, right_philosopher_notes.",
     "agent_response: your reply in character as the existential detective (main reply to the user).",
-    "left_philosopher_response: a short in-character response from the left philosopher persona.",
+    "left_philosopher_user_response: a short in-character response from the left philosopher persona, addressed to the user.",
+    "right_philosopher_user_response: a short in-character response from the right philosopher persona, addressed to the user.",
+    "left_philosopher_other_response: a short in-character response from the left philosopher persona addressed to or about the right philosopher. On main user turns, leave this as an empty string.",
+    "right_philosopher_other_response: a short in-character response from the right philosopher persona addressed to or about the left philosopher. On main user turns, leave this as an empty string.",
     "left_philosopher_notes: array of words or phrases the left philosopher jots down.",
-    "right_philosopher_response: a short in-character response from the right philosopher persona.",
     "right_philosopher_notes: array of words or phrases the right philosopher jots down.",
   ].join("\n");
   const developerParts = [structuredOutputInstruction];
@@ -421,11 +501,37 @@ function parseStructuredResponse(rawText, logPrefix) {
   const replyText = parsed.agent_response != null && String(parsed.agent_response).trim()
     ? String(parsed.agent_response).trim()
     : rawText?.trim() || "(No reply.)";
-  const leftPhilosopherResponse = parsed.left_philosopher_response != null ? String(parsed.left_philosopher_response) : "";
-  const leftPhilosopherNotes = Array.isArray(parsed.left_philosopher_notes) ? parsed.left_philosopher_notes.map((s) => String(s)) : [];
-  const rightPhilosopherResponse = parsed.right_philosopher_response != null ? String(parsed.right_philosopher_response) : "";
-  const rightPhilosopherNotes = Array.isArray(parsed.right_philosopher_notes) ? parsed.right_philosopher_notes.map((s) => String(s)) : [];
-  return { replyText, leftPhilosopherResponse, leftPhilosopherNotes, rightPhilosopherResponse, rightPhilosopherNotes };
+  const leftPhilosopherUserResponse =
+    parsed.left_philosopher_user_response != null
+      ? String(parsed.left_philosopher_user_response)
+      : "";
+  const rightPhilosopherUserResponse =
+    parsed.right_philosopher_user_response != null
+      ? String(parsed.right_philosopher_user_response)
+      : "";
+  const leftPhilosopherOtherResponse =
+    parsed.left_philosopher_other_response != null
+      ? String(parsed.left_philosopher_other_response)
+      : "";
+  const rightPhilosopherOtherResponse =
+    parsed.right_philosopher_other_response != null
+      ? String(parsed.right_philosopher_other_response)
+      : "";
+  const leftPhilosopherNotes = Array.isArray(parsed.left_philosopher_notes)
+    ? parsed.left_philosopher_notes.map((s) => String(s))
+    : [];
+  const rightPhilosopherNotes = Array.isArray(parsed.right_philosopher_notes)
+    ? parsed.right_philosopher_notes.map((s) => String(s))
+    : [];
+  return {
+    replyText,
+    leftPhilosopherUserResponse,
+    rightPhilosopherUserResponse,
+    leftPhilosopherOtherResponse,
+    rightPhilosopherOtherResponse,
+    leftPhilosopherNotes,
+    rightPhilosopherNotes,
+  };
 }
 
 function normalizeOpenAIError(err) {
@@ -538,9 +644,11 @@ async function handleChatRequest(sessionId, trimmed, options) {
     dailyUsageStore.writeDailyUsage(dailyCount);
     const body = {
       reply: parsed.replyText,
-      leftPhilosopherResponse: parsed.leftPhilosopherResponse,
+      leftPhilosopherUserResponse: parsed.leftPhilosopherUserResponse,
+      rightPhilosopherUserResponse: parsed.rightPhilosopherUserResponse,
+      leftPhilosopherOtherResponse: parsed.leftPhilosopherOtherResponse,
+      rightPhilosopherOtherResponse: parsed.rightPhilosopherOtherResponse,
       leftPhilosopherNotes: parsed.leftPhilosopherNotes,
-      rightPhilosopherResponse: parsed.rightPhilosopherResponse,
       rightPhilosopherNotes: parsed.rightPhilosopherNotes,
     };
     if (debug) body.debug = buildDebugBody(userCount + 1, dailyCount);
@@ -578,9 +686,11 @@ async function handlePhilosopherDialogRequest(sessionId, body, options) {
     return {
       status: 200,
       body: {
-        leftPhilosopherResponse: "",
+        leftPhilosopherUserResponse: "",
+        rightPhilosopherUserResponse: "",
+        leftPhilosopherOtherResponse: "",
+        rightPhilosopherOtherResponse: "",
         leftPhilosopherNotes: [],
-        rightPhilosopherResponse: "",
         rightPhilosopherNotes: [],
       },
     };
@@ -589,6 +699,8 @@ async function handlePhilosopherDialogRequest(sessionId, body, options) {
   const history = getOrCreateSessionHistory(sessionId);
   const leftPhilosopherPrompt = loadLeftPhilosopherPrompt();
   const rightPhilosopherPrompt = loadRightPhilosopherPrompt();
+  const leftPhilosopherOtherPrompt = loadLeftPhilosopherOtherPrompt();
+  const rightPhilosopherOtherPrompt = loadRightPhilosopherOtherPrompt();
 
   const conversationText =
     history.messages
@@ -617,10 +729,11 @@ async function handlePhilosopherDialogRequest(sessionId, body, options) {
   if (requestLeft) taskParts.push("Left philosopher: respond to the right philosopher's recent notes/response (take your holistic metaphysical perspective).");
   if (requestRight) taskParts.push("Right philosopher: respond to the left philosopher's recent notes/response (take your reductionist metaphysical perspective).");
   const outputInstruction = [
-    "You must respond with a single JSON object with exactly these five keys: agent_response, left_philosopher_response, left_philosopher_notes, right_philosopher_response, right_philosopher_notes.",
+    "You must respond with a single JSON object with exactly these seven keys: agent_response, left_philosopher_user_response, right_philosopher_user_response, left_philosopher_other_response, right_philosopher_other_response, left_philosopher_notes, right_philosopher_notes.",
     "agent_response: leave empty string (this is a philosopher-only turn).",
-    "For the philosopher side(s) NOT requested above, use empty string for response and empty array for notes.",
-    "For the requested side(s): left_philosopher_response / left_philosopher_notes and/or right_philosopher_response / right_philosopher_notes as usual (short in-character response and list of words/phrases).",
+    "left_philosopher_user_response and right_philosopher_user_response: leave empty strings (you are not addressing the user on this turn).",
+    "For the philosopher side(s) NOT requested above, use empty string for *_other_response and empty array for notes.",
+    "For the requested side(s): fill the corresponding *_other_response and *_philosopher_notes (short in-character response and list of words/phrases).",
   ].join("\n");
 
   const developerParts = [
@@ -634,6 +747,16 @@ async function handlePhilosopherDialogRequest(sessionId, body, options) {
   ];
   if (leftPhilosopherPrompt) developerParts.push("## Left philosopher persona\n\n" + leftPhilosopherPrompt);
   if (rightPhilosopherPrompt) developerParts.push("## Right philosopher persona\n\n" + rightPhilosopherPrompt);
+  if (leftPhilosopherOtherPrompt)
+    developerParts.push(
+      "## Left philosopher (responding to right philosopher)\n\n" +
+        leftPhilosopherOtherPrompt
+    );
+  if (rightPhilosopherOtherPrompt)
+    developerParts.push(
+      "## Right philosopher (responding to left philosopher)\n\n" +
+        rightPhilosopherOtherPrompt
+    );
 
   const developerContent = developerParts.join("\n\n---\n\n");
   const input = [
@@ -666,16 +789,20 @@ async function handlePhilosopherDialogRequest(sessionId, body, options) {
     const rawText = extractOutputText(response);
     const parsed = parseStructuredResponse(rawText, "[philosopher-dialog]");
     const bodyOut = {
-      leftPhilosopherResponse: parsed.leftPhilosopherResponse,
+      leftPhilosopherUserResponse: parsed.leftPhilosopherUserResponse,
+      rightPhilosopherUserResponse: parsed.rightPhilosopherUserResponse,
+      leftPhilosopherOtherResponse: parsed.leftPhilosopherOtherResponse,
+      rightPhilosopherOtherResponse: parsed.rightPhilosopherOtherResponse,
       leftPhilosopherNotes: parsed.leftPhilosopherNotes,
-      rightPhilosopherResponse: parsed.rightPhilosopherResponse,
       rightPhilosopherNotes: parsed.rightPhilosopherNotes,
     };
     if (debug) {
       console.log("[DEBUG] Philosopher-dialog response:", {
-        leftLen: parsed.leftPhilosopherResponse.length,
+        leftUserLen: parsed.leftPhilosopherUserResponse.length,
+        leftOtherLen: parsed.leftPhilosopherOtherResponse.length,
         leftNotes: parsed.leftPhilosopherNotes.length,
-        rightLen: parsed.rightPhilosopherResponse.length,
+        rightUserLen: parsed.rightPhilosopherUserResponse.length,
+        rightOtherLen: parsed.rightPhilosopherOtherResponse.length,
         rightNotes: parsed.rightPhilosopherNotes.length,
       });
     }
@@ -692,8 +819,10 @@ module.exports = {
   CLOSERS_FILE,
   EASTER_EGG_PROMPT_FILE,
   PHIL_ANNOTATIONS_FILE,
-  LEFT_PHILOSOPHER_PROMPT_FILE,
-  RIGHT_PHILOSOPHER_PROMPT_FILE,
+  LEFT_PHILOSOPHER_USER_PROMPT_FILE,
+  RIGHT_PHILOSOPHER_USER_PROMPT_FILE,
+  LEFT_PHILOSOPHER_OTHER_PROMPT_FILE,
+  RIGHT_PHILOSOPHER_OTHER_PROMPT_FILE,
   MODEL,
   SERVICE_TIER,
   MAX_USER_EXCHANGES,
@@ -711,6 +840,8 @@ module.exports = {
   loadAgentPrompt,
   loadLeftPhilosopherPrompt,
   loadRightPhilosopherPrompt,
+  loadLeftPhilosopherOtherPrompt,
+  loadRightPhilosopherOtherPrompt,
   getPromptFirstLines,
   loadClosers,
   loadPhilAnnotations,
