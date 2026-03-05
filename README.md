@@ -29,6 +29,3 @@ Unified landing, querent chat, and poem experiences served from `frontend/public
 ## Deployment notes
 - Azure Static Web Apps consumes `frontend/public/staticwebapp.config.json`, which already rewrites unknown paths to `/index.html` while excluding `/api/*` and `/assets/*`. No extra configuration is needed for the History API router.
 - The `frontend` server continues to serve `public/index.html` for any GET without an extension, so deep links like `/q` and `/p` work locally and in production.
-
-## Legacy `yang/` project
-- Keep the directory for historical comparison, but treat it as read-only. Any new work (assets, scripts, or styles) must land under `frontend/` so the merged document stays authoritative.

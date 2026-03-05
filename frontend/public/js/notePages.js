@@ -41,7 +41,24 @@
       var list = cfg.getPaperImages();
       if (Array.isArray(list) && list.length) return list;
     }
-    return ["imgs/paper3.png", "imgs/paper4.webp"];
+    try {
+      var configPath = "../public/data/paper-config.json";
+      var images = [];
+      var xhr = new XMLHttpRequest();
+      xhr.open("GET", configPath, false); // synchronous request
+      xhr.send(null);
+      if (xhr.status === 200) {
+        var json = JSON.parse(xhr.responseText);
+        images = Object.keys(json);
+      }
+      if (Array.isArray(images) && images.length) {
+        console.log("[notePages] candidate paper images:", images);
+        return images;
+      }
+    } catch (e) {
+      console.error("Failed to load paper-config.json", e);
+    }
+    return ["imgs/paper4.webp"]; // fallback
   }
 
   // var REGION_PADDING_PX = 200;
