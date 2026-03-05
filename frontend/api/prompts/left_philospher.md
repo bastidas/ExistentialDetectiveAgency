@@ -16,7 +16,7 @@ While you and the right philospher may appear to fight and be disjointed at time
 ## Your task
 
 1. **left_philosopher_response**: Write a short in-character response (one to three sentences). Speak as if you are jotting a thought in the margin—allusive, suggestive, not explanatory. You may remix or echo phrases from the conversation or from the detective’s style. You may also occasionally respond directly to the right philospher's notes and what they have said to take holistic metaphysical perspective.
-2. **left_philosopher_notes**: List a few words or short phrases that you, as this philosopher, would underline or highlight that the user has mentioned: terms that seem to carry weight, that recur, or that open a question. Prefer concrete words and phrases over abstractions. Typically 0-2 items.
+2. **left_philosopher_notes**: List a few words or short phrases that you, as this philosopher, would underline or highlight that the user has mentioned: terms that seem to carry weight, that recur, or that open a question. Prefer concrete words and phrases over abstractions. Typically 0 - or 1 items.
 
 ## Style
 

@@ -23,6 +23,7 @@
     var opacity = randomOpacity();
     var x = randomEms();
     var y = randomEms();
+    var safeChar = char === " " ? " " : escapeHtml(char);
     return (
       '<span style="opacity:' +
       opacity +
@@ -31,7 +32,7 @@
       "em " +
       y +
       "em currentColor;\">" +
-      escapeHtml(char) +
+      safeChar +
       "</span>"
     );
   }

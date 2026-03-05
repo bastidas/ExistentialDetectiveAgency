@@ -1,8 +1,6 @@
 (function () {
   "use strict";
 
-  var SENTENCE_DURATION = 3;
-  var SENTENCE_DURATION_VAR = 1.5;
   var STORAGE_KEY = "existential-detective-effect-prefs";
 
   var SELECTED_EFFECTS = [
@@ -142,6 +140,8 @@
   var ALL_EFFECTS = SELECTED_EFFECTS.concat(OUTRO_EFFECTS);
   var EFFECTS_BY_CATEGORY = buildEffectsByCategory();
 
+  var DEFAULT_HOLD_TIME_SECONDS = 3;
+
   var poemState = {
     initialized: false,
     routeActive: false,
@@ -157,6 +157,7 @@
     elements: {},
     videoLoaded: false,
     loading: false,
+    holdTimeSeconds: DEFAULT_HOLD_TIME_SECONDS,
   };
 
   function initPoem() {
@@ -267,35 +268,80 @@
     }
   }
 
+  /**
+   * Split poem text into segments. A segment ends at a period or question mark.
+   * The last run of text (with no . or ?) is always one segment (last line is end).
+   * Preserves the author's spaces and line breaks within each segment.
+   */
+  function parsePoemSegments(text) {
+    var segments = [];
+    var pos = 0;
+    var len = text.length;
+    while (pos < len) {
+      var nextPeriod = text.indexOf(".", pos);
+      var nextQuestion = text.indexOf("?", pos);
+      var nextEnd = -1;
+      if (nextPeriod >= 0 && nextQuestion >= 0) {
+        nextEnd = Math.min(nextPeriod, nextQuestion);
+      } else if (nextPeriod >= 0) {
+        nextEnd = nextPeriod;
+      } else if (nextQuestion >= 0) {
+        nextEnd = nextQuestion;
+      }
+      if (nextEnd === -1) {
+        var rest = text.slice(pos).trim();
+        /* Skip trailing punctuation-only (e.g. stray '.' at end of file) */
+        if (rest.length > 0 && !/^[.\?\s]+$/.test(rest)) segments.push(rest);
+        break;
+      }
+      var segment = text.slice(pos, nextEnd + 1).trim();
+      if (segment.length > 0) segments.push(segment);
+      pos = nextEnd + 1;
+    }
+    return segments;
+  }
+
+  function pickRandomPoemFile(poemsMeta) {
+    var keys = Object.keys(poemsMeta);
+    if (!keys.length) return null;
+    return keys[Math.floor(Math.random() * keys.length)];
+  }
+
   function loadPoemLines() {
     if (poemState.loading) return;
     poemState.loading = true;
     if (poemState.elements.line) {
       poemState.elements.line.textContent = "Loading poem...";
     }
-    fetch("data/poem.md")
+    fetch("data/poems.json")
       .then(function (response) {
-        if (!response.ok) throw new Error("Failed to fetch poem");
-        return response.text();
+        if (!response.ok) throw new Error("Failed to fetch poems.json");
+        return response.json();
+      })
+      .then(function (poemsMeta) {
+        var poemFile = pickRandomPoemFile(poemsMeta);
+        if (!poemFile) throw new Error("No poems in poems.json");
+        var config = poemsMeta[poemFile] || {};
+        var holdTime = config.hold_time;
+        poemState.holdTimeSeconds = typeof holdTime === "number" && holdTime >= 0
+          ? holdTime
+          : DEFAULT_HOLD_TIME_SECONDS;
+        return fetch("data/" + poemFile).then(function (res) {
+          if (!res.ok) throw new Error("Failed to fetch poem: " + poemFile);
+          return res.text();
+        });
       })
       .then(function (text) {
-        var lines = text
-          .split(/\r?\n/)
-          .map(function (line) {
-            return line.trim();
-          })
-          .filter(function (line) {
-            return line.length > 0;
-          });
+        var lines = parsePoemSegments(text);
         poemState.lines = lines;
         poemState.currentIndex = 0;
         if (poemState.elements.line) {
-          poemState.elements.line.textContent = lines.length ? lines[0] : "Add content to poem.md to begin.";
+          poemState.elements.line.textContent = lines.length ? lines[0] : "Add poems to poems.json and data/ to begin.";
         }
         maybeStartPlayback();
       })
       .catch(function (error) {
-        console.warn("[poem] Unable to load poem lines", error);
+        console.warn("[poem] Unable to load poem", error);
         if (poemState.elements.line) {
           poemState.elements.line.textContent = "Unable to load poem.";
         }
@@ -329,7 +375,7 @@
 
   function enterHoldPhase() {
     poemState.currentPhase = "hold";
-    var holdMs = (SENTENCE_DURATION + Math.random() * SENTENCE_DURATION_VAR) * 1000;
+    var holdMs = poemState.holdTimeSeconds * 1000;
     scheduleTimer(holdMs, startOutroPhase);
   }
 

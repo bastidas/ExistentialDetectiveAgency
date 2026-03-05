@@ -52,6 +52,10 @@ app.get("*", (req, res, next) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
+app.get("/api/config", (req, res) => {
+  res.json({ devMode: !!shared.DEV_MODE });
+});
+
 app.get("/api/debug", (req, res) => {
   if (!shared.DEBUG) return res.status(404).end();
   const sessionId = getOrCreateSessionId(req, res);

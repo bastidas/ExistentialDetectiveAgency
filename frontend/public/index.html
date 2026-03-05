@@ -43,26 +43,26 @@
         </div>
         <main class="content">
           <section class="landing-gallery" aria-label="Select an artifact">
-            <p class="landing-tagline">choose your instrument</p>
+            <p class="landing-tagline"></p>
             <div class="landing-grid">
               <a href="/q" class="landing-card landing-card--glass" data-route-link aria-label="Enter the querent chat">
                 <div class="landing-image-wrap">
                   <span class="glass-blur" aria-hidden="true"></span>
                   <img src="assets/imgs/glass.webp" alt="Vintage magnifying glass" loading="lazy">
                 </div>
-                <p class="landing-card-caption">interrogate the querent</p>
+                <p class="landing-card-caption"></p>
               </a>
               <a href="#/measure" class="landing-card landing-card--measure" aria-label="Measurement ritual coming soon">
                 <div class="landing-image-wrap">
                   <img src="assets/imgs/measure.webp" alt="Tape measure" loading="lazy">
                 </div>
-                <p class="landing-card-caption">measure • coming soon</p>
+                <p class="landing-card-caption"></p>
               </a>
               <a href="/p" class="landing-card landing-card--letters" data-route-link aria-label="Enter the poem experience">
                 <div class="landing-image-wrap">
                   <img src="assets/imgs/letters.webp" alt="Stack of letters" loading="lazy">
                 </div>
-                <p class="landing-card-caption">letters • poem experience</p>
+                <p class="landing-card-caption"></p>
               </a>
             </div>
           </section>
@@ -89,7 +89,6 @@
           <div id="left-philosopher-content" class="philosopher-notes-content"></div>
         </aside>
         <main>
-          <h1>Chat</h1>
           <form id="form" class="form form--hidden">
             <div id="messages" class="messages">
               <div class="chat-editor-wrapper">
@@ -128,20 +127,20 @@
         <div class="video-overlay" aria-hidden="true"></div>
         <main class="content">
             <div class="poem-container" data-poem-root>
-            <h2 class="poem-heading">Existential Detective Agency</h2>
+            <h2 class="poem-heading"> </h2>
             <div class="sentence-display" id="poem-sentence-display">
               <p class="sentence" id="poem-current-line">The poem will begin once initialized.</p>
             </div>
             <div class="poem-controls">
-              <button type="button" class="next-button" data-poem-skip>Skip forward</button>
-              <button type="button" class="next-button" data-poem-effects-button>Effect library</button>
+              <button type="button" class="next-button poem-dev-only" data-poem-skip>Skip forward</button>
+              <button type="button" class="next-button poem-dev-only" data-poem-effects-button>Effect library</button>
             </div>
           </div>
         </main>
         <footer class="site-footer" data-poem-footer>
           <a href="#" class="footer-link" data-poem-about>about</a>
           <span class="footer-separator">•</span>
-          <a href="#" class="footer-link" data-poem-effects-button>effect explorer</a>
+          <a href="#" class="footer-link poem-dev-only" data-poem-effects-button>effect explorer</a>
         </footer>
       </div>
       <div class="modal-overlay" data-poem-about-modal hidden>
@@ -207,6 +206,8 @@
   <script src="js/utils.js"></script>
   <script src="https://unpkg.com/rough-notation@0.5.1/lib/rough-notation.iife.js"></script>
   <script src="js/noteFormatConfig.js"></script>
+  <script src="js/noteLayout.js"></script>
+  <script src="js/noteElement.js"></script>
   <script src="js/noteCapacity.js"></script>
   <script src="js/chatConfig.js"></script>
   <script src="js/handwriter.js"></script>
@@ -218,6 +219,7 @@
   <script src="js/messageUI.js"></script>
   <script src="js/chatInput.js"></script>
   <script src="js/chatSend.js"></script>
+  <script src="js/viewportNotes.js"></script>
   <script src="app.js"></script>
   <script src="js/chat.js"></script>
   <script src="js/poem.js"></script>

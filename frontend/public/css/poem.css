@@ -8,11 +8,11 @@
   max-width: 900px;
   width: 100%;
   text-align: center;
-  background: var(--poem-panel-bg);
+  /* background: var(--poem-panel-bg);
   padding: 3rem 2rem;
   border: 1px solid var(--poem-panel-border);
   border-radius: 4px;
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px); */
   user-select: none;
   -webkit-user-select: none;
   -moz-user-select: none;
@@ -223,6 +223,14 @@
   margin-top: 1rem;
 }
 
+/* Poem dev-only controls (skip forward, effect library): visible only when dev=true */
+.poem-dev-only {
+  display: none !important;
+}
+body[data-dev-mode="true"] .poem-dev-only {
+  display: revert !important;
+}
+
 @media (max-width: 768px) {
   .sentence-display {
     min-height: 200px;
@@ -250,6 +258,7 @@
   -webkit-user-select: none;
   -moz-user-select: none;
   -ms-user-select: none;
+  white-space: pre-line; /* preserve author line breaks within a segment */
 }
 
 /* Next Button */

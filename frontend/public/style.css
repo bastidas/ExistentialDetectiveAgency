@@ -105,6 +105,16 @@ main {
   text-align: center;
 }
 
+/* Non-dev: hide philosopher area title, bounding boxes, menu bar outline (see note-pages.css, landing.css); remove philosopher region outline */
+body:not([data-dev-mode="true"]) .philosopher-notes-title {
+  display: none !important;
+}
+
+body:not([data-dev-mode="true"]) .philosopher-notes,
+body:not([data-dev-mode="true"]) .mobile-shared-notes {
+  border: none !important;
+}
+
 .left-philosopher .philosopher-notes-title {
   text-align: left;
 }
@@ -142,7 +152,15 @@ h1 {
   padding: 0.5rem 0;
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 1rem;
+}
+
+.messages .message,
+.messages .chat-editor-wrapper {
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 70ch;
 }
 
 .message {
@@ -154,12 +172,13 @@ h1 {
 
 .message.assistant {
   align-items: flex-end;
+  align-self: flex-end;
 }
 
 .message .label {
   font-size: 0.75rem;
   font-family: var(--chat-editor-font, "Cutive Mono", monospace);
-  font-weight: 700;
+  font-weight: bold;
   letter-spacing: 0.18em;
   color: #1a1a1a;
   text-transform: uppercase;
@@ -175,24 +194,39 @@ h1 {
 }
 
 .message .content {
+  display: block;
+  min-height: 0;
   padding: 0;
   line-height: 1.5;
   white-space: pre-wrap;
-  word-break: break-word;
+  word-break: normal;
+  overflow-wrap: break-word;
   font-family: var(--chat-editor-font, "Cutive Mono", monospace);
   max-width: 70ch;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .message.user .content {
   align-self: flex-start;
   text-align: left;
   padding-left: 1.5rem;
+  background: transparent;
+  border: none;
 }
 
 .message.assistant .content {
   align-self: flex-end;
   text-align: right;
   padding-right: 1.5rem;
+  background: transparent;
+  border: none;
+}
+
+body[data-dev-mode="true"] .message.user .content,
+body[data-dev-mode="true"] .message.assistant .content {
+  border: 1px solid #000;
 }
 
 .status {
@@ -267,7 +301,7 @@ h1 {
     margin-top: auto;
     position: sticky;
     bottom: 0;
-    background: rgba(8, 8, 8, 0.8);
+    background: var(--chat-bg, #e8e4d8);
     padding: 0.75rem 0;
   }
 
@@ -299,7 +333,8 @@ h1 {
 
 @media (min-width: 769px) and (max-width: 1440px) {
   .app-layout {
-    grid-template-columns: minmax(0, 0.6fr) minmax(0, 0.4fr);
+    /* Chat 10% less horizontal: 50% / 50% so philosophers get more space */
+    grid-template-columns: minmax(0, 0.5fr) minmax(0, 0.5fr);
     grid-template-rows: minmax(50vh, 1fr) minmax(50vh, 1fr);
     grid-template-areas:
       "main left"
@@ -308,6 +343,17 @@ h1 {
 
   main {
     border-radius: 1.25rem 0 0 1.25rem;
+  }
+
+  /* Right philosopher overlaps 20% of top (left) philosopher's space; both share the area */
+  /* Philosopher panels above chat (z-index 10) so notes can cover or be dragged over chat */
+  #left-philosopher {
+    z-index: 15;
+  }
+
+  #right-philosopher {
+    margin-top: -10vh; /* 20% of 50vh row height = shared overlap */
+    z-index: 20;
   }
 
   .philosopher-notes {

@@ -227,10 +227,11 @@ function loadClosers() {
 const VALID_MODES = ["note", "rewrite", "keyword", "strike", "highlight"];
 
 function loadPhilAnnotations() {
+  const publicDataFile = path.resolve(__dirname, "..", "..", "public", "data", "phil_annotations.json");
   const candidates = [
+    publicDataFile,
     path.resolve(__dirname, "..", "prompts", "phil_annotations.json"),
     PHIL_ANNOTATIONS_FILE,
-    path.join(FRONTEND_DIR, "public", "data", "phil_annotations.json"),
     path.join(PROMPTS_DIR, "phil_annotations.json"),
     path.resolve(process.cwd(), "api", "prompts", "phil_annotations.json"),
     path.resolve(process.cwd(), "frontend", "api", "prompts", "phil_annotations.json"),

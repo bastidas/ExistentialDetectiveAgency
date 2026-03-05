@@ -62,12 +62,16 @@
       if (idx >= 0) list.splice(idx, 1);
     }
 
-    function pickFromList(list, requiredChars, preferLarger) {
+    function pickFromList(list, requiredChars, preferLarger, avoidPaperUrl) {
       if (!list || !list.length) return null;
       var filtered = list.filter(function (entry) {
         return typeof entry.capacity === "number" && entry.capacity >= requiredChars;
       });
       var candidates = filtered.length ? filtered : list.slice();
+      if (avoidPaperUrl) {
+        candidates = candidates.filter(function (e) { return e.paperUrl !== avoidPaperUrl; });
+        if (!candidates.length) candidates = filtered.length ? filtered : list.slice();
+      }
       if (!candidates.length) return null;
       if (preferLarger) {
         candidates.sort(function (a, b) {
@@ -79,11 +83,13 @@
       return candidates[idx];
     }
 
-    function reserve(side, requiredChars, preferLargerPaper) {
+    function reserve(side, requiredChars, preferLargerPaper, options) {
+      options = options || {};
+      var avoidPaperUrl = options.avoidPaperUrl || null;
       var sideKey = side === "right" ? "right" : "left";
       var needChars = Math.max(1, requiredChars || 0);
       ensure(sideKey);
-      var entry = pickFromList(available[sideKey], needChars, preferLargerPaper);
+      var entry = pickFromList(available[sideKey], needChars, preferLargerPaper, avoidPaperUrl);
       if (entry) {
         removeEntry(available[sideKey], entry);
         spent[sideKey].push(entry);
@@ -92,13 +98,13 @@
         }
         return entry;
       }
-      entry = pickFromList(spent[sideKey], needChars, true);
+      entry = pickFromList(spent[sideKey], needChars, true, avoidPaperUrl);
       if (entry) {
         console.log(LOG_PREFIX, "reusing spent paper", entry.paperUrl, sideKey);
         return entry;
       }
       hydrateside(sideKey);
-      return pickFromList(available[sideKey], needChars, true);
+      return pickFromList(available[sideKey], needChars, true, avoidPaperUrl);
     }
 
     function snapshot(list) {
@@ -188,8 +194,9 @@
     var decision = notePages.need_new_note(side, text) || { needNew: true };
     var writeStep = Promise.resolve();
     if (decision.needNew) {
-      var selection = allocator.reserve(side, text.length, !!decision.preferLargerPaper);
-      var noteOptions = {};
+      var currentPaperUrl = (notePages.getCurrentPaperUrl && notePages.getCurrentPaperUrl(side)) || null;
+      var selection = allocator.reserve(side, text.length, !!decision.preferLargerPaper, { avoidPaperUrl: currentPaperUrl });
+      var noteOptions = { avoidPaperUrl: currentPaperUrl };
       if (selection && selection.paperUrl) {
         noteOptions.paperUrl = selection.paperUrl;
       } else if (decision.preferLargerPaper) {

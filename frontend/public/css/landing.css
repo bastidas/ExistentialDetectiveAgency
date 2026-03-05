@@ -115,7 +115,7 @@ body[data-intro-state="menu"] .intro-hero-glitch-title {
   left: 0;
   width: 100%;
   height: 64px; /* predictable header height */
-  background: rgba(0, 188, 212, 0.06);
+  /* background: rgba(0, 188, 212, 0.06); */
   padding: 0 2rem;
   z-index: 100;
   display: flex;
@@ -130,12 +130,17 @@ body[data-intro-state="menu"] .intro-hero-glitch-title {
   transform: translateY(0);
 }
 
+/* Non-dev: remove cyan outline from menu bar */
+body:not([data-dev-mode="true"]) .cyan-menu-bar {
+  border-bottom-color: transparent;
+}
+
 .menu-title {
   position: relative;
   font-family: var(--font-display);
   font-size: calc(20px + 2.5vw);
   font-weight: 700;
-  color: #fff;
+  /* color: #fff; */
   margin: 0;
   padding: 0;
   letter-spacing: 0.08em;
@@ -216,12 +221,8 @@ body[data-intro-state="menu"] .intro-hero-glitch-title {
   white-space: nowrap;
 }
 
-/* Hover reveal behavior: desktop */
+/* Hover reveal behavior: desktop (no background tint on hover) */
 @media (min-width: 769px) {
-  .menu-bar:hover {
-    background: rgba(0, 188, 212, 0.16);
-  }
-
   .menu-bar:hover .eda-logo-small.small-glitch-title {
     opacity: 1;
     transform: translateY(0);

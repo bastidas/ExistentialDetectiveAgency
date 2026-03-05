@@ -76,13 +76,5 @@
     "width": 490,
     "height": 250,
     "scale": 1.4
-  },
-      "imgs/paper17.webp": {
-    "padding": { "top": 20, "right": 15,
-     "bottom": 35,
-     "left": -1},
-    "width": 735,
-    "height": 620,
-    "scale": 0.8
   }
 }

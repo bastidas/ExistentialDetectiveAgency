@@ -105,39 +105,20 @@
     return queueNoteWrite(writeLeft ? "left" : "right", text, baseOpts);
   }
 
-  function appendLeftPhilosopherContent(responseText, notesArray) {
-    var baseOpts = {
+  var SIDE_OPTS = {
+    left: {
       baseDelayMs: LEFT_WRITING_SPEED_MS,
       variationMs: LEFT_WRITING_VARIATION_MS,
-    };
-    var pieces = [];
-    if (responseText && responseText.trim()) pieces.push(responseText.trim());
-    if (Array.isArray(notesArray)) {
-      notesArray.forEach(function (note) {
-        if (note != null && String(note).trim() !== "") pieces.push(String(note).trim());
-      });
-    }
-    if (!pieces.length) return Promise.resolve();
-    var chain = Promise.resolve();
-    pieces.forEach(function (text, idx) {
-      chain = chain.then(function () {
-        console.log("[philosopherRules] left piece", idx + 1, "/", pieces.length, "len:", text.length);
-        var opts = Object.assign({}, baseOpts, {
-          debugLabel: "L " + (idx + 1) + "/" + pieces.length,
-        });
-        return queueNoteWrite("left", text, opts);
-      });
-    });
-    return chain;
-  }
-
-  function appendRightPhilosopherContent(responseText, notesArray) {
-    var baseOpts = {
+    },
+    right: {
       baseDelayMs: RIGHT_WRITING_SPEED_MS,
       variationMs: RIGHT_WRITING_VARIATION_MS,
       useLinedLayout: true,
       disableScroll: true,
-    };
+    },
+  };
+
+  function appendPhilosopherContent(side, responseText, notesArray) {
     var pieces = [];
     if (responseText && responseText.trim()) pieces.push(responseText.trim());
     if (Array.isArray(notesArray)) {
@@ -146,14 +127,17 @@
       });
     }
     if (!pieces.length) return Promise.resolve();
+    var normalizedSide = side === "right" ? "right" : "left";
+    var baseOpts = SIDE_OPTS[normalizedSide];
+    var labelPrefix = normalizedSide === "right" ? "R" : "L";
     var chain = Promise.resolve();
     pieces.forEach(function (text, idx) {
       chain = chain.then(function () {
-        console.log("[philosopherRules] right piece", idx + 1, "/", pieces.length, "len:", text.length);
+        console.log("[philosopherRules]", normalizedSide, "piece", idx + 1, "/", pieces.length, "len:", text.length);
         var opts = Object.assign({}, baseOpts, {
-          debugLabel: "R " + (idx + 1) + "/" + pieces.length,
+          debugLabel: labelPrefix + " " + (idx + 1) + "/" + pieces.length,
         });
-        return queueNoteWrite("right", text, opts);
+        return queueNoteWrite(normalizedSide, text, opts);
       });
     });
     return chain;
@@ -249,8 +233,7 @@
     runNoteActions: runNoteActions,
     applyRewriteFirst: applyRewriteFirst,
     appendPhilosopherNoteToBothPanels: appendPhilosopherNoteToBothPanels,
-    appendLeftPhilosopherContent: appendLeftPhilosopherContent,
-    appendRightPhilosopherContent: appendRightPhilosopherContent,
+    appendPhilosopherContent: appendPhilosopherContent,
     loadRules: loadRules,
     getRulesCount: getRulesCount,
   };

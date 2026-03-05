@@ -15,6 +15,177 @@
   /** Prevents double-send when submit fires twice (e.g. easter-egg path or fast double Enter). */
   var sending = false;
 
+  /** Returns display string for chat error response (data.reply absent, data.error present). */
+  function chatErrorToMessage(data) {
+    var kind = data.errorKind || "bad_request";
+    return kind === "flex_busy"
+      ? "Service busy (Flex). Please try again in a moment."
+      : kind === "rate_limit"
+        ? "Too many requests. Please try again later."
+        : kind === "bad_request"
+          ? (data.error || "Invalid request. Check your message and try again.")
+          : (data.error || "Something went wrong. Please try again.");
+  }
+
+  /** True if any philosopher response/notes field is present. */
+  function hasPhilosopherContent(data) {
+    return !!(
+      data.leftPhilosopherResponse ||
+      (Array.isArray(data.leftPhilosopherNotes) && data.leftPhilosopherNotes.length > 0) ||
+      data.rightPhilosopherResponse ||
+      (Array.isArray(data.rightPhilosopherNotes) && data.rightPhilosopherNotes.length > 0)
+    );
+  }
+
+  /** True if the given side has philosopher response or notes. */
+  function hasPhilosopherContentForSide(data, side) {
+    var s = (side === "right" ? "right" : "left");
+    if (s === "left") {
+      return !!(data.leftPhilosopherResponse || (Array.isArray(data.leftPhilosopherNotes) && data.leftPhilosopherNotes.length));
+    }
+    return !!(data.rightPhilosopherResponse || (Array.isArray(data.rightPhilosopherNotes) && data.rightPhilosopherNotes.length));
+  }
+
+  /** Normalize API response to payload { left: { response, notes }, right: { response, notes } }. */
+  function toPhilosopherPayload(data) {
+    return {
+      left: {
+        response: data.leftPhilosopherResponse || "",
+        notes: Array.isArray(data.leftPhilosopherNotes) ? data.leftPhilosopherNotes : [],
+      },
+      right: {
+        response: data.rightPhilosopherResponse || "",
+        notes: Array.isArray(data.rightPhilosopherNotes) ? data.rightPhilosopherNotes : [],
+      },
+    };
+  }
+
+  /**
+   * Apply philosopher response: optionally push to history and append to panels.
+   * @param payload - { left: { response, notes }, right: { response, notes } }
+   * @param options - pushHistory (push both), or pushHistoryLeft/pushHistoryRight (per-side); appendLeft, appendRight
+   */
+  function applyPhilosopherResponse(payload, options) {
+    var opts = options || {};
+    var pushHistory = opts.pushHistory !== false;
+    var pushLeft = opts.pushHistoryLeft !== undefined ? opts.pushHistoryLeft : pushHistory;
+    var pushRight = opts.pushHistoryRight !== undefined ? opts.pushHistoryRight : pushHistory;
+    var appendLeft = opts.appendLeft !== false;
+    var appendRight = opts.appendRight !== false;
+
+    if (pushLeft) leftPhilosopherHistory.push(payload.left);
+    if (pushRight) rightPhilosopherHistory.push(payload.right);
+
+    var promises = [];
+    if (appendLeft && (payload.left.response || payload.left.notes.length)) {
+      promises.push(
+        EDARules.appendPhilosopherContent("left", payload.left.response, payload.left.notes).catch(function (err) {
+          console.warn("[chatSend] philosopher left panel:", err);
+        })
+      );
+    }
+    if (appendRight && (payload.right.response || payload.right.notes.length)) {
+      promises.push(
+        EDARules.appendPhilosopherContent("right", payload.right.response, payload.right.notes).catch(function (err) {
+          console.warn("[chatSend] philosopher right panel:", err);
+        })
+      );
+    }
+    return Promise.all(promises);
+  }
+
+  function handlePhilosopherDialogResponse(dialogData, requestLeft, requestRight) {
+    console.log(
+      "[DEBUG] Philosopher dialog response; left content:",
+      hasPhilosopherContentForSide(dialogData, "left"),
+      " right content:",
+      hasPhilosopherContentForSide(dialogData, "right")
+    );
+    var payload = toPhilosopherPayload(dialogData);
+    applyPhilosopherResponse(payload, {
+      pushHistoryLeft: requestLeft && hasPhilosopherContentForSide(dialogData, "left"),
+      pushHistoryRight: requestRight && hasPhilosopherContentForSide(dialogData, "right"),
+      appendLeft: requestLeft,
+      appendRight: requestRight,
+    });
+  }
+
+  function schedulePhilosopherDialog() {
+    setTimeout(function () {
+      var requestLeft = Math.random() < LEFT_PHILOSOPHER_INTERACTION_RATE;
+      var requestRight = Math.random() < RIGHT_PHILOSOPHER_INTERACTION_RATE;
+      console.log(
+        "[DEBUG] Philosopher self-dialog: requestLeft=" + requestLeft + " requestRight=" + requestRight,
+        "(left turns: " + leftPhilosopherHistory.length + ", right turns: " + rightPhilosopherHistory.length + ")"
+      );
+      if (!requestLeft && !requestRight) return;
+      var dialogPayload = {
+        leftPhilosopherTurns: leftPhilosopherHistory,
+        rightPhilosopherTurns: rightPhilosopherHistory,
+        requestLeft: requestLeft,
+        requestRight: requestRight,
+      };
+      fetch("/api/philosopher-dialog", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(dialogPayload),
+      })
+        .then(function (res) {
+          return res.ok ? res.json() : res.json().then(function (j) { throw new Error(j.error || res.statusText); });
+        })
+        .then(function (dialogData) {
+          handlePhilosopherDialogResponse(dialogData, requestLeft, requestRight);
+        })
+        .catch(function (err) {
+          console.warn("[chatSend] Philosopher dialog request failed:", err.message);
+        });
+    }, PHILOSOPHER_SELF_DIALOG_TIME);
+  }
+
+  function handlePhilosopherContent(data) {
+    if (!hasPhilosopherContent(data)) {
+      leftPhilosopherHistory.push({ response: "", notes: [] });
+      rightPhilosopherHistory.push({ response: "", notes: [] });
+      return;
+    }
+    var payload = toPhilosopherPayload(data);
+    applyPhilosopherResponse(payload, { pushHistory: true, appendLeft: true, appendRight: true });
+    schedulePhilosopherDialog();
+  }
+
+  function handleChatResponse(data, editorRef) {
+    if (!data.reply && data.error) {
+      var displayMsg = chatErrorToMessage(data);
+      EDAMessageUI.setStatus(displayMsg, true);
+      EDAMessageUI.addMessage("assistant", displayMsg, editorRef);
+      return;
+    }
+    EDAMessageUI.setStatus("");
+    if (data.debug) {
+      console.log(
+        "[DEBUG] user exchanges:",
+        data.debug.userExchanges + "/" + data.debug.maxUserExchanges
+      );
+      console.log(
+        "[DEBUG] daily usage:",
+        data.debug.dailyUsage + "/" + data.debug.maxDailyUsage
+      );
+    }
+    console.log("[DEBUG] Main chat response received; philosopher fields present:", hasPhilosopherContent(data));
+    EDAMessageUI.addMessage("assistant", data.reply || "(No reply)", editorRef);
+    handlePhilosopherContent(data);
+    if (Array.isArray(data.philosopherNotes) && data.philosopherNotes.length > 0) {
+      var seq = Promise.resolve();
+      data.philosopherNotes.forEach(function (note) {
+        if (typeof note !== "string") return;
+        seq = seq.then(function () {
+          return EDARules.appendPhilosopherNoteToBothPanels(note);
+        });
+      });
+    }
+  }
+
   function focusEditor(atEnd) {
     var editorNode = EDAChatInput && EDAChatInput.getEditor ? EDAChatInput.getEditor() : null;
     if (!editorNode) return;
@@ -125,115 +296,13 @@
         })
         .then(function (data) {
           if (!data) return;
-
           if (!data.reply && data.error) {
-            var kind = data.errorKind || "bad_request";
-            var displayMsg =
-              kind === "flex_busy"
-                ? "Service busy (Flex). Please try again in a moment."
-                : kind === "rate_limit"
-                  ? "Too many requests. Please try again later."
-                  : kind === "bad_request"
-                    ? (data.error ||
-                      "Invalid request. Check your message and try again.")
-                    : (data.error ||
-                      "Something went wrong. Please try again.");
-            EDAMessageUI.setStatus(displayMsg, true);
-            EDAMessageUI.addMessage("assistant", displayMsg, editorRef);
+            var msg = chatErrorToMessage(data);
+            EDAMessageUI.setStatus(msg, true);
+            EDAMessageUI.addMessage("assistant", msg, editorRef);
             return;
           }
-
-        EDAMessageUI.setStatus("");
-        if (data.debug) {
-            console.log(
-              "[DEBUG] user exchanges:",
-              data.debug.userExchanges + "/" + data.debug.maxUserExchanges
-            );
-            console.log(
-              "[DEBUG] daily usage:",
-              data.debug.dailyUsage + "/" + data.debug.maxDailyUsage
-            );
-          }
-          var hasPhilosopherFields =
-            data.leftPhilosopherResponse != null ||
-            (Array.isArray(data.leftPhilosopherNotes) && data.leftPhilosopherNotes.length > 0) ||
-            data.rightPhilosopherResponse != null ||
-            (Array.isArray(data.rightPhilosopherNotes) && data.rightPhilosopherNotes.length > 0);
-          console.log("[DEBUG] Main chat response received; philosopher fields present:", hasPhilosopherFields);
-          EDAMessageUI.addMessage("assistant", data.reply || "(No reply)", editorRef);
-
-          var hasStructured =
-            data.leftPhilosopherResponse != null ||
-            (Array.isArray(data.leftPhilosopherNotes) &&
-              data.leftPhilosopherNotes.length > 0) ||
-            data.rightPhilosopherResponse != null ||
-            (Array.isArray(data.rightPhilosopherNotes) &&
-              data.rightPhilosopherNotes.length > 0);
-          if (hasStructured) {
-            var leftResp = data.leftPhilosopherResponse || "";
-            var leftNotes = Array.isArray(data.leftPhilosopherNotes) ? data.leftPhilosopherNotes : [];
-            var rightResp = data.rightPhilosopherResponse || "";
-            var rightNotes = Array.isArray(data.rightPhilosopherNotes) ? data.rightPhilosopherNotes : [];
-            leftPhilosopherHistory.push({ response: leftResp, notes: leftNotes });
-            rightPhilosopherHistory.push({ response: rightResp, notes: rightNotes });
-            var leftPromise = EDARules.appendLeftPhilosopherContent(leftResp, leftNotes);
-            var rightPromise = EDARules.appendRightPhilosopherContent(rightResp, rightNotes);
-            Promise.all([leftPromise, rightPromise]).catch(function (err) {
-              console.warn("[chatSend] philosopher panels:", err);
-            });
-            setTimeout(function () {
-              var requestLeft = Math.random() < LEFT_PHILOSOPHER_INTERACTION_RATE;
-              var requestRight = Math.random() < RIGHT_PHILOSOPHER_INTERACTION_RATE;
-              console.log("[DEBUG] Philosopher self-dialog: requestLeft=" + requestLeft + " requestRight=" + requestRight, "(left turns: " + leftPhilosopherHistory.length + ", right turns: " + rightPhilosopherHistory.length + ")");
-              if (!requestLeft && !requestRight) return;
-              var dialogPayload = {
-                leftPhilosopherTurns: leftPhilosopherHistory,
-                rightPhilosopherTurns: rightPhilosopherHistory,
-                requestLeft: requestLeft,
-                requestRight: requestRight,
-              };
-              fetch("/api/philosopher-dialog", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                credentials: "same-origin",
-                body: JSON.stringify(dialogPayload),
-              })
-                .then(function (res) { return res.ok ? res.json() : res.json().then(function (j) { throw new Error(j.error || res.statusText); }); })
-                .then(function (dialogData) {
-                  console.log("[DEBUG] Philosopher dialog response; left content:", !!(dialogData.leftPhilosopherResponse || (Array.isArray(dialogData.leftPhilosopherNotes) && dialogData.leftPhilosopherNotes.length)), " right content:", !!(dialogData.rightPhilosopherResponse || (Array.isArray(dialogData.rightPhilosopherNotes) && dialogData.rightPhilosopherNotes.length)));
-                  var dLeftResp = dialogData.leftPhilosopherResponse || "";
-                  var dLeftNotes = Array.isArray(dialogData.leftPhilosopherNotes) ? dialogData.leftPhilosopherNotes : [];
-                  var dRightResp = dialogData.rightPhilosopherResponse || "";
-                  var dRightNotes = Array.isArray(dialogData.rightPhilosopherNotes) ? dialogData.rightPhilosopherNotes : [];
-                  if (requestLeft && (dLeftResp || dLeftNotes.length)) {
-                    leftPhilosopherHistory.push({ response: dLeftResp, notes: dLeftNotes });
-                    EDARules.appendLeftPhilosopherContent(dLeftResp, dLeftNotes).catch(function (err) { console.warn("[chatSend] philosopher dialog left panel:", err); });
-                  }
-                  if (requestRight && (dRightResp || dRightNotes.length)) {
-                    rightPhilosopherHistory.push({ response: dRightResp, notes: dRightNotes });
-                    EDARules.appendRightPhilosopherContent(dRightResp, dRightNotes).catch(function (err) { console.warn("[chatSend] philosopher dialog right panel:", err); });
-                  }
-                })
-                .catch(function (err) {
-                  console.warn("[chatSend] Philosopher dialog request failed:", err.message);
-                });
-            }, PHILOSOPHER_SELF_DIALOG_TIME);
-          } else {
-            leftPhilosopherHistory.push({ response: "", notes: [] });
-            rightPhilosopherHistory.push({ response: "", notes: [] });
-          }
-          if (
-            Array.isArray(data.philosopherNotes) &&
-            data.philosopherNotes.length > 0
-          ) {
-            var seq = Promise.resolve();
-            data.philosopherNotes.forEach(function (note) {
-              if (typeof note !== "string") return;
-              seq = seq.then(function () {
-                return EDARules.appendPhilosopherNoteToBothPanels(note);
-              });
-            });
-          }
+          handleChatResponse(data, editorRef);
         })
         .catch(function (err) {
           EDAMessageUI.setStatus("Network error: " + err.message, true);

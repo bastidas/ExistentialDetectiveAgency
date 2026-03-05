@@ -22,13 +22,13 @@ seen my grandmother
 
 waiting to follow
 
-the little man
+the somber man
 
 through the stone arch
 
-of the french chapel,
+of the french chapel.
 
-she would have shown us
+She would have shown us
 
 how to let go
 
@@ -55,4 +55,3 @@ She could still teach us,
 to let go of each other.
 
 But then grandmother why are we here?
-.

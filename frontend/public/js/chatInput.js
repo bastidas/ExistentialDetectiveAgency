@@ -128,8 +128,14 @@
         rect = r.getBoundingClientRect();
       }
       if (rect.width === 0 && rect.height === 0) {
-        cursorEl.style.display = "none";
-        return;
+        /* Empty or collapsed at invisible position: show cursor at start of editor */
+        var editorRect = editor.getBoundingClientRect();
+        rect = {
+          left: editorRect.left,
+          top: editorRect.top,
+          width: 2,
+          height: Math.max(20, editorRect.height)
+        };
       }
     }
     cursorEl.style.display = "block";
@@ -271,6 +277,13 @@
       cursorEl.setAttribute("aria-hidden", "true");
       wrapper.style.position = "relative";
       wrapper.appendChild(cursorEl);
+      /* Click anywhere in the chat area (including padding) to focus editor and show cursor */
+      wrapper.addEventListener("click", function (e) {
+        if (e.target === editor || editor.contains(e.target)) return;
+        editor.focus();
+        placeCaretAtEnd(editor);
+        scheduleCursorUpdate();
+      });
     }
 
     var form = document.getElementById("form");
