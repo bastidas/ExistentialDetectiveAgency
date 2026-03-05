@@ -1,10 +1,37 @@
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700&family=Space+Grotesk:wght@400;500;600&display=swap');
+
 :root {
   --color-background: #000000;
   --color-foreground: #ffffff;
   --color-text: #e8e8e8;
   --color-text-muted: #a0a0a0;
-  --font-primary: 'Courier New', Courier, monospace;
-  --font-secondary: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-display: 'Montserrat', 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
+  --font-sans: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Cutive Mono', 'Courier New', Courier, monospace;
+  --font-primary: var(--font-mono);
+  --font-secondary: var(--font-sans);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-border-strong: rgba(255, 255, 255, 0.18);
+  --glass-bg: rgba(2, 2, 2, 0.78);
+  --glass-card-bg: rgba(7, 7, 7, 0.75);
+  --glass-radius: 12px;
+  --glass-shadow: 0 40px 80px rgba(0, 0, 0, 0.65);
+  --glass-hover-shadow: 0 35px 55px rgba(0, 0, 0, 0.85);
+  --glass-blur-strength: 18px;
+  --overlay-gradient: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.7),
+    rgba(0, 0, 0, 0.5),
+    rgba(0, 0, 0, 0.7)
+  );
+  --poem-panel-bg: rgba(0, 0, 0, 0.6);
+  --poem-panel-border: rgba(255, 255, 255, 0.1);
+  --poem-button-bg: rgba(255, 255, 255, 0.1);
+  --poem-button-border: rgba(255, 255, 255, 0.3);
+  --poem-button-hover-bg: rgba(255, 255, 255, 0.2);
+  --poem-button-hover-border: rgba(255, 255, 255, 0.5);
+  --poem-info-bg: rgba(0, 0, 0, 0.9);
+  --modal-overlay-bg: rgba(0, 0, 0, 0.78);
 }
 
 * {

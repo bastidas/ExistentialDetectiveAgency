@@ -1,11 +1,16 @@
+#route-poem {
+  font-family: var(--font-secondary);
+  color: var(--color-text);
+}
+
 /* Poem Container */
 .poem-container {
   max-width: 900px;
   width: 100%;
   text-align: center;
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--poem-panel-bg);
   padding: 3rem 2rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--poem-panel-border);
   border-radius: 4px;
   backdrop-filter: blur(8px);
   user-select: none;
@@ -32,7 +37,7 @@
 
 .title {
   position: relative;
-  font-family: 'Montserrat', Arial, sans-serif;
+  font-family: var(--font-display);
   font-size: calc(15.8px + 3.94vw);
   font-weight: 700;
   color: #fff;
@@ -121,10 +126,10 @@
 }
 
 .poem {
-  font-family: 'Courier New', Courier, monospace;
+  font-family: var(--font-mono);
   font-size: 1.1rem;
   line-height: 1.8;
-  color: #e8e8e8;
+  color: var(--color-text);
   white-space: pre-wrap;
   text-align: left;
 }
@@ -165,55 +170,31 @@
   font-size: 1rem;
 }
 
-/* Responsive Design */
+/* Responsive Design (poem-specific layout only; header handled in landing.css) */
 @media (max-width: 768px) {
-  .content {
-    padding: 1rem 0.5rem;
-  }
-
-  .menu-bar {
-    padding: 1rem;
-  }
-
-  .menu-title {
-    font-size: 1.5rem;
-    padding: 1rem 5%;
-  }
-
-  .menu-title span,
-  .menu-title::before,
-  .menu-title::after {
-    left: 0;
-  }
-
-  .title {
-    font-size: 1.8rem;
-    padding: 0 5%;
-    white-space: normal;
-  }
-
-  .title span,
-  .title::before,
-  .title::after {
-    left: 0;
-  }
-
+  .poem-container .content,
   .poem {
     font-size: 1rem;
   }
 }
 
 @media (max-width: 480px) {
-  .title {
+  .poem-heading {
     font-size: 1.3rem;
     letter-spacing: 0.05em;
     padding: 0 2%;
   }
 
-  .menu-title {
-    font-size: 1.2rem;
-  }
 
+.poem-heading {
+  font-family: var(--font-display);
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 2rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
   .poem {
     font-size: 0.9rem;
   }
@@ -233,6 +214,15 @@
   -ms-user-select: none;
 }
 
+.poem-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
 @media (max-width: 768px) {
   .sentence-display {
     min-height: 200px;
@@ -250,7 +240,7 @@
 }
 
 .sentence {
-  font-family: 'Courier New', Courier, monospace;
+  font-family: var(--font-mono);
   font-size: 1.8rem;
   line-height: 1.8;
   color: #ffffff;
@@ -264,11 +254,11 @@
 
 /* Next Button */
 .next-button {
-  background: rgba(255, 255, 255, 0.1);
-  border: 2px solid rgba(255, 255, 255, 0.3);
+  background: var(--poem-button-bg);
+  border: 2px solid var(--poem-button-border);
   color: #ffffff;
   padding: 1rem 3rem;
-  font-family: 'Courier New', Courier, monospace;
+  font-family: var(--font-mono);
   font-size: 1rem;
   letter-spacing: 0.2em;
   text-transform: uppercase;
@@ -279,8 +269,8 @@
 }
 
 .next-button:hover {
-  background: rgba(255, 255, 255, 0.2);
-  border-color: rgba(255, 255, 255, 0.5);
+  background: var(--poem-button-hover-bg);
+  border-color: var(--poem-button-hover-border);
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(255, 255, 255, 0.2);
 }
@@ -295,7 +285,7 @@
   bottom: 1.5rem;
   left: 0;
   width: 100%;
-  background: rgba(0, 0, 0, 0.9);
+  background: var(--poem-info-bg);
   border-top: 1px solid rgba(255, 255, 255, 0.2);
   padding: 1rem 2rem;
   display: flex;
@@ -313,7 +303,7 @@
 }
 
 .info-label {
-  font-family: 'Courier New', Courier, monospace;
+  font-family: var(--font-mono);
   font-size: 0.7rem;
   color: #888;
   text-transform: uppercase;
@@ -321,7 +311,7 @@
 }
 
 .info-value {
-  font-family: 'Courier New', Courier, monospace;
+  font-family: var(--font-mono);
   font-size: 0.9rem;
   color: #ffffff;
   font-weight: 500;
@@ -780,7 +770,7 @@
   z-index: 999;
   padding: 0.5rem 1rem;
   text-align: center;
-  font-family: 'Courier New', Courier, monospace;
+  font-family: var(--font-mono);
   font-size: 0.7rem;
   color: rgba(255, 255, 255, 0.4);
   background: rgba(0, 0, 0, 0.5);
@@ -810,13 +800,17 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.85);
+  background: var(--modal-overlay-bg);
   backdrop-filter: blur(8px);
   z-index: 100;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 2rem;
+}
+
+.modal-overlay[hidden] {
+  display: none !important;
 }
 
 /* Effect Picker Modal Overlay - Left Aligned */
@@ -838,7 +832,7 @@
   overflow-y: auto;
   padding: 2rem;
   position: relative;
-  font-family: 'Courier New', Courier, monospace;
+  font-family: var(--font-mono);
   color: #e8e8e8;
 }
 
@@ -1513,10 +1507,10 @@
 /* Effect Toggle & Settings Buttons */
 .toggle-effect-btn,
 .settings-btn {
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: var(--poem-button-bg);
+  border: 1px solid var(--poem-button-border);
   color: #ffffff;
-  font-family: 'Courier New', Courier, monospace;
+  font-family: var(--font-mono);
   font-size: 1.2rem;
   padding: 0.5rem 1rem;
   cursor: pointer;
@@ -1526,8 +1520,8 @@
 
 .toggle-effect-btn:hover,
 .settings-btn:hover {
-  background: rgba(255, 255, 255, 0.2);
-  border-color: rgba(255, 255, 255, 0.4);
+  background: var(--poem-button-hover-bg);
+  border-color: var(--poem-button-hover-border);
 }
 
 .toggle-effect-btn {
@@ -1575,10 +1569,10 @@
 }
 
 .bulk-btn {
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: var(--poem-button-bg);
+  border: 1px solid var(--poem-button-border);
   color: #e8e8e8;
-  font-family: 'Courier New', Courier, monospace;
+  font-family: var(--font-mono);
   font-size: 0.7rem;
   padding: 0.35rem 0.6rem;
   cursor: pointer;
@@ -1587,8 +1581,8 @@
 }
 
 .bulk-btn:hover {
-  background: rgba(255, 255, 255, 0.2);
-  border-color: rgba(255, 255, 255, 0.4);
+  background: var(--poem-button-hover-bg);
+  border-color: var(--poem-button-hover-border);
 }
 
 /* Category Sections */
@@ -1677,7 +1671,7 @@
 }
 
 .effect-name {
-  font-family: 'Courier New', Courier, monospace;
+  font-family: var(--font-mono);
   letter-spacing: 0.01em;
   line-height: 1.2;
 }
@@ -1687,7 +1681,7 @@
   background: rgba(100, 150, 255, 0.3);
   border: 1px solid rgba(100, 150, 255, 0.5);
   color: #ffffff;
-  font-family: 'Courier New', Courier, monospace;
+  font-family: var(--font-mono);
   font-size: 0.65rem;
   padding: 0.3rem 0.6rem;
   cursor: pointer;
@@ -1730,7 +1724,7 @@
   border-radius: 2px;
   font-size: 0.6rem;
   color: #ffffff;
-  font-family: 'Courier New', Courier, monospace;
+  font-family: var(--font-mono);
   animation-iteration-count: infinite;
   animation-fill-mode: both;
   text-align: center;

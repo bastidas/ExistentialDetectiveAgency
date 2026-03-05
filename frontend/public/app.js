@@ -1,7 +1,49 @@
 (function () {
   "use strict";
 
-  (function debugOnLoad() {
+  function initIntroSplash() {
+    var body = document.body;
+    if (!body) return;
+
+    var hash = window.location.hash;
+    var isMenuHash = hash === "#" || hash === "#/" || hash === "#menu";
+
+    // If we land directly on non-intro routes like /q or /p,
+    // skip the splash entirely and go straight to "menu" state.
+    var path = window.location.pathname.toLowerCase();
+    var isNonIntroRoute = path === "/q" || path === "/p";
+    if (isNonIntroRoute) {
+      body.dataset.introState = "menu";
+      return;
+    }
+
+    // If we land directly on /# (or equivalent), skip the splash and show menu.
+    if (isMenuHash) {
+      body.dataset.introState = "menu";
+      return;
+    }
+
+    // Default: play splash, then reveal menu and rewrite to /# on plain "/".
+    body.dataset.introState = "splash";
+    var splashDuration = 2600; // matches title crack/blur animation
+
+    window.setTimeout(function () {
+      body.dataset.introState = "menu";
+      if (window.location.pathname === "/" && !window.location.hash) {
+        history.replaceState({}, "", "/#");
+      }
+    }, splashDuration);
+  }
+
+  if (document.readyState === "complete" || document.readyState === "interactive") {
+    initIntroSplash();
+  } else {
+    document.addEventListener("DOMContentLoaded", initIntroSplash);
+  }
+
+  var chatRuntimeBound = false;
+
+  function debugOnLoad() {
     fetch("/api/debug", { credentials: "same-origin" })
       .then(function (res) {
         return res.ok ? res.json() : null;
@@ -30,10 +72,19 @@
         );
       })
       .catch(function () {});
-  })();
+  }
 
-  var form = document.getElementById("form");
-  if (!form) return;
+  function bootstrapChatRuntime() {
+    if (chatRuntimeBound) return;
+    chatRuntimeBound = true;
+
+    debugOnLoad();
+
+    var form = document.getElementById("form");
+    if (!form) {
+      console.warn("[chat] form element not found; skipping chat bootstrap.");
+      return;
+    }
 
   if (typeof ChatConfig !== "undefined" && ChatConfig.applyChatStyle) {
     ChatConfig.applyChatStyle();
@@ -170,4 +221,7 @@
       sendAndRunNotes(message, html);
     }
   });
+  }
+
+  window.EDAChatBootstrap = bootstrapChatRuntime;
 })();

@@ -22,6 +22,25 @@ body {
   color: #e3e0d7;
 }
 
+#eda-app-shell {
+  min-height: 100vh;
+}
+
+.route {
+  display: none;
+  min-height: 100vh;
+}
+
+.route.route--active {
+  display: block;
+}
+
+.route--hidden {
+  display: none !important;
+}
+
+/* route-nav was the old per-route header; superseded by unified .menu-bar */
+
 .app-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -209,6 +228,11 @@ h1 {
 @media (max-width: 768px) {
   body {
     padding-bottom: calc(var(--mobile-shared-height, 30vh) + 2rem);
+  }
+
+  .route-nav {
+    justify-content: flex-start;
+    padding: 0.5rem 0;
   }
 
   main {

@@ -45,6 +45,13 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
+app.get("*", (req, res, next) => {
+  if (req.path.startsWith("/api/")) return next();
+  if (req.method !== "GET") return next();
+  if (path.extname(req.path)) return next();
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
 app.get("/api/debug", (req, res) => {
   if (!shared.DEBUG) return res.status(404).end();
   const sessionId = getOrCreateSessionId(req, res);
