@@ -64,8 +64,7 @@
 }
 
 .note-page:focus-visible {
-  outline: 2px solid rgba(255, 255, 255, 0.7);
-  outline-offset: 2px;
+  outline: none; /* no sharp box on selected note; paper keeps its drop-shadow */
 }
 
 .note-page__controls {
