@@ -62,6 +62,11 @@
     return (Math.random() * 2 - 1) * DYNAMIC_ANCHOR_JITTER_PX;
   }
 
+  // Base path for paper note images (used when constructing actual image URLs)
+  var PAPER_NOTES_PATH = "assets/imgs/paper";
+
+  // Canonical paper IDs come from NoteFormatConfig.getPaperImages() and must
+  // match the keys in PAPER_CONFIG (e.g. "paper4.webp").
   function getPaperImages() {
     if (cfg && typeof cfg.getPaperImages === "function") {
       var list = cfg.getPaperImages();
@@ -71,7 +76,7 @@
       paperListFallbackWarned = true;
       console.warn("[notePages] Using fallback paper list; NoteFormatConfig may not be loaded.");
     }
-    return ["imgs/paper4.webp"];
+    return ["paper4.webp"];
   }
 
   function getSharedMobilePanel() {
@@ -214,6 +219,7 @@
 
   function randomPaperUrl() {
     var list = getPaperImages();
+    if (!list.length) return null;
     return list[Math.floor(Math.random() * list.length)];
   }
 

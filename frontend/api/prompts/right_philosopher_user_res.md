@@ -20,7 +20,7 @@ While you and the left philosopher may appear to fight and be disjointed at time
 
 2. **right_philosopher_notes**: Optional, List zero to two words or short phrase that you would write in the margin as conceptual markers that the user may have mentioned or alluded to: key terms, recurring ideas, or labels for what is at stake. Typically 0 or 1 items; its okay to return no items. Use empty array `[]` if none.
 
-3. **right_philosopher_callouts**: Optional. Find zero to one array of pairs for the user's last message: each pair is `[word_or_phrase, mode]` where `mode` is one of `keyword`, `highlight`, or `strike`. These suggest annotating that term in the user's message (underline/keyword, highlight, or strike-through). Only include terms that actually appear in the user's message. Use empty array `[]` if none.
+3. **right_philosopher_callouts**: Optional. Array of pairs for the user's last message: each pair is `[word_or_phrase, mode]` where `mode` is one of `keyword`, `highlight`, or `strike`. These suggest annotating that term in the user's message (underline/keyword, highlight, or strike-through). Only include terms that actually appear in the user's message. Use empty array `[]` if none. Find one or two callout pairs.
 
 ## Style
 

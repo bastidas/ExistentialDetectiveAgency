@@ -2,6 +2,7 @@
 
 :root {
   --note-responsive-font-scale: 1;
+  --glass-blur-strength: 2px;
 }
 
 .philosopher-notes-content {
@@ -85,6 +86,51 @@ body[data-dev-mode="true"] #mobile-shared-notes-content {
   filter: drop-shadow(4px 4px 5px rgba(0, 0, 0, 0.5));
   user-select: none;
   -webkit-user-drag: none;
+}
+
+/* For glass margin items (e.g. mglass.webp), cut a circular hole in the
+ * image itself so the page behind shows through under the lens. The
+ * position and radius are driven by CSS variables set from
+ * transparent_x / transparent_y / transparent_radius.
+ */
+.margin-item--glass .margin-item__image {
+  -webkit-mask-image: radial-gradient(
+    circle at var(--glass-center-x, 50%) var(--glass-center-y, 50%),
+    transparent 0,
+    transparent var(--glass-hole-radius, 9px),
+    black calc(var(--glass-hole-radius, 9px) + 1px)
+  );
+  mask-image: radial-gradient(
+    circle at var(--glass-center-x, 50%) var(--glass-center-y, 50%),
+    transparent 0,
+    transparent var(--glass-hole-radius, 9px),
+    black calc(var(--glass-hole-radius, 9px) + 1px)
+  );
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+/* Circular glass lens overlay for special margin items (e.g. magnifying glass).
+ * Positioned in the margin-item's bounding-box coordinate space using
+ * transparent_x / transparent_y / transparent_radius from object-config.json.
+ */
+.margin-item--glass .margin-item__glass-lens {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 2;
+  /* Subtle glass fill; fall back if theme vars are unavailable. */
+  /* background: rgba(255, 255, 255, 0.01); */
+    /* Subtle but visible glass fill; if this alpha is too low, the
+     * backdrop blur becomes almost imperceptible.
+     */
+    background: rgba(255, 255, 255, 0.1);
+  /* Blur the backdrop (chat + philosophers) seen through the lens. */
+  backdrop-filter: blur(var(--glass-blur-strength, 3px));
+  -webkit-backdrop-filter: blur(var(--glass-blur-strength, 3px));
+  /* Light inner rim and soft outer glow for a skeuomorphic feel. */
+  box-shadow:
+    inset 0 0 50px rgba(255, 255, 255, 0.35),
+    0 0 50px rgba(0, 0, 0, 0.35);
 }
 
 .margin-item:hover .note-page__close {
@@ -253,10 +299,33 @@ body:not([data-dev-mode="true"]) .note-page__content.note-page__content--debug-o
   white-space: nowrap;
 }
 
+/* Dev-only bounding box + label for random margin objects */
+.margin-item__debug-box {
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(0, 255, 255, 0.9);
+  box-sizing: border-box;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.margin-item__debug-box > .margin-item__debug-label {
+  position: absolute;
+  top: -14px;
+  left: 0;
+  padding: 1px 4px;
+  font-size: 10px;
+  font-family: sans-serif;
+  background: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  white-space: nowrap;
+}
+
 /* Non-dev: hide note bounding box + label, text-character-region box, and padding box */
 body:not([data-dev-mode="true"]) .note-page__debug-box,
 body:not([data-dev-mode="true"]) .note-page__debug-text-box,
-body:not([data-dev-mode="true"]) .note-page__debug-padding-box {
+body:not([data-dev-mode="true"]) .note-page__debug-padding-box,
+body:not([data-dev-mode="true"]) .margin-item__debug-box {
   display: none !important;
 }
 

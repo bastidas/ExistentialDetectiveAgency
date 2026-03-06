@@ -237,7 +237,14 @@
 
     var paperEl = document.createElement("div");
     paperEl.className = "note-page__paper";
-    paperEl.style.backgroundImage = "url(" + paperUrl + ")";
+    // paperUrl is the canonical ID (e.g. "paper4.webp"); map it to
+    // the actual asset path under public/assets/imgs/paper.
+    var paperPathBase = "assets/imgs/paper";
+    var paperSrc = paperUrl;
+    if (paperSrc && paperSrc.indexOf("/") === -1) {
+      paperSrc = paperPathBase + "/" + paperSrc;
+    }
+    paperEl.style.backgroundImage = "url(" + paperSrc + ")";
     wrapper.appendChild(paperEl);
 
     var contentEl = document.createElement("div");

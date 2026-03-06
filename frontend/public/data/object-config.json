@@ -1,0 +1,53 @@
+{
+  "mglass.webp": {
+    "padding_frac":0.18,
+    "width": 420,
+    "height": 600,
+    "transparent_x": 254,
+    "transparent_y": 190,
+    "glass_center_x": 254,
+    "glass_center_y": 190,
+    "transparent_radius": 136,
+    "scale": 1.5,
+    "rotation_range": 18
+  },
+    "statuette.webp": {
+    "padding_frac":0.1,
+    "scale": 0.8,
+    "rotation_range": 50
+  },
+  "key_above.webp": {
+    "padding_frac":0.1,
+    "scale": 0.39,
+    "rotation_range": 100
+  },
+    "ace.webp": {
+    "width": 240,
+    "height": 280,
+    "padding_frac":0.09,
+    "scale": 1.0,
+    "rotation_range": 20
+  },
+    "camera.webp": {
+         "padding_frac":0.1,
+    "scale": 1.5,
+    "rotation_range": 39
+  },
+  "chess_piece.webp": {
+
+         "padding_frac":0.1,
+    "scale": 0.55,
+    "rotation_range": 125
+  },
+  "dice.webp": {
+
+         "padding_frac":0.1,
+    "scale": 0.5,
+    "rotation_range": 230
+  },
+  "tarot.webp": {
+     "padding_frac":0.02,
+    "scale": 1.4,
+    "rotation_range": 20
+  }
+}
