@@ -91,9 +91,11 @@
         <div id="notes-layer" class="notes-layer" aria-hidden="true"></div>
         <main>
           <form id="form" class="form form--hidden">
-            <div id="messages" class="messages">
-              <div class="chat-editor-wrapper">
-                <div id="input-wrap" data-chat-input="true" class="chat-editor typewriter" contenteditable="true" tabindex="0" data-placeholder="Type here…" aria-label="Message"></div>
+            <div class="messages-wrap">
+              <div id="messages" class="messages">
+                <div class="chat-editor-wrapper">
+                  <div id="input-wrap" data-chat-input="true" class="chat-editor typewriter" contenteditable="true" tabindex="0" data-placeholder="Type here…" aria-label="Message"></div>
+                </div>
               </div>
             </div>
             <button type="submit" id="submit" class="visually-hidden" aria-label="Send">Send</button>
@@ -188,7 +190,7 @@
       <h2 id="missing-route-title">Signal Misplaced</h2>
       <div class="modal-body">
         <figure class="about-art">
-          <img src="assets/imgs/black_cat_left_gaze.webp" alt="Black cat waiting by an unopened file drawer" loading="lazy">
+          <img src="assets/imgs/other/black_cat_left_gaze.webp" alt="Black cat waiting by an unopened file drawer" loading="lazy">
           <figcaption>the familiar swears that drawer was here a moment ago.</figcaption>
         </figure>
         <p class="about-copy">
@@ -220,6 +222,7 @@
   <script src="js/annotationConfig.js"></script>
   <script src="js/annotation.js"></script>
   <script src="js/messageUI.js"></script>
+  <script src="js/closingStamps.js"></script>
   <script src="js/chatInput.js"></script>
   <script src="js/chatSend.js"></script>
   <script src="js/viewportNotes.js"></script>

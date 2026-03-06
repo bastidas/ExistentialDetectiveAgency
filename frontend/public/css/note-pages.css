@@ -56,6 +56,7 @@ body[data-dev-mode="true"] #mobile-shared-notes-content {
   outline-offset: 2px;
 }
 
+/* Draggable: reserve touch for drag so page doesn't scroll when grabbing (mobile). */
 .note-page {
   position: absolute;
   z-index: 1;
@@ -65,6 +66,8 @@ body[data-dev-mode="true"] #mobile-shared-notes-content {
   box-shadow: none;
   cursor: grab;
   transition: transform 0.25s ease, box-shadow 0.25s ease;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .margin-item {
@@ -76,6 +79,10 @@ body[data-dev-mode="true"] #mobile-shared-notes-content {
   box-shadow: none;
   cursor: grab;
   pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .margin-item__image {
@@ -203,11 +210,14 @@ body[data-dev-mode="true"] #mobile-shared-notes-content {
   color: #1f1204;
 }
 
-.note-page--dragging {
+.note-page--dragging,
+.margin-item.note-page--dragging {
   cursor: grabbing;
   /* Keep container transparent; rely on paper image's own shadow. */
   z-index: 100; /* above chat when dragged over */
-  touch-action: none; /* prevent scroll/zoom while dragging (notes and margin items) */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* Selected note: no extra box-shadow; paper keeps its drop-shadow via .note-page__paper */

@@ -107,6 +107,8 @@
       if (typeof callbacks.onDragEnd === "function") callbacks.onDragEnd(wrapper, side);
     }
 
+    var captureOpt = { passive: false };
+
     wrapper.addEventListener("pointerdown", function (event) {
       if (event.button && event.button !== 0) return;
       if (event.target && event.target.closest && event.target.closest(".note-page__controls")) {
@@ -137,7 +139,7 @@
       }
       wrapper.classList.add(NOTE_DRAG_CLASS);
       bringNoteToFront(wrapper, side);
-    });
+    }, captureOpt);
 
     wrapper.addEventListener("pointermove", function (event) {
       if (activePointerId == null || event.pointerId !== activePointerId || !dragState) return;
@@ -150,7 +152,7 @@
       wrapper.style.left = nextLeft + "px";
       wrapper.style.right = "";
       wrapper.style.top = nextTop + "px";
-    });
+    }, captureOpt);
 
     wrapper.addEventListener("pointerup", endDrag);
     wrapper.addEventListener("pointercancel", endDrag);

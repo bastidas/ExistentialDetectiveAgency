@@ -506,7 +506,7 @@ function handleUserAtLimitCloser(history, trimmed, userCount, dailyCount, debug)
   history.usedCloserIndexes.add(index);
   history.closerCount += 1;
   if (debug) console.log("[DEBUG] user limit reached: replying with closer, stored user message and closer in history");
-  const body = { reply: closer };
+  const body = { reply: closer, limitReached: true };
   if (debug) body.debug = buildDebugBody(userCount, dailyCount);
   return { status: 200, body };
 }
@@ -678,6 +678,23 @@ async function handleChatRequest(sessionId, trimmed, options) {
     console.log("[DEBUG] daily usage:", dailyCount + "/" + MAX_DAILY_USAGE);
   }
 
+  if (OFFLINE) {
+    history.messages.push({ role: "user", content: trimmed });
+    history.messages.push({ role: "assistant", content: OFFLINE_REPLY });
+    userExchangeCounts.set(sessionId, userCount + 1);
+    const body = {
+      reply: OFFLINE_REPLY,
+      leftPhilosopherUserResponse: "",
+      rightPhilosopherUserResponse: "",
+      leftPhilosopherNotes: [],
+      rightPhilosopherNotes: [],
+      leftPhilosopherCallouts: [],
+      rightPhilosopherCallouts: [],
+    };
+    if (debug) body.debug = buildDebugBody(userCount + 1, dailyCount);
+    return { status: 200, body };
+  }
+
   if (userCount >= MAX_USER_EXCHANGES) {
     if (history.closerCount < 2) {
       return handleUserAtLimitCloser(history, trimmed, userCount, dailyCount, debug);
@@ -733,29 +750,11 @@ async function handleChatRequest(sessionId, trimmed, options) {
     ...(SERVICE_TIER === "flex" && { service_tier: "flex" }),
   };
   if (debug) {
-    console.log(
-      "[DEBUG] Main chat" + (OFFLINE ? " [NOT SENT - OFFLINE]:" : ":")
-    );
+    console.log("[DEBUG] Main chat:");
     console.log("[DEBUG] Full messages sent to LLM (main chat):");
     console.log(JSON.stringify(createParams.input, null, 2));
     console.log("[DEBUG] Full createParams (main chat):");
     console.log(JSON.stringify(createParams, null, 2));
-  }
-  if (OFFLINE) {
-    history.messages.push({ role: "user", content: trimmed });
-    history.messages.push({ role: "assistant", content: OFFLINE_REPLY });
-    userExchangeCounts.set(sessionId, userCount + 1);
-    const body = {
-      reply: OFFLINE_REPLY,
-      leftPhilosopherUserResponse: "",
-      rightPhilosopherUserResponse: "",
-      leftPhilosopherNotes: [],
-      rightPhilosopherNotes: [],
-      leftPhilosopherCallouts: [],
-      rightPhilosopherCallouts: [],
-    };
-    if (debug) body.debug = buildDebugBody(userCount + 1, dailyCount);
-    return { status: 200, body };
   }
   const requestOptions = SERVICE_TIER === "flex" ? { timeout: 15 * 60 * 1000 } : undefined;
 

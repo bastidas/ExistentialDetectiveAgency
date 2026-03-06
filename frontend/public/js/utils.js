@@ -83,6 +83,7 @@
     var msg = String(text || "");
     if (!msg) {
       container.textContent = "";
+      if (options && typeof options.onDone === "function") options.onDone();
       return;
     }
 
@@ -118,6 +119,7 @@
 
     if ((respectReduced && prefersReducedMotion) || opts.instant === true) {
       container.innerHTML = typewriterWrapText(msg);
+      if (typeof opts.onDone === "function") opts.onDone();
       return;
     }
 
@@ -127,6 +129,7 @@
 
     if (maxChars && total > maxChars) {
       container.innerHTML = typewriterWrapText(msg);
+      if (typeof opts.onDone === "function") opts.onDone();
       return;
     }
 
@@ -164,10 +167,55 @@
           delay = tickMs + Math.floor(Math.random() * variation);
         }
         setTimeout(appendChunk, delay);
+      } else if (typeof opts.onDone === "function") {
+        opts.onDone();
       }
     }
 
     appendChunk();
+  }
+
+  /**
+   * Type a label string into an element one character at a time (typewriter).
+   * Respects prefers-reduced-motion by showing the full text immediately.
+   * @param {HTMLElement} element - Target element (e.g. label span)
+   * @param {string} text - Text to type (e.g. "QUERENT" or "DETECTIVE")
+   * @param {Object} [options] - { delayMs: number, onDone: function }
+   */
+  function typeLabelIntoElement(element, text, options) {
+    if (!element) return;
+    var msg = String(text || "");
+    var opts = options || {};
+    var delayMs = typeof opts.delayMs === "number" && opts.delayMs >= 0 ? opts.delayMs : 60;
+    var onDone = typeof opts.onDone === "function" ? opts.onDone : null;
+
+    var prefersReducedMotion = false;
+    try {
+      if (typeof window !== "undefined" && window.matchMedia) {
+        prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      }
+    } catch (e) {}
+
+    if (prefersReducedMotion || opts.instant === true) {
+      element.textContent = msg;
+      if (onDone) onDone();
+      return;
+    }
+
+    element.textContent = "";
+    var index = 0;
+    var total = msg.length;
+
+    function typeNext() {
+      if (index >= total) {
+        if (onDone) onDone();
+        return;
+      }
+      element.textContent = msg.slice(0, index + 1);
+      index += 1;
+      setTimeout(typeNext, delayMs);
+    }
+    typeNext();
   }
 
   /**
@@ -249,6 +297,7 @@
     typewriterWrapTextForEditor: typewriterWrapTextForEditor,
     applyTypewriterToElement: applyTypewriterToElement,
     animateAssistantText: animateAssistantText,
+    typeLabelIntoElement: typeLabelIntoElement,
     getCursorOffset: getCursorOffset,
     setCursorOffset: setCursorOffset,
   };

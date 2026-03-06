@@ -1,0 +1,34 @@
+{
+"imgs/paper5.webp": {
+    "padding": { "top": 7.2, "right": 1.0, "bottom": 13.5, "left": 12.0 },
+    "width": 600,
+    "height": 700,
+    "scale": 1.2
+  },
+      "imgs/paper6.webp": {
+    "padding": { "top": 5.2, "right": 4.0, "bottom": 25.5, "left": 14.0 },
+    "width": 600,
+    "height": 700,
+    "scale": 1.2
+  },
+    "imgs/paper7.webp": {
+    "padding": { "top": 17.7, "right": 2.5, "bottom": 22, "left": 6.1 },
+    "width": 380,
+    "height": 390,
+    "scale": 1.0
+  },
+
+      "imgs/paper8.webp": {
+    "padding": { "top": 34, "right": 1.5, "bottom": 20, "left": 5.1 },
+    "width": 580,
+    "height": 290,
+    "scale": 1.0
+  },
+      "imgs/paper9.webp": {
+    "padding": { "top": 24, "right": 4, "bottom": 25,
+     "left": 8.8 },
+    "width": 290,
+    "height": 360,
+    "scale": 0.9
+  }
+}

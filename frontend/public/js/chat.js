@@ -24,6 +24,9 @@
       node.setAttribute("aria-hidden", "false");
     }
     document.body.dataset.chatVisible = "true";
+    if (window.EDAMessageUI && typeof window.EDAMessageUI.runBlankChatIntro === "function") {
+      window.EDAMessageUI.runBlankChatIntro();
+    }
   }
 
   function hideChat() {

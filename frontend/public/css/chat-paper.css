@@ -30,9 +30,116 @@ main {
   }
 }
 
+main .messages-wrap {
+  position: relative;
+  overflow: visible;
+}
+
 main .messages {
+  position: relative;
   background: transparent;
   align-items: flex-start;
+  overflow: visible;
+}
+
+/* Stamps must not be clipped and must not affect scroll height */
+
+/* Closing stamps overlay when user hits chat limit */
+.chat-closing-stamps-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Stamp block: zero-height anchor in the flow — stamp is a permanent mark at this point on the paper and does not extend or move the paper */
+.chat-closing-stamp-block {
+  position: relative;
+  height: 0;
+  min-height: 0;
+  flex: 0 0 0;
+  overflow: visible;
+  display: block;
+  pointer-events: none;
+  width: 100%;
+}
+
+.chat-closing-stamp-block .chat-closing-stamp {
+  position: absolute;
+  z-index: 10;
+}
+
+.chat-closing-stamp {
+  font-size: 1.25rem;
+  font-weight: 700;
+  display: inline-block;
+  padding: 0.25rem 1rem;
+  text-transform: uppercase;
+  font-family: "Courier", Courier New, monospace;
+  white-space: pre-line;
+  -webkit-mask-image: url("../assets/imgs/other/grunge.webp");
+  -webkit-mask-size: 944px 604px;
+  mask-image: url("../assets/imgs/other/grunge.webp");
+  mask-size: 944px 604px;
+  mix-blend-mode: multiply;
+}
+
+/* Stashed: square, thick solid edge; dark top-left, nearly transparent lower right */
+.chat-closing-stamp--stashed {
+  color: #054c11ca;
+  border: 0.5rem solid #054c11ca;
+  border-radius: 0;
+  -webkit-mask-image: url("../assets/imgs/other/grunge.webp"), linear-gradient(to bottom right, black, rgba(0, 0, 0, 0.5) 90%);
+  -webkit-mask-size: 944px 604px, 100% 100%;
+  -webkit-mask-position: 13rem 6rem, 0 0;
+  -webkit-mask-composite: source-in;
+  mask-image: url("../assets/imgs/other/grunge.webp"), linear-gradient(to bottom right, black, rgba(0, 0, 0, 0.5) 90%);
+  mask-size: 944px 604px, 100% 100%;
+  mask-position: 13rem 6rem, 0 0;
+  mask-composite: intersect;
+}
+
+/* Tracked: grey, single outline; dark top-right, nearly transparent lower left */
+.chat-closing-stamp--tracked {
+  color: #6b6b6b;
+  border: 0.25rem solid #6b6b6b;
+  border-radius: 1rem;
+  font-size: 1rem;
+  -webkit-mask-image: url("../assets/imgs/other/grunge.webp"), linear-gradient(to bottom left, black, rgba(0, 0, 0, 0.45) 99%);
+  -webkit-mask-size: 944px 604px, 100% 100%;
+  -webkit-mask-position: 2rem 3rem, 0 0;
+  -webkit-mask-composite: source-in;
+  mask-image: url("../assets/imgs/other/grunge.webp"), linear-gradient(to bottom left, black, rgba(0, 0, 0, 0.45) 99%);
+  mask-size: 944px 604px, 100% 100%;
+  mask-position: 2rem 3rem, 0 0;
+  mask-composite: intersect;
+}
+
+/* Anomaly: red, double outline; dark bottom, nearly transparent top */
+.chat-closing-stamp--anomaly {
+  font-family: "Verdana", sans-serif;
+  text-align: center;
+  color: #b20412;
+  border: 0.5rem double #b20412;
+  border-radius: 2rem;
+  font-size: 2rem;
+  -webkit-mask-image: url("../assets/imgs/other/grunge.webp"), linear-gradient(to top, black, rgba(0, 0, 0, 0.5) 90%);
+  -webkit-mask-size: 944px 604px, 100% 100%;
+  -webkit-mask-position: 2rem 3rem, 0 0;
+  -webkit-mask-composite: source-in;
+  mask-image: url("../assets/imgs/other/grunge.webp"), linear-gradient(to top, black, rgba(0, 0, 0, 0.5) 90%);
+  mask-size: 944px 604px, 100% 100%;
+  mask-position: 2rem 3rem, 0 0;
+  mask-composite: intersect;
+}
+
+.chat-closing-stamp-line1,
+.chat-closing-stamp-line2 {
+  display: block;
 }
 
 main .messages .message,
@@ -48,11 +155,18 @@ main .message.assistant {
 
 main .message .label {
   font-weight: bold;
-  color: var(--chat-label, #555);
+  font-family: var(--chat-editor-font, monospace);
+  font-size: 1em;
+  line-height: var(--chat-editor-line-height, 1.5);
+  text-transform: uppercase;
+  direction: ltr;
+  text-align: left;
+  color: var(--chat-text, #1a1a1a);
 }
 
-main .message.user .label {
-  color: var(--chat-user-label, #2c5282);
+/* DETECTIVE label: start 10 characters from left so typewriter types in place left-to-right */
+main .message.assistant .label {
+  padding-left: 10ch;
 }
 
 main .message .content {
@@ -91,6 +205,8 @@ main .message .content.typewriter {
 }
 
 main .status {
+  font-family: var(--chat-editor-font, monospace);
+  line-height: var(--chat-editor-line-height, 1.5);
   color: var(--chat-status, #555);
 }
 
@@ -130,6 +246,11 @@ main .chat-editor-wrapper {
   width: 100%;
   max-width: 70ch;
   cursor: text;
+}
+
+/* Hidden until QUERENT has finished typing (blank-chat intro) */
+main .chat-editor-wrapper.chat-editor-wrapper--hidden {
+  visibility: hidden;
 }
 
 /* Dev/debug: highlight the clickable text entry region so it's easy to see

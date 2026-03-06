@@ -270,11 +270,15 @@
 
     var index = layer.querySelectorAll('.note-page[data-note-side="' + side + '"], .margin-item[data-note-side="' + side + '"]').length;
     var zoneEl = notePages.getPanel(side);
-    // Use same stacked placement helper as notes, but with the object's
-    // hit-box dimensions (after padding_frac) so it fits the philosopher zones.
-    var pos = typeof NoteLayout.stackedPositionInRegion === "function" && zoneEl
-      ? NoteLayout.stackedPositionInRegion(zoneEl, side, rotationDeg, size.hitWidth, size.hitHeight, index)
-      : { left: side === "left" ? 0 : undefined, right: side === "right" ? 0 : undefined, top: 0 };
+    // Use same placement as notes: stacked in zone and, when applicable, anchored near last user message.
+    var pos;
+    if (zoneEl && typeof notePages.getPositionInZone === "function") {
+      pos = notePages.getPositionInZone(zoneEl, side, rotationDeg, size.hitWidth, size.hitHeight, index);
+    } else if (typeof NoteLayout.stackedPositionInRegion === "function" && zoneEl) {
+      pos = NoteLayout.stackedPositionInRegion(zoneEl, side, rotationDeg, size.hitWidth, size.hitHeight, index);
+    } else {
+      pos = { left: side === "left" ? 0 : undefined, right: side === "right" ? 0 : undefined, top: 0 };
+    }
 
     var wrapper = createMarginItemElement(side, imageUrl, pos, rotationDeg);
     var zoneOffsetLeft = pos.left != null ? pos.left : (zoneBounds.width - pos.right - size.hitWidth);
@@ -286,6 +290,9 @@
     wrapper.dataset.zoneOffsetTop = String(zoneOffsetTop);
 
     layer.appendChild(wrapper);
+    if (NoteElement && typeof NoteElement.bringNoteToFront === "function") {
+      NoteElement.bringNoteToFront(wrapper, side);
+    }
     if (notePages && typeof notePages.addEntranceAnimation === "function") {
       notePages.addEntranceAnimation(wrapper);
     }

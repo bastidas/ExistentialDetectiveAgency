@@ -348,11 +348,23 @@
     content.setAttribute("data-applied-callouts", JSON.stringify(applied));
   }
 
-  function handleChatResponse(data, editorRef) {
+  /**
+   * @param {Object} data - API response
+   * @param {HTMLElement} editorRef - Insert ref (unused when placeholderOpts provided)
+   * @param {{ placeholderContent: HTMLElement }} [placeholderOpts] - When set, fill this content instead of addMessage
+   */
+  function handleChatResponse(data, editorRef, placeholderOpts) {
     if (!data.reply && data.error) {
       var displayMsg = chatErrorToMessage(data);
       EDAMessageUI.setStatus(displayMsg, true);
-      EDAMessageUI.addMessage("assistant", displayMsg, editorRef);
+      if (placeholderOpts && placeholderOpts.placeholderContent) {
+        placeholderOpts.placeholderContent.textContent = displayMsg;
+      } else {
+        EDAMessageUI.addMessage("assistant", displayMsg, editorRef);
+      }
+      if (global.EDARandomMarginItems && typeof global.EDARandomMarginItems.maybeDropRandomItemForUserInput === "function") {
+        global.EDARandomMarginItems.maybeDropRandomItemForUserInput({});
+      }
       return;
     }
     EDAMessageUI.setStatus("");
@@ -369,23 +381,38 @@
     var philNormalized = normalizePhilosopherResponse(data);
     console.log("[DEBUG] Main chat response received; philosopher fields present:", hasPhilosopherContent(philNormalized));
 
-    // Apply new callouts to the last user message before adding assistant content (no reflow; existing annotations stay intact).
     applyCalloutsToLastUserMessage(data, lastSentUserMessage);
 
-    EDAMessageUI.addMessage("assistant", data.reply || "(No reply)", editorRef);
+    var atLimit = data.debug && typeof data.debug.userExchanges === "number" && typeof data.debug.maxUserExchanges === "number" && data.debug.userExchanges >= data.debug.maxUserExchanges;
+    var stampOpts = { limitReached: !!data.limitReached, debug: !!(document.body && document.body.dataset.devMode === "true") && atLimit };
+    var leftHasContent = hasPhilosopherContentForSide(philNormalized, "left");
+    var rightHasContent = hasPhilosopherContentForSide(philNormalized, "right");
+    var marginItemSideHint = (leftHasContent && !rightHasContent) ? "left" : (rightHasContent && !leftHasContent) ? "right" : null;
+    var onAssistantDone = function () {
+      if (global.EDAClosingStamps && typeof global.EDAClosingStamps.maybeShowStamps === "function") {
+        if (stampOpts.limitReached) global.EDAClosingStamps.maybeShowStamps({ limitReached: true });
+        else if (stampOpts.debug) global.EDAClosingStamps.maybeShowStamps({ debug: true });
+      }
+      if (global.EDARandomMarginItems && typeof global.EDARandomMarginItems.maybeDropRandomItemForUserInput === "function") {
+        global.EDARandomMarginItems.maybeDropRandomItemForUserInput({ side: marginItemSideHint });
+      }
+      if (EDAMessageUI.runReadyForNextInput) {
+        EDAMessageUI.runReadyForNextInput();
+      }
+    };
+    if (placeholderOpts && placeholderOpts.placeholderContent) {
+      var contentEl = placeholderOpts.placeholderContent;
+      if (EDAUtils && EDAUtils.animateAssistantText) {
+        EDAUtils.animateAssistantText(contentEl, data.reply || "(No reply)", { onDone: onAssistantDone });
+      } else {
+        contentEl.textContent = data.reply || "(No reply)";
+        onAssistantDone();
+      }
+    } else {
+      EDAMessageUI.addMessage("assistant", data.reply || "(No reply)", editorRef, { onAssistantDone: onAssistantDone });
+    }
     handlePhilosopherContent(data);
 
-    if (global.EDARandomMarginItems && typeof global.EDARandomMarginItems.maybeDropRandomItemForUserInput === "function") {
-      var leftHasContent = hasPhilosopherContentForSide(philNormalized, "left");
-      var rightHasContent = hasPhilosopherContentForSide(philNormalized, "right");
-      var sideHint = null;
-      if (leftHasContent && !rightHasContent) {
-        sideHint = "left";
-      } else if (rightHasContent && !leftHasContent) {
-        sideHint = "right";
-      }
-      global.EDARandomMarginItems.maybeDropRandomItemForUserInput({ side: sideHint });
-    }
     if (Array.isArray(data.philosopherNotes) && data.philosopherNotes.length > 0) {
       var seq = Promise.resolve();
       data.philosopherNotes.forEach(function (note) {
@@ -467,19 +494,33 @@
     var submitBtn = document.getElementById("submit");
     var editorRef = EDAMessageUI.getEditorNode && EDAMessageUI.getEditorNode();
     lastSentUserMessage = messageToSend;
+    if (EDAMessageUI.removeQuerentIntroIfPresent) {
+      EDAMessageUI.removeQuerentIntroIfPresent();
+    }
     // Always add user message via addMessage so it gets annotated (keyword/highlight/strike).
     EDAMessageUI.addMessage("user", messageToSend);
     if (EDAChatInput && EDAChatInput.clear && !deferInputClear) {
       EDAChatInput.clear();
-      focusEditor(true);
     }
     if (submitBtn) submitBtn.disabled = true;
     EDAMessageUI.setStatus("Thinking…");
 
+    var wrapper = editorRef && editorRef.parentNode;
+    if (wrapper) wrapper.classList.add("chat-editor-wrapper--hidden");
+
+    var agentLabel = (global.ChatConfig && global.ChatConfig.AGENT_CHAT_LABEL) || "DETECTIVE";
+    var placeholder = EDAMessageUI.addAssistantPlaceholder && EDAMessageUI.addAssistantPlaceholder(editorRef);
+    if (placeholder) {
+      if (EDAUtils && EDAUtils.typeLabelIntoElement) {
+        EDAUtils.typeLabelIntoElement(placeholder.labelEl, agentLabel, { delayMs: 60 });
+      } else {
+        placeholder.labelEl.textContent = agentLabel;
+      }
+    }
+
     function onDone() {
       sending = false;
       if (submitBtn) submitBtn.disabled = false;
-      focusEditor(true);
     }
 
     function runFetch() {
@@ -499,7 +540,14 @@
       })
         .then(function (res) {
           if (res.status === 204) {
+            if (placeholder && placeholder.node) placeholder.node.remove();
             EDAMessageUI.setStatus("");
+            if (global.EDAClosingStamps && typeof global.EDAClosingStamps.maybeShowStamps === "function") {
+              global.EDAClosingStamps.maybeShowStamps({ noReply: true });
+            }
+            if (EDAMessageUI.runReadyForNextInput) {
+              EDAMessageUI.runReadyForNextInput();
+            }
             return null;
           }
           return res.json().catch(function () {
@@ -511,13 +559,29 @@
           if (!data.reply && data.error) {
             var msg = chatErrorToMessage(data);
             EDAMessageUI.setStatus(msg, true);
-            EDAMessageUI.addMessage("assistant", msg, editorRef);
+            if (placeholder && placeholder.contentEl) {
+              placeholder.contentEl.textContent = msg;
+            } else {
+              EDAMessageUI.addMessage("assistant", msg, editorRef);
+            }
+            if (EDAMessageUI.runReadyForNextInput) {
+              EDAMessageUI.runReadyForNextInput();
+            }
             return;
           }
-          handleChatResponse(data, editorRef);
+          var opts = placeholder && placeholder.contentEl
+            ? { placeholderContent: placeholder.contentEl }
+            : undefined;
+          handleChatResponse(data, editorRef, opts);
         })
         .catch(function (err) {
           EDAMessageUI.setStatus("Network error: " + err.message, true);
+          if (placeholder && placeholder.contentEl) {
+            placeholder.contentEl.textContent = "Network error: " + err.message;
+          }
+          if (EDAMessageUI.runReadyForNextInput) {
+            EDAMessageUI.runReadyForNextInput();
+          }
         })
         .finally(onDone);
     }

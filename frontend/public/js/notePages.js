@@ -745,6 +745,8 @@
     getOrCreateRegion: getOrCreateRegion,
     getOrCreateNotesLayer: getOrCreateNotesLayer,
     getZoneBoundsInLayer: getZoneBoundsInLayer,
+    /** Same position logic as notes: stacked in zone, or anchored near last user message when applicable. */
+    getPositionInZone: computeNotePosition,
     updateNotePositionsInLayer: updateNotePositionsInLayer,
     addEntranceAnimation: addEntranceAnimation,
     bring_note_to_front: bringNoteToFront,

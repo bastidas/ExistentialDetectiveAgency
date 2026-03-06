@@ -1,0 +1,46 @@
+{
+  "defaultLocale": "en",
+  "stashed": {
+    "rotation_range": 10,
+    "color": "#1a1515",
+    "phrases": {
+      "en": [
+        "Stashing archives",
+        "Filed in the archives under stray miracles",
+        "Depositing, keeping, or setting aside",
+        "Archiving, indexing, filing",
+        "Activity noted: marked for archival"
+      ]
+    }
+  },
+  "tracked": {
+    "rotation_range": 10,
+    "color": "#013001",
+    "phrases": {
+      "en": [
+        "Rough Shadowing",
+        "Skip tracing",
+        "Technical surveillance",
+        "A seguro, le llevan preso",
+        "No pidas perdon antes de ser acusado."
+      ]
+    }
+  },
+  "anomaly": {
+    "rotation_range": 30,
+    "color": "#690c13",
+    "phrases": {
+      "en": [
+        "agent vacant",
+        "Rethreading reality",
+        "Anomaly filed",
+        "Due diligence",
+        "Hidden asset",
+        "Anomalous Syndicate",
+        "Rm9sbG93ZXJz",
+        "Delphic Expanse Anomaly",
+        "Sophon Anomaly"
+      ]
+    }
+  }
+}
