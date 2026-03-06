@@ -212,6 +212,142 @@
     schedulePhilosopherDialog();
   }
 
+  /**
+   * Parse callout entries from API (object { userText, mode } or array [userText, mode]).
+   * Returns normalized { userText, mode } or null if invalid.
+   */
+  function parseCalloutEntry(entry) {
+    if (!entry) return null;
+    var userText = (entry && typeof entry === "object" && "userText" in entry)
+      ? String(entry.userText).trim()
+      : (Array.isArray(entry) && entry.length >= 2)
+        ? String(entry[0]).trim()
+        : "";
+    var mode = (entry && typeof entry === "object" && "mode" in entry)
+      ? String(entry.mode).toLowerCase()
+      : (Array.isArray(entry) && entry.length >= 2)
+        ? String(entry[1]).toLowerCase()
+        : "";
+    if (!userText || !mode) return null;
+    if (mode !== "keyword" && mode !== "highlight" && mode !== "strike") return null;
+    return { userText: userText, mode: mode };
+  }
+
+  /**
+   * Build "seen" set from existing applied callouts and DOM spans.
+   * Uses exact span text only (plus optional capped subphrases) to avoid O(n²) and keep behavior stable.
+   */
+  function buildSeenFromAppliedAndSpans(applied, contentEl, options) {
+    var opts = options || {};
+    var maxSubphrasesPerSpan = typeof opts.maxSubphrasesPerSpan === "number" ? opts.maxSubphrasesPerSpan : 20;
+    var seen = {};
+    applied.forEach(function (c) {
+      var k = (c.userText || "").toLowerCase();
+      if (k) seen[k] = true;
+    });
+    var existingSpans = contentEl ? contentEl.querySelectorAll(".keyword-annotation") : [];
+    for (var i = 0; i < existingSpans.length; i++) {
+      var t = (existingSpans[i].textContent || "").trim().toLowerCase();
+      if (!t) continue;
+      seen[t] = true;
+      var words = t.split(/\s+/);
+      var count = 0;
+      for (var start = 0; start < words.length && count < maxSubphrasesPerSpan; start++) {
+        for (var end = start; end < words.length && count < maxSubphrasesPerSpan; end++) {
+          var sub = words.slice(start, end + 1).join(" ");
+          if (sub && !seen[sub]) {
+            seen[sub] = true;
+            count++;
+          }
+        }
+      }
+    }
+    return seen;
+  }
+
+  /**
+   * Apply API callouts to the last user message content.
+   * Only mutates the DOM by adding new spans and rough notation; does not replace or reflow existing content.
+   * @param data - API response with leftPhilosopherCallouts / rightPhilosopherCallouts (or snake_case)
+   * @param lastSentText - text of the last sent user message (used to verify we're annotating the right node)
+   */
+  function applyCalloutsToLastUserMessage(data, lastSentText) {
+    if (!data || typeof data !== "object") return;
+    var leftCallouts = Array.isArray(data.leftPhilosopherCallouts)
+      ? data.leftPhilosopherCallouts
+      : Array.isArray(data.left_philosopher_callouts)
+        ? data.left_philosopher_callouts
+        : [];
+    var rightCallouts = Array.isArray(data.rightPhilosopherCallouts)
+      ? data.rightPhilosopherCallouts
+      : Array.isArray(data.right_philosopher_callouts)
+        ? data.right_philosopher_callouts
+        : [];
+    if (!leftCallouts.length && !rightCallouts.length) return;
+    if (!lastSentText || typeof lastSentText !== "string" || !lastSentText.trim()) return;
+    if (typeof EDAAnnotation === "undefined" || !EDAAnnotation.addInPlaceAnnotationSpans) return;
+
+    var messagesEl = document.getElementById("messages");
+    var userBlocks = messagesEl ? messagesEl.querySelectorAll(".message.user") : [];
+    var lastUser = userBlocks.length ? userBlocks[userBlocks.length - 1] : null;
+    var content = lastUser ? lastUser.querySelector(".content") : null;
+    if (!content) return;
+
+    // Harden: verify this content node corresponds to the last sent message (avoid annotating wrong message).
+    var contentText = (content.textContent || "").trim();
+    var sentNorm = lastSentText.trim();
+    if (contentText.indexOf(sentNorm) === -1 && sentNorm.indexOf(contentText) === -1) {
+      return;
+    }
+
+    var applied = [];
+    try {
+      var raw = content.getAttribute("data-applied-callouts") || "[]";
+      var parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        applied = parsed.map(function (c) {
+          if (c && typeof c === "object" && "userText" in c && "mode" in c) {
+            return { userText: String(c.userText).trim(), mode: String(c.mode).toLowerCase() };
+          }
+          if (Array.isArray(c) && c.length >= 2) {
+            return { userText: String(c[0]).trim(), mode: String(c[1]).toLowerCase() };
+          }
+          return null;
+        }).filter(Boolean);
+      }
+    } catch (e) {}
+
+    var seen = buildSeenFromAppliedAndSpans(applied, content, { maxSubphrasesPerSpan: 20 });
+    function addCallout(word, mode) {
+      var key = (word || "").trim().toLowerCase();
+      if (!key || seen[key]) return;
+      seen[key] = true;
+      applied.push({ userText: (word || "").trim(), mode: (mode || "keyword").toLowerCase() });
+    }
+
+    var appliedLengthBefore = applied.length;
+    [].concat(leftCallouts, rightCallouts).forEach(function (entry) {
+      var c = parseCalloutEntry(entry);
+      if (c) addCallout(c.userText, c.mode);
+    });
+    var newCallouts = applied.slice(appliedLengthBefore);
+    if (!newCallouts.length) return;
+
+    var newSpans = [];
+    var requestedCount = newCallouts.length;
+    newCallouts.forEach(function (c) {
+      var spans = EDAAnnotation.addInPlaceAnnotationSpans(content, c.userText, c.mode);
+      newSpans.push.apply(newSpans, spans);
+    });
+    if (newSpans.length < requestedCount && typeof console !== "undefined" && console.warn) {
+      console.warn("[annotation] applyCalloutsToLastUserMessage: applied " + newSpans.length + " spans for " + requestedCount + " callouts (some phrases not found or overlapped)");
+    }
+    if (newSpans.length && EDAAnnotation.applyRoughNotationToSpans) {
+      EDAAnnotation.applyRoughNotationToSpans(newSpans, "left");
+    }
+    content.setAttribute("data-applied-callouts", JSON.stringify(applied));
+  }
+
   function handleChatResponse(data, editorRef) {
     if (!data.reply && data.error) {
       var displayMsg = chatErrorToMessage(data);
@@ -232,47 +368,12 @@
     }
     var philNormalized = normalizePhilosopherResponse(data);
     console.log("[DEBUG] Main chat response received; philosopher fields present:", hasPhilosopherContent(philNormalized));
+
+    // Apply new callouts to the last user message before adding assistant content (no reflow; existing annotations stay intact).
+    applyCalloutsToLastUserMessage(data, lastSentUserMessage);
+
     EDAMessageUI.addMessage("assistant", data.reply || "(No reply)", editorRef);
     handlePhilosopherContent(data);
-
-    var leftCallouts = Array.isArray(data.leftPhilosopherCallouts) ? data.leftPhilosopherCallouts : [];
-    var rightCallouts = Array.isArray(data.rightPhilosopherCallouts) ? data.rightPhilosopherCallouts : [];
-    if ((leftCallouts.length || rightCallouts.length) && lastSentUserMessage) {
-      var merged = [];
-      var seenWord = {};
-      function addCallout(word, mode) {
-        var key = (word || "").toLowerCase();
-        if (!key || seenWord[key]) return;
-        seenWord[key] = true;
-        merged.push({ userText: word, mode: mode });
-      }
-      leftCallouts.forEach(function (entry) {
-        if (Array.isArray(entry) && entry.length >= 2) {
-          addCallout(String(entry[0]).trim(), String(entry[1]).toLowerCase());
-        }
-      });
-      rightCallouts.forEach(function (entry) {
-        if (Array.isArray(entry) && entry.length >= 2) {
-          addCallout(String(entry[0]).trim(), String(entry[1]).toLowerCase());
-        }
-      });
-      if (merged.length) {
-        var messagesEl = document.getElementById("messages");
-        if (messagesEl) {
-          var userBlocks = messagesEl.querySelectorAll(".message.user");
-          var lastUser = userBlocks.length ? userBlocks[userBlocks.length - 1] : null;
-          if (lastUser) {
-            var content = lastUser.querySelector(".content");
-            if (content && typeof EDAAnnotation !== "undefined" && EDAAnnotation.wrapAnnotationKeywords) {
-              content.innerHTML = EDAAnnotation.wrapAnnotationKeywords(lastSentUserMessage, { extraCallouts: merged });
-              if (EDAAnnotation.applyRoughNotationToKeywordSpans) {
-                EDAAnnotation.applyRoughNotationToKeywordSpans(content, "left");
-              }
-            }
-          }
-        }
-      }
-    }
 
     if (global.EDARandomMarginItems && typeof global.EDARandomMarginItems.maybeDropRandomItemForUserInput === "function") {
       var leftHasContent = hasPhilosopherContentForSide(philNormalized, "left");

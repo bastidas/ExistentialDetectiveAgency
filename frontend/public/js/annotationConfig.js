@@ -11,7 +11,7 @@
   /** Map from rule mode to RoughNotation type names (one picked at random per span). */
   var ANNOTATION_MODE_TO_TYPES = {
     keyword: ["circle", "box", "underline"],
-    highlight: ["highlight", "bracket"],
+    highlight: ["bracket"], /** highlight was causing dispaly issues, remove */
     strike: ["strike-through", "crossed-off"],
   };
 
@@ -32,7 +32,7 @@
     },
     right: {
       animationDuration: 800,
-      strokeWidth: 1.5,
+      strokeWidth: 2,
       padding: 4,
       iterations: 3,
       bracketSides: ["right", "left"],

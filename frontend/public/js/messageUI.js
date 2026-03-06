@@ -45,6 +45,7 @@
     content.className = "content typewriter";
     if (role === "user") {
       content.innerHTML = EDAAnnotation.wrapAnnotationKeywords(text);
+      content.setAttribute("data-applied-callouts", "[]");
       if (EDAUtils && EDAUtils.applyTypewriterToElement) {
         EDAUtils.applyTypewriterToElement(content);
       }
