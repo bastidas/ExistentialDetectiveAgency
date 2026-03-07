@@ -18,6 +18,51 @@
     mobile: null,
     medium: null,
   };
+  var layoutBreakpoints = null;
+
+  function initLayoutBreakpoints() {
+    var bp = typeof window !== "undefined" ? window.EDABreakpoints : null;
+    var layout = bp && bp.LAYOUT;
+    if (layout && typeof layout.MOBILE_MAX === "number" && typeof layout.MEDIUM_MIN === "number" && typeof layout.MEDIUM_MAX === "number") {
+      layoutBreakpoints = {
+        mobileMax: layout.MOBILE_MAX,
+        mediumMin: layout.MEDIUM_MIN,
+        mediumMax: layout.MEDIUM_MAX,
+      };
+    } else {
+      // Fallback to previous hardcoded values if central config is unavailable.
+      layoutBreakpoints = {
+        mobileMax: 768,
+        mediumMin: 769,
+        mediumMax: 1440,
+      };
+    }
+  }
+
+  function resolveWidthBand(width) {
+    var bp = typeof window !== "undefined" ? window.EDABreakpoints : null;
+    var bands = bp && bp.RESPONSIVE_BANDS;
+    if (bands && bands.length) {
+      if (typeof width !== "number" || !isFinite(width) || width <= 0) {
+        // Fallback to desktop-base if present, otherwise first band.
+        for (var j = 0; j < bands.length; j++) {
+          if (bands[j].mode === "desktop-base") return bands[j].mode;
+        }
+        return bands[0].mode;
+      }
+      for (var i = 0; i < bands.length; i++) {
+        var band = bands[i];
+        var minOk = typeof band.min === "number" ? width >= band.min : true;
+        var maxOk = typeof band.max === "number" && isFinite(band.max) ? width <= band.max : true;
+        if (minOk && maxOk) return band.mode;
+      }
+      for (var k = 0; k < bands.length; k++) {
+        if (bands[k].mode === "desktop-base") return bands[k].mode;
+      }
+      return bands[0].mode;
+    }
+    return null;
+  }
 
   function moveNotesLayerToShared() {
     var layer = document.getElementById("notes-layer");
@@ -59,6 +104,8 @@
 
   function syncViewportFlag() {
     if (!bodyEl) return;
+    if (!layoutBreakpoints) initLayoutBreakpoints();
+
     var next = "large";
     if (viewportQueries.mobile && viewportQueries.mobile.matches) {
       next = "mobile";
@@ -67,6 +114,14 @@
     }
     if (bodyEl.dataset.viewport !== next) {
       bodyEl.dataset.viewport = next;
+    }
+
+    var width = typeof window !== "undefined" ? window.innerWidth : null;
+    var band = resolveWidthBand(width);
+    if (band) {
+      bodyEl.dataset.widthBand = band;
+    } else {
+      delete bodyEl.dataset.widthBand;
     }
     if (currentViewport !== next) {
       currentViewport = next;
@@ -98,8 +153,13 @@
       return;
     }
 
-    viewportQueries.mobile = window.matchMedia ? window.matchMedia("(max-width: 768px)") : null;
-    viewportQueries.medium = window.matchMedia ? window.matchMedia("(min-width: 769px) and (max-width: 1440px)") : null;
+    if (!layoutBreakpoints) initLayoutBreakpoints();
+
+    var mqMobile = "(max-width: " + layoutBreakpoints.mobileMax + "px)";
+    var mqMedium = "(min-width: " + layoutBreakpoints.mediumMin + "px) and (max-width: " + layoutBreakpoints.mediumMax + "px)";
+
+    viewportQueries.mobile = window.matchMedia ? window.matchMedia(mqMobile) : null;
+    viewportQueries.medium = window.matchMedia ? window.matchMedia(mqMedium) : null;
 
     bindViewportListener(viewportQueries.mobile);
     bindViewportListener(viewportQueries.medium);

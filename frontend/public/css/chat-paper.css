@@ -197,6 +197,38 @@ main .message.assistant .content {
 body[data-dev-mode="true"] main .message.user .content,
 body[data-dev-mode="true"] main .message.assistant .content {
   border: 1px solid #000;
+
+  position: relative;
+}
+
+body[data-dev-mode="true"] main .message.user .content::before {
+  content: "user message content";
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 2px;
+  z-index: 9999;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 4px;
+  background: rgba(200, 200, 200, 0.9);
+  color: #000;
+  pointer-events: none;
+}
+
+body[data-dev-mode="true"] main .message.assistant .content::before {
+  content: "assistant message content";
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 2px;
+  z-index: 9999;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 4px;
+  background: rgba(200, 200, 200, 0.9);
+  color: #000;
+  pointer-events: none;
 }
 
 main .message .content.typewriter {
@@ -258,6 +290,22 @@ main .chat-editor-wrapper.chat-editor-wrapper--hidden {
 body[data-dev-mode="true"] main .chat-editor-wrapper {
   outline: 2px solid #00ff66;
   outline-offset: 4px;
+    position: relative;
+}
+
+body[data-dev-mode="true"] main .chat-editor-wrapper::before {
+  content: "chat editor wrapper";
+  position: absolute;
+  bottom: 100%;
+  left: 2px;
+  margin-bottom: 2px;
+  z-index: 9999;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 4px;
+  background: rgba(0, 255, 102, 0.9);
+  color: #000;
+  pointer-events: none;
 }
 
 @media (max-width: 640px) {

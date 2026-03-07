@@ -8,6 +8,7 @@
 
   var NOTE_ACTIVE_CLASS = "note-page--active";
   var NOTE_DRAG_CLASS = "note-page--dragging";
+  var NOTE_HIT_HOVER_CLASS = "note-page--hit-hover";
   var NOTE_DESTROY_CLASS = "note-page--destroying";
   // Keep in sync with CSS animation duration in note-pages.css
   var DESTROY_ANIMATION_MS = 450;
@@ -86,6 +87,51 @@
   }
 
   /**
+   * Return true if a viewport-space point (clientX, clientY) lies inside the
+   * logical bounding box for this note, accounting for rotation.
+   * Falls back to true (no gating) if bounding metadata is missing.
+   */
+  function isPointInBoundingBox(wrapper, clientX, clientY) {
+    if (!wrapper || !wrapper.dataset) return true;
+    var bw = wrapper.dataset.boundingWidth != null ? parseFloat(wrapper.dataset.boundingWidth) : NaN;
+    var bh = wrapper.dataset.boundingHeight != null ? parseFloat(wrapper.dataset.boundingHeight) : NaN;
+    var boX = wrapper.dataset.boundingOffsetX != null ? parseFloat(wrapper.dataset.boundingOffsetX) : NaN;
+    var boY = wrapper.dataset.boundingOffsetY != null ? parseFloat(wrapper.dataset.boundingOffsetY) : NaN;
+    if (!isFinite(bw) || !isFinite(bh) || !isFinite(boX) || !isFinite(boY)) {
+      return true;
+    }
+
+    var angleDeg = wrapper.dataset.rotationDeg != null ? parseFloat(wrapper.dataset.rotationDeg) : 0;
+    if (!isFinite(angleDeg)) angleDeg = 0;
+    var angleRad = angleDeg * Math.PI / 180;
+    var cos = Math.cos(angleRad);
+    var sin = Math.sin(angleRad);
+
+    var layer = wrapper.parentNode;
+    if (!layer || !layer.getBoundingClientRect) return true;
+    var layerRect = layer.getBoundingClientRect();
+    var originX = layerRect.left + wrapper.offsetLeft;
+    var originY = layerRect.top + wrapper.offsetTop;
+    if (wrapper.offsetParent !== layer) {
+      var noteRect = wrapper.getBoundingClientRect();
+      originX = noteRect.left;
+      originY = noteRect.top;
+    }
+
+    var dx = clientX - originX;
+    var dy = clientY - originY;
+    // Invert rotation: map from screen space back to the note's unrotated local
+    // coordinates (top-left origin).
+    var localX = dx * cos + dy * sin;
+    var localY = -dx * sin + dy * cos;
+
+    return (
+      localX >= boX && localX <= boX + bw &&
+      localY >= boY && localY <= boY + bh
+    );
+  }
+
+  /**
    * In-region drag only; transform-origin–based so rotated notes don't jump.
    * No overlay reparent. Optional: replace with @neodrag/vanilla (ESM) when using a bundler.
    */
@@ -94,6 +140,23 @@
     callbacks = callbacks || {};
     var activePointerId = null;
     var dragState = null;
+
+    function updateHoverState(event) {
+      if (!event || !wrapper) return;
+      if (event.pointerType && event.pointerType !== "mouse") {
+        wrapper.classList.remove(NOTE_HIT_HOVER_CLASS);
+        return;
+      }
+      if (activePointerId != null && event.pointerId === activePointerId && dragState) {
+        wrapper.classList.remove(NOTE_HIT_HOVER_CLASS);
+        return;
+      }
+      if (!isPointInBoundingBox(wrapper, event.clientX, event.clientY)) {
+        wrapper.classList.remove(NOTE_HIT_HOVER_CLASS);
+      } else {
+        wrapper.classList.add(NOTE_HIT_HOVER_CLASS);
+      }
+    }
 
     function endDrag(event) {
       if (activePointerId == null || event.pointerId !== activePointerId) return;
@@ -112,6 +175,9 @@
     wrapper.addEventListener("pointerdown", function (event) {
       if (event.button && event.button !== 0) return;
       if (event.target && event.target.closest && event.target.closest(".note-page__controls")) {
+        return;
+      }
+      if (!isPointInBoundingBox(wrapper, event.clientX, event.clientY)) {
         return;
       }
       if (activeDragRef && activeDragRef.wrapper !== wrapper) {
@@ -142,6 +208,7 @@
     }, captureOpt);
 
     wrapper.addEventListener("pointermove", function (event) {
+      updateHoverState(event);
       if (activePointerId == null || event.pointerId !== activePointerId || !dragState) return;
       if (event.preventDefault) event.preventDefault();
       var layer = wrapper.parentNode;
@@ -153,6 +220,10 @@
       wrapper.style.right = "";
       wrapper.style.top = nextTop + "px";
     }, captureOpt);
+
+    wrapper.addEventListener("pointerleave", function () {
+      wrapper.classList.remove(NOTE_HIT_HOVER_CLASS);
+    });
 
     wrapper.addEventListener("pointerup", endDrag);
     wrapper.addEventListener("pointercancel", endDrag);
@@ -206,7 +277,31 @@
     });
     wrapper.addEventListener("pointerdown", function (event) {
       if (event.button && event.button !== 0) return;
-      bringNoteToFront(wrapper, side);
+      if (event.target && event.target.closest && event.target.closest(".note-page__controls")) {
+        return;
+      }
+
+      var layer = wrapper.parentNode;
+      if (!layer || !layer.querySelectorAll) return;
+
+      var clientX = event.clientX;
+      var clientY = event.clientY;
+      var nodes = layer.querySelectorAll(".note-page");
+      var chosen = null;
+      var bestZ = -Infinity;
+      for (var i = 0; i < nodes.length; i++) {
+        var w = nodes[i];
+        if (!isPointInBoundingBox(w, clientX, clientY)) continue;
+        var z = parseFloat(w.style.zIndex || "0");
+        if (!isFinite(z)) z = 0;
+        if (z >= bestZ) {
+          bestZ = z;
+          chosen = w;
+        }
+      }
+      if (!chosen) return;
+      var chosenSide = chosen.dataset && chosen.dataset.noteSide ? chosen.dataset.noteSide : side;
+      bringNoteToFront(chosen, chosenSide);
     });
   }
 
@@ -230,6 +325,7 @@
     wrapper.style.transformOrigin = "top left";
     wrapper.style.setProperty("--note-rotation", rotationDeg + "deg");
     wrapper.style.transform = "rotate(" + rotationDeg + "deg)";
+    wrapper.dataset.rotationDeg = String(rotationDeg);
     if (pos.left != null) wrapper.style.left = pos.left + "px";
     if (pos.right != null) wrapper.style.right = pos.right + "px";
     wrapper.style.top = pos.top + "px";
@@ -248,6 +344,12 @@
     }
     paperEl.style.backgroundImage = "url(" + paperSrc + ")";
     wrapper.appendChild(paperEl);
+
+    // Dedicated hit area used for selection/drag hit-testing; sized/positioned by notePages.
+    var hitEl = document.createElement("div");
+    hitEl.className = "note-page__hit-area";
+    hitEl.setAttribute("aria-hidden", "true");
+    paperEl.appendChild(hitEl);
 
     var contentEl = document.createElement("div");
     contentEl.className = "note-page__content";

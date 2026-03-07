@@ -200,6 +200,12 @@
   }
 
   function getPaperWritingAreaHeight(paperUrl, side) {
+    if (cfg && typeof cfg.getWritableAreaSize === "function") {
+      var writable = cfg.getWritableAreaSize(paperUrl, side);
+      if (writable && typeof writable.height === "number") {
+        return writable.height;
+      }
+    }
     var size = getPaperSize(paperUrl);
     var padding = getPaperPadding(paperUrl, side);
     return size.height * (1 - (padding.top + padding.bottom) / 100);

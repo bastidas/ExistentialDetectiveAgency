@@ -40,20 +40,106 @@
   pointer-events: auto;
 }
 
-/* Debug: philosopher zone bounding boxes (left and right). Visible only in dev mode. */
+/* Debug: philosopher panels and content zones. Visible only in dev mode. Labels identify each box. */
+body[data-dev-mode="true"] #left-philosopher {
+  position: relative;
+}
+
+body[data-dev-mode="true"] #left-philosopher::before {
+  content: "placement zone (left)";
+  position: absolute;
+  bottom: 100%;
+  left: 2px;
+  margin-bottom: 2px;
+  z-index: 9999;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 4px;
+  background: rgba(200, 200, 200, 0.9);
+  color: #000;
+  pointer-events: none;
+}
+
+body[data-dev-mode="true"] #right-philosopher {
+  position: relative;
+}
+
+body[data-dev-mode="true"] #right-philosopher::before {
+  content: "placement zone (right)";
+  position: absolute;
+  bottom: 100%;
+  left: 2px;
+  margin-bottom: 2px;
+  z-index: 9999;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 4px;
+  background: rgba(200, 200, 200, 0.9);
+  color: #000;
+  pointer-events: none;
+}
+/* abc */
 body[data-dev-mode="true"] #left-philosopher-content {
   outline: 2px dashed rgba(100, 180, 255, 0.7);
   outline-offset: 2px;
+    position: relative;
+}
+
+body[data-dev-mode="true"] #left-philosopher-content::before {
+  content: "left philosopher content";
+  position: absolute;
+  bottom: 100%;
+  left: 2px;
+  margin-bottom: 2px;
+  z-index: 9999;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 4px;
+  background: rgba(100, 180, 255, 0.9);
+  color: #000;
+  pointer-events: none;
 }
 
 body[data-dev-mode="true"] #right-philosopher-content {
   outline: 2px dashed rgba(255, 180, 100, 0.7);
   outline-offset: 2px;
+    position: relative;
+}
+
+body[data-dev-mode="true"] #right-philosopher-content::before {
+  content: "right philosopher content";
+  position: absolute;
+  bottom: 100%;
+  left: 2px;
+  margin-bottom: 2px;
+  z-index: 9999;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 4px;
+  background: rgba(255, 180, 100, 0.9);
+  color: #000;
+  pointer-events: none;
 }
 
 body[data-dev-mode="true"] #mobile-shared-notes-content {
   outline: 2px dashed rgba(150, 255, 150, 0.6);
   outline-offset: 2px;
+    position: relative;
+}
+
+body[data-dev-mode="true"] #mobile-shared-notes-content::before {
+  content: "mobile shared notes content";
+  position: absolute;
+  bottom: 100%;
+  left: 2px;
+  margin-bottom: 2px;
+  z-index: 9999;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 4px;
+  background: rgba(150, 255, 150, 0.9);
+  color: #000;
+  pointer-events: none;
 }
 
 /* Draggable: reserve touch for drag so page doesn't scroll when grabbing (mobile). */
@@ -64,10 +150,14 @@ body[data-dev-mode="true"] #mobile-shared-notes-content {
   border: none;
   outline: none;
   box-shadow: none;
-  cursor: grab;
+  cursor: default;
   transition: transform 0.25s ease, box-shadow 0.25s ease;
   touch-action: none;
   -webkit-tap-highlight-color: transparent;
+}
+
+.note-page.note-page--hit-hover {
+  cursor: grab;
 }
 
 .margin-item {
@@ -147,7 +237,7 @@ body[data-dev-mode="true"] #mobile-shared-notes-content {
 
 .note-page__paper {
   position: relative;
-  background-size: cover;
+  background-size: contain;
   background-position: center;
   background-repeat: no-repeat;
   background-color: transparent;
@@ -291,7 +381,8 @@ body:not([data-dev-mode="true"]) .note-page__content.note-page__content--debug-o
 /* Dev-only overlays: bounding box, text-region box, and padding box */
 .note-page__debug-padding-box {
   position: absolute;
-  border: 1px solid rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(0, 200, 0, 0.9);
+  background: transparent;
   box-sizing: border-box;
   pointer-events: none;
   z-index: 4;

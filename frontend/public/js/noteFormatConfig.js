@@ -6,22 +6,39 @@
 (function (global) {
   "use strict";
 
-  var RESPONSIVE_STEPS = [
-    { mode: "mobile-xs", max: 480, noteScale: 0.6, fontScale: 0.85 },
-    { mode: "mobile-sm", max: 640, noteScale: 0.68, fontScale: 0.88 },
-    { mode: "mobile", max: 768, noteScale: 0.76, fontScale: 0.9 },
-    { mode: "medium", max: 1440, noteScale: 0.94, fontScale: 0.97 },
+  // Central responsive configuration for note scaling is provided by
+  // EDABreakpoints (breakpointsConfig.js). Fall back to legacy literals if
+  // that config is not loaded for any reason.
+  var Breakpoints = global.EDABreakpoints || {};
+  // Fallback bands mirror the defaults in breakpointsConfig.js so that note
+  // behavior stays consistent even if EDABreakpoints is not loaded.
+  var RESPONSIVE_BANDS = Breakpoints.RESPONSIVE_BANDS || [
+    { mode: "mobile-xs",   min: 0,    max: 480,  noteScale: 0.58, fontScale: 0.8 },
+    { mode: "mobile-sm",   min: 481,  max: 640,  noteScale: 0.65, fontScale: 0.85 },
+    { mode: "mobile",      min: 641,  max: 768,  noteScale: 0.76, fontScale: 0.9 },
+    { mode: "medium",      min: 769,  max: 1440, noteScale: 0.8,  fontScale: 0.9 },
+    { mode: "desktop-base",min: 1441, max: 1999, noteScale: 1,    fontScale: 1 },
+    { mode: "desktop-wide",min: 2000, max: Infinity, noteScale: 1.05, fontScale: 1.02 },
   ];
-  var RESPONSIVE_WIDE = { mode: "desktop-wide", min: 2000, noteScale: 1.05, fontScale: 1.02 };
-  var RESPONSIVE_BASE = { mode: "desktop-base", noteScale: 1, fontScale: 1 };
+
+  var RESPONSIVE_BASE = (function () {
+    for (var i = 0; i < RESPONSIVE_BANDS.length; i++) {
+      if (RESPONSIVE_BANDS[i].mode === "desktop-base") {
+        return {
+          mode: RESPONSIVE_BANDS[i].mode,
+          noteScale: RESPONSIVE_BANDS[i].noteScale,
+          fontScale: RESPONSIVE_BANDS[i].fontScale,
+        };
+      }
+    }
+    return { mode: "desktop-base", noteScale: 1, fontScale: 1 };
+  })();
+
   var responsiveState = { mode: RESPONSIVE_BASE.mode, noteScale: RESPONSIVE_BASE.noteScale, fontScale: RESPONSIVE_BASE.fontScale };
 
-  var PAPER_REFERENCE_SIZE = { width: 440, height: 560 };
-  var NOTE_BASE_WIDTH = 340;
-  var NOTE_BASE_SIZE = {
-    width: NOTE_BASE_WIDTH,
-    height: Math.round(NOTE_BASE_WIDTH * (PAPER_REFERENCE_SIZE.height / PAPER_REFERENCE_SIZE.width)),
-  };
+  // Base visual paper size used for all papers before per-paper scale and responsive scale.
+  // Previously derived from PAPER_REFERENCE_SIZE; now hard-coded to preserve the same 340x433 canvas.
+  var NOTE_BASE_SIZE = { width: 340, height: 440 };
 
   /**
    * Philosopher-specific note content styles (note-page__content). Keys match CSS vars --note-*.
@@ -82,7 +99,7 @@ if we use 0 the code doesn't use this constant; it fell back to fontSize × line
     right: 0,
   };
 
-  /** Default padding (percent) when paper is not in PAPER_CONFIG */
+  /** Default text padding (percent) when paper is not in PAPER_CONFIG */
   var DEFAULT_PAPER_PADDING = { top: 17.5, right: 17.5, bottom: 17.5, left: 17.5 };
 
   var DEFAULT_PAPER_SCALE = 1;
@@ -148,9 +165,13 @@ if we use 0 the code doesn't use this constant; it fell back to fontSize × line
   }
 
   /**
-   * Paper image path -> { padding %, widthFactor, heightFactor, scale }.
-   * Factors are derived from the legacy px values in data/paper-config.json so relative sizing stays intact
-   * while NOTE_BASE_SIZE controls the absolute canvas.
+   * Paper image path -> {
+   *   textPadding %,
+   *   scale,
+   *   boundingXFrac,
+   *   boundingYFrac
+   * }.
+   * Width/height are no longer used; NOTE_BASE_SIZE + scale + responsive scale control the canvas.
    */
   var PAPER_CONFIG = {};
 
@@ -160,12 +181,12 @@ if we use 0 the code doesn't use this constant; it fell back to fontSize × line
    */
   function getPaperPadding(paperUrl, side) {
     var entry = PAPER_CONFIG[paperUrl];
-    if (!entry || !entry.padding) return DEFAULT_PAPER_PADDING;
+    if (!entry || !entry.textPadding) return DEFAULT_PAPER_PADDING;
     var pad = {
-      top: Number(entry.padding.top) != null ? Number(entry.padding.top) : DEFAULT_PAPER_PADDING.top,
-      right: Number(entry.padding.right) != null ? Number(entry.padding.right) : DEFAULT_PAPER_PADDING.right,
-      bottom: Number(entry.padding.bottom) != null ? Number(entry.padding.bottom) : DEFAULT_PAPER_PADDING.bottom,
-      left: Number(entry.padding.left) != null ? Number(entry.padding.left) : DEFAULT_PAPER_PADDING.left,
+      top: Number(entry.textPadding.top) != null ? Number(entry.textPadding.top) : DEFAULT_PAPER_PADDING.top,
+      right: Number(entry.textPadding.right) != null ? Number(entry.textPadding.right) : DEFAULT_PAPER_PADDING.right,
+      bottom: Number(entry.textPadding.bottom) != null ? Number(entry.textPadding.bottom) : DEFAULT_PAPER_PADDING.bottom,
+      left: Number(entry.textPadding.left) != null ? Number(entry.textPadding.left) : DEFAULT_PAPER_PADDING.left,
     };
     if (side === "left") {
       var leftFormat = NOTE_FORMAT.left;
@@ -179,25 +200,43 @@ if we use 0 the code doesn't use this constant; it fell back to fontSize × line
 
   function getPaperSize(paperUrl) {
     var entry = PAPER_CONFIG[paperUrl];
-    var widthFactor = entry && typeof entry.widthFactor === "number" ? entry.widthFactor : 1;
-    var heightFactor = entry && typeof entry.heightFactor === "number" ? entry.heightFactor : 1;
     var scale = entry && typeof entry.scale === "number" ? entry.scale : DEFAULT_PAPER_SCALE;
     if (!scale || scale <= 0) scale = DEFAULT_PAPER_SCALE;
-    if (!widthFactor || widthFactor <= 0) widthFactor = 1;
-    if (!heightFactor || heightFactor <= 0) heightFactor = 1;
     var responsiveScale = getResponsiveNoteScale();
     return {
-      width: Math.round(NOTE_BASE_SIZE.width * widthFactor * scale * responsiveScale),
-      height: Math.round(NOTE_BASE_SIZE.height * heightFactor * scale * responsiveScale),
+      width: Math.round(NOTE_BASE_SIZE.width * scale * responsiveScale),
+      height: Math.round(NOTE_BASE_SIZE.height * scale * responsiveScale),
     };
   }
 
   function getWritableAreaSize(paperUrl, side) {
-    var size = getPaperSize(paperUrl);
+    var bounding = getPaperBoundingBox(paperUrl);
     var pad = getPaperPadding(paperUrl, side);
+    var width = bounding.width * (1 - (pad.left + pad.right) / 100);
+    var height = bounding.height * (1 - (pad.top + pad.bottom) / 100);
     return {
-      width: size.width * (1 - (pad.left + pad.right) / 100),
-      height: size.height * (1 - (pad.top + pad.bottom) / 100),
+      width: width > 0 ? width : 0,
+      height: height > 0 ? height : 0,
+    };
+  }
+
+  /**
+   * Logical bounding box for selection/placement. Fractions are of visual paper size and centered.
+   */
+  function getPaperBoundingBox(paperUrl) {
+    var size = getPaperSize(paperUrl);
+    var entry = PAPER_CONFIG[paperUrl] || {};
+    var bx = typeof entry.boundingXFrac === "number" && entry.boundingXFrac > 0 ? entry.boundingXFrac : 1;
+    var by = typeof entry.boundingYFrac === "number" && entry.boundingYFrac > 0 ? entry.boundingYFrac : 1;
+    var boundingWidth = size.width * bx;
+    var boundingHeight = size.height * by;
+    var offsetX = (size.width - boundingWidth) / 2;
+    var offsetY = (size.height - boundingHeight) / 2;
+    return {
+      width: boundingWidth,
+      height: boundingHeight,
+      offsetX: offsetX,
+      offsetY: offsetY,
     };
   }
 
@@ -216,13 +255,8 @@ if we use 0 the code doesn't use this constant; it fell back to fontSize × line
   }
 
   function deriveDimensionFactor(rawValue, referenceValue, fallbackFactor) {
-    var numeric = Number(rawValue);
-    if (!isNaN(numeric) && numeric > 0 && referenceValue > 0) {
-      return numeric / referenceValue;
-    }
-    if (typeof fallbackFactor === "number" && fallbackFactor > 0) {
-      return fallbackFactor;
-    }
+    // Legacy helper: width/height from paper-config.json are no longer used
+    // for sizing. Keep returning 1 so any stray calls behave as a no-op.
     return 1;
   }
 
@@ -242,24 +276,30 @@ if we use 0 the code doesn't use this constant; it fell back to fontSize × line
           if (!Object.prototype.hasOwnProperty.call(data, key) || !data[key] || typeof data[key] !== "object") continue;
           var raw = data[key];
           var existing = PAPER_CONFIG[key];
-          var padding = raw.padding && typeof raw.padding === "object"
+
+          // Prefer new "text-padding" field; fall back to legacy "padding" for backward compatibility.
+          var paddingSource = raw["text-padding"] || raw.padding;
+          var textPadding = paddingSource && typeof paddingSource === "object"
             ? {
-                top: Number(raw.padding.top) != null ? Number(raw.padding.top) : DEFAULT_PAPER_PADDING.top,
-                right: Number(raw.padding.right) != null ? Number(raw.padding.right) : DEFAULT_PAPER_PADDING.right,
-                bottom: Number(raw.padding.bottom) != null ? Number(raw.padding.bottom) : DEFAULT_PAPER_PADDING.bottom,
-                left: Number(raw.padding.left) != null ? Number(raw.padding.left) : DEFAULT_PAPER_PADDING.left,
+                top: Number(paddingSource.top) != null ? Number(paddingSource.top) : DEFAULT_PAPER_PADDING.top,
+                right: Number(paddingSource.right) != null ? Number(paddingSource.right) : DEFAULT_PAPER_PADDING.right,
+                bottom: Number(paddingSource.bottom) != null ? Number(paddingSource.bottom) : DEFAULT_PAPER_PADDING.bottom,
+                left: Number(paddingSource.left) != null ? Number(paddingSource.left) : DEFAULT_PAPER_PADDING.left,
               }
-            : (existing && existing.padding) || DEFAULT_PAPER_PADDING;
-          var widthFallback = existing && (typeof existing.widthFactor === "number" ? existing.widthFactor : (typeof existing.width === "number" ? existing.width / PAPER_REFERENCE_SIZE.width : null));
-          var heightFallback = existing && (typeof existing.heightFactor === "number" ? existing.heightFactor : (typeof existing.height === "number" ? existing.height / PAPER_REFERENCE_SIZE.height : null));
-          var widthFactor = deriveDimensionFactor(raw.width, PAPER_REFERENCE_SIZE.width, widthFallback);
-          var heightFactor = deriveDimensionFactor(raw.height, PAPER_REFERENCE_SIZE.height, heightFallback);
+            : (existing && existing.textPadding) || DEFAULT_PAPER_PADDING;
+
           var scale = sanitizeScale(raw.scale, existing && existing.scale);
+
+          var bx = typeof raw.bounding_x_frac === "number" ? raw.bounding_x_frac : (existing && typeof existing.boundingXFrac === "number" ? existing.boundingXFrac : 1);
+          var by = typeof raw.bounding_y_frac === "number" ? raw.bounding_y_frac : (existing && typeof existing.boundingYFrac === "number" ? existing.boundingYFrac : 1);
+          if (!(bx > 0)) bx = 1;
+          if (!(by > 0)) by = 1;
+
           PAPER_CONFIG[key] = {
-            padding: padding,
-            widthFactor: widthFactor,
-            heightFactor: heightFactor,
+            textPadding: textPadding,
             scale: scale,
+            boundingXFrac: bx,
+            boundingYFrac: by,
           };
         }
         return PAPER_CONFIG;
@@ -300,7 +340,7 @@ if we use 0 the code doesn't use this constant; it fell back to fontSize × line
 
   /**
    * Reference content width (px) for the default chars-per-line estimate (notePages.js).
-   * 440 * (1 - 0.175 - 0.175) = 286.
+   * Kept at 286px to match legacy behavior.
    */
   var REFERENCE_CONTENT_WIDTH_PX = 286;
   var REFERENCE_CHARS_PER_LINE = 40;
@@ -409,13 +449,12 @@ if we use 0 the code doesn't use this constant; it fell back to fontSize × line
     if (typeof width !== "number" || !isFinite(width) || width <= 0) {
       return { mode: RESPONSIVE_BASE.mode, noteScale: RESPONSIVE_BASE.noteScale, fontScale: RESPONSIVE_BASE.fontScale };
     }
-    if (width >= RESPONSIVE_WIDE.min) {
-      return { mode: RESPONSIVE_WIDE.mode, noteScale: RESPONSIVE_WIDE.noteScale, fontScale: RESPONSIVE_WIDE.fontScale };
-    }
-    for (var i = 0; i < RESPONSIVE_STEPS.length; i++) {
-      var step = RESPONSIVE_STEPS[i];
-      if (width <= step.max) {
-        return { mode: step.mode, noteScale: step.noteScale, fontScale: step.fontScale };
+    for (var i = 0; i < RESPONSIVE_BANDS.length; i++) {
+      var band = RESPONSIVE_BANDS[i];
+      var minOk = typeof band.min === "number" ? width >= band.min : true;
+      var maxOk = typeof band.max === "number" && isFinite(band.max) ? width <= band.max : true;
+      if (minOk && maxOk) {
+        return { mode: band.mode, noteScale: band.noteScale, fontScale: band.fontScale };
       }
     }
     return { mode: RESPONSIVE_BASE.mode, noteScale: RESPONSIVE_BASE.noteScale, fontScale: RESPONSIVE_BASE.fontScale };
@@ -515,6 +554,7 @@ if we use 0 the code doesn't use this constant; it fell back to fontSize × line
     getShortNoteRotationDeg: getShortNoteRotationDeg,
     getShortNoteLeadingSpacesCount: getShortNoteLeadingSpacesCount,
     applyNoteFormatToPanels: applyNoteFormatToPanels,
+    getPaperBoundingBox: getPaperBoundingBox,
   };
 
   if (typeof window !== "undefined") {

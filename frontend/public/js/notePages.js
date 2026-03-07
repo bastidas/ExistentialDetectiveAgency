@@ -230,18 +230,33 @@
     if (!paperEl || !contentEl) return null;
     var size = presetSize || getPaperSize(paperUrl);
     var padding = getPaperPadding(paperUrl, side);
+    var bounding = cfg && typeof cfg.getPaperBoundingBox === "function"
+      ? cfg.getPaperBoundingBox(paperUrl)
+      : { width: size.width, height: size.height, offsetX: 0, offsetY: 0 };
     var noteWidth = size.width;
     var noteHeight = size.height;
     paperEl.style.width = noteWidth + "px";
     paperEl.style.height = noteHeight + "px";
-    contentEl.style.top = padding.top + "%";
-    contentEl.style.right = padding.right + "%";
-    contentEl.style.bottom = padding.bottom + "%";
-    contentEl.style.left = padding.left + "%";
-    var writingAreaHeight = noteHeight * (1 - (padding.top + padding.bottom) / 100);
-    var writingAreaWidth = noteWidth * (1 - (padding.left + padding.right) / 100);
-    contentEl.style.height = writingAreaHeight + "px";
+    // Define the writable text region inside the logical bounding box. The
+    // text-padding values are now interpreted relative to the bounding box,
+    // not the full paper.
+    var topInset = bounding.height * (padding.top / 100);
+    var bottomInset = bounding.height * (padding.bottom / 100);
+    var leftInset = bounding.width * (padding.left / 100);
+    var rightInset = bounding.width * (padding.right / 100);
+    var writingAreaWidth = bounding.width - leftInset - rightInset;
+    var writingAreaHeight = bounding.height - topInset - bottomInset;
+    if (writingAreaWidth < 0) writingAreaWidth = 0;
+    if (writingAreaHeight < 0) writingAreaHeight = 0;
+    var contentLeft = bounding.offsetX + leftInset;
+    var contentTop = bounding.offsetY + topInset;
+
+    contentEl.style.top = contentTop + "px";
+    contentEl.style.left = contentLeft + "px";
+    contentEl.style.right = "";
+    contentEl.style.bottom = "";
     contentEl.style.width = writingAreaWidth + "px";
+    contentEl.style.height = writingAreaHeight + "px";
 
     if (NOTE_DEBUG) {
       // Visualize paper padding and computed writing area in dev mode only.
@@ -253,17 +268,10 @@
         paperEl.appendChild(debugBox);
       }
 
-      var topPx = noteHeight * (padding.top / 100);
-      var bottomPx = noteHeight * (padding.bottom / 100);
-      var leftPx = noteWidth * (padding.left / 100);
-      var rightPx = noteWidth * (padding.right / 100);
-      var boxWidth = noteWidth - leftPx - rightPx;
-      var boxHeight = noteHeight - topPx - bottomPx;
-
-      debugBox.style.top = topPx + "px";
-      debugBox.style.left = leftPx + "px";
-      debugBox.style.width = boxWidth + "px";
-      debugBox.style.height = boxHeight + "px";
+      debugBox.style.top = contentTop + "px";
+      debugBox.style.left = contentLeft + "px";
+      debugBox.style.width = writingAreaWidth + "px";
+      debugBox.style.height = writingAreaHeight + "px";
 
       var label = debugBox.querySelector("span");
       if (!label) {
@@ -273,7 +281,7 @@
       label.textContent =
         "pad T:" + padding.top + " R:" + padding.right +
         " B:" + padding.bottom + " L:" + padding.left +
-        " | area " + Math.round(boxWidth) + "x" + Math.round(boxHeight);
+        " | area " + Math.round(writingAreaWidth) + "x" + Math.round(writingAreaHeight);
     }
 
     return { noteWidth: noteWidth, noteHeight: noteHeight, writingAreaHeight: writingAreaHeight };
@@ -530,11 +538,31 @@
     var size = getPaperSize(paperUrl);
     var noteWidth = size.width;
     var noteHeight = size.height;
+    var bounding = cfg && typeof cfg.getPaperBoundingBox === "function"
+      ? cfg.getPaperBoundingBox(paperUrl)
+      : { width: noteWidth, height: noteHeight, offsetX: 0, offsetY: 0 };
     var noteIndex = layer.querySelectorAll('.note-page[data-note-side="' + side + '"]').length;
     var zoneEl = getPanel(side);
-    var pos = computeNotePosition(zoneEl, side, rotationDeg, noteWidth, noteHeight, noteIndex);
+    // Use the logical bounding box for placement math; visual size remains noteWidth/noteHeight.
+    var pos = computeNotePosition(zoneEl, side, rotationDeg, bounding.width, bounding.height, noteIndex);
 
     var created = NoteElement.createNoteElement(side, paperUrl, pos, rotationDeg, size);
+    // Expose bounding box geometry for debug overlays and size the hit area.
+    created.wrapper.dataset.boundingWidth = String(bounding.width);
+    created.wrapper.dataset.boundingHeight = String(bounding.height);
+    created.wrapper.dataset.boundingOffsetX = String(bounding.offsetX);
+    created.wrapper.dataset.boundingOffsetY = String(bounding.offsetY);
+    var hitEl = created.wrapper.querySelector(".note-page__hit-area");
+    if (hitEl) {
+      hitEl.style.position = "absolute";
+      hitEl.style.top = bounding.offsetY + "px";
+      hitEl.style.left = bounding.offsetX + "px";
+      hitEl.style.width = bounding.width + "px";
+      hitEl.style.height = bounding.height + "px";
+      // Hit area is used only for geometric checks; keep it non-interactive
+      // so hover/cursor behavior is driven by the full paper.
+      hitEl.style.pointerEvents = "none";
+    }
     applyNoteFormatStyles(created.contentEl, side);
     var sizing = applyPaperSizing(created.wrapper, side, paperUrl, size) || { noteWidth: noteWidth, noteHeight: noteHeight, writingAreaHeight: 0 };
 
@@ -552,13 +580,18 @@
       var debugBox = document.createElement("div");
       debugBox.className = "note-page__debug-box";
       debugBox.setAttribute("aria-hidden", "true");
+      // Visualize the logical selection bounding box (centered inside the paper).
       debugBox.style.cssText =
-        "position:absolute;top:0;left:0;width:" + noteWidth + "px;height:" + noteHeight + "px;" +
+        "position:absolute;" +
+        "top:" + bounding.offsetY + "px;" +
+        "left:" + bounding.offsetX + "px;" +
+        "width:" + bounding.width + "px;" +
+        "height:" + bounding.height + "px;" +
         "border:2px solid #000;background:transparent;pointer-events:none;box-sizing:border-box;";
       var label = document.createElement("span");
       label.style.cssText = "position:absolute;top:2px;left:2px;background:#000;color:#fff;font-size:10px;padding:2px 4px;font-family:sans-serif;";
       var paperFilename = paperUrl.split("/").pop();
-      label.textContent = paperFilename;
+      label.textContent = paperFilename + " bounding box";
       debugBox.appendChild(label);
       created.wrapper.appendChild(debugBox);
     }
@@ -582,6 +615,17 @@
         }
       },
     });
+    // Position the close/destroy control at the top-right corner of the
+    // logical bounding box rather than the full paper.
+    var controls = created.wrapper.querySelector(".note-page__controls");
+    if (controls) {
+      var controlsTop = bounding.offsetY + 2;
+      var controlsRight = size.width - (bounding.offsetX + bounding.width) + 2;
+      if (controlsTop < 0) controlsTop = 0;
+      if (controlsRight < 0) controlsRight = 0;
+      controls.style.top = controlsTop + "px";
+      controls.style.right = controlsRight + "px";
+    }
     NoteElement.bringNoteToFront(created.wrapper, side);
 
     state[side] = {
