@@ -98,6 +98,13 @@ Adjust these to make philosopher–philosopher exchanges more or less frequent, 
 | `getPaperSize(paperUrl)` | Final size in px (`NOTE_BASE_SIZE` × factor × scale × responsive note scale). |
 | `applyNoteFormatToPanels()` | Sets `--note-*` on `#left-philosopher` and `#right-philosopher` from `NOTE_FORMAT`. Call once at app init. |
 
+**Viewport-responsive note scaling and breakpoints:**
+
+- Core width bands and names (e.g. `mobile-xs`, `mobile-sm`, `mobile`, `medium`, `desktop-base`, `desktop-wide`) are defined once in `public/js/breakpointsConfig.js` on `window.EDABreakpoints`.
+- `noteFormatConfig.js` reads `EDABreakpoints.RESPONSIVE_STEPS`, `RESPONSIVE_WIDE`, and `RESPONSIVE_BASE` to decide how note and font scaling change with `window.innerWidth`.
+- `viewportNotes.js` uses `EDABreakpoints.LAYOUT` to set `data-viewport="mobile" | "medium" | "large"` and also exposes the fine-grained band as `data-width-band` on `<body>`.
+- CSS media queries still use plain pixel values (e.g. `max-width: 768px`, `max-width: 1440px`), but these should conceptually match the ranges in `breakpointsConfig.js`.
+
 **Used by:** `notePages.js`, `note-pages.css`, `left-philosopher.css`, `right-philosopher.css` (via `var(--note-*)`).
 
 ---
