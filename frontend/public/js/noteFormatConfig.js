@@ -48,10 +48,10 @@
   var NOTE_FORMAT = {
     left: {
       lineHeight: 1.45,
-      paddingTop: "5%",
-      paddingRight: "5%",
-      paddingBottom: "5%",
-      paddingLeft: "6%",
+      paddingTop: "1%",
+      paddingRight: "1%",
+      paddingBottom: "1%",
+      paddingLeft: "1%",
       opacity: 0.98,
       color: "#202024",
       fontSize: "1.05rem",
@@ -60,10 +60,10 @@
     },
     right: {
       lineHeight: 1.65,
-      paddingTop: "5%",
-      paddingRight: "10%",
-      paddingBottom: "11%",
-      paddingLeft: "7%",
+      paddingTop: "1%",
+      paddingRight: "1%",
+      paddingBottom: "1%",
+      paddingLeft: "1%",
       opacity: 0.93,
       color: "#284283",
       fontSize: "1.12rem",
@@ -95,8 +95,8 @@ noteCapacity.js for capacity.
 if we use 0 the code doesn't use this constant; it fell back to fontSize × lineHeight from NOTE_FORMAT (~29.57 px). 
   */
   var ESTIMATE_LINE_HEIGHT_PX = {
-    left:  0,
-    right: 0,
+    left:  20,
+    right: 26,
   };
 
   /** Default text padding (percent) when paper is not in PAPER_CONFIG */
@@ -263,6 +263,10 @@ if we use 0 the code doesn't use this constant; it fell back to fontSize × line
   /**
    * Load data/paper-config.json and merge into PAPER_CONFIG.
    * Call once at startup; notes created after it resolves use the JSON values.
+   *
+   * Each paper entry may include a "type" field used for pooling:
+   *   - "small"  -> pooled as "small"
+   *   - "medium" or "full" (or missing/unknown) -> pooled as "medium_full".
    */
   function loadPaperConfigJson() {
     return fetch("data/paper-config.json")
@@ -295,11 +299,21 @@ if we use 0 the code doesn't use this constant; it fell back to fontSize × line
           if (!(bx > 0)) bx = 1;
           if (!(by > 0)) by = 1;
 
+          var rawType = typeof raw.type === "string" ? raw.type.toLowerCase() : (existing && existing.type) || null;
+          var normalizedType;
+          if (rawType === "small") normalizedType = "small";
+          else if (rawType === "medium" || rawType === "full") normalizedType = rawType;
+          else normalizedType = "full";
+          // Pooling group used by allocator: "small" vs "medium_full".
+          var typeGroup = normalizedType === "small" ? "small" : "medium_full";
+
           PAPER_CONFIG[key] = {
             textPadding: textPadding,
             scale: scale,
             boundingXFrac: bx,
             boundingYFrac: by,
+            type: normalizedType,
+            typeGroup: typeGroup,
           };
         }
         return PAPER_CONFIG;
@@ -308,6 +322,25 @@ if we use 0 the code doesn't use this constant; it fell back to fontSize × line
         console.warn("[NoteFormatConfig] Could not load data/paper-config.json:", err.message);
         return PAPER_CONFIG;
       });
+  }
+
+  function getPaperType(paperUrl) {
+    var entry = PAPER_CONFIG[paperUrl];
+    return entry && entry.type ? entry.type : null;
+  }
+
+  function getPaperTypeGroup(paperUrl) {
+    var entry = PAPER_CONFIG[paperUrl];
+    if (!entry) return "medium_full";
+    return entry.typeGroup || (entry.type === "small" ? "small" : "medium_full");
+  }
+
+  function getPaperImagesByTypeGroup(typeGroup) {
+    var group = typeGroup === "small" ? "small" : "medium_full";
+    var all = getPaperImages();
+    return all.filter(function (paperUrl) {
+      return getPaperTypeGroup(paperUrl) === group;
+    });
   }
 
   function getNoteFormat(side) {
@@ -535,6 +568,9 @@ if we use 0 the code doesn't use this constant; it fell back to fontSize × line
     getPaperSize: getPaperSize,
     getWritableAreaSize: getWritableAreaSize,
     getPaperImages: getPaperImages,
+    getPaperType: getPaperType,
+    getPaperTypeGroup: getPaperTypeGroup,
+    getPaperImagesByTypeGroup: getPaperImagesByTypeGroup,
     getNoteFormat: getNoteFormat,
     getContentHeightScale: getContentHeightScale,
     getEstimatedLineHeightPx: getEstimatedLineHeightPx,

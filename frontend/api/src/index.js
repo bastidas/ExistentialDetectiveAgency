@@ -8,142 +8,118 @@ const apiKey = process.env.OPENAI_API_KEY;
 const client = apiKey ? new OpenAI({ apiKey }) : null;
 const dailyUsageStore = shared.createMemoryDailyUsageStore();
 
-app.http("debug", {
-  methods: ["GET"],
-  authLevel: "anonymous",
-  route: "debug",
-  handler: async (request, context) => {
-    if (!shared.DEBUG_LOGS) {
-      return { status: 404 };
-    }
-    const sessionId = shared.getOrCreateSessionId(request);
-    const userExchangeCount = shared.userExchangeCounts.get(sessionId) ?? 0;
-    const dailyCount = dailyUsageStore.readDailyUsage();
-    const promptPreview = shared.getPromptFirstLines(5);
-    const body = {
-      devMode: shared.DEV,
-      offline: shared.OFFLINE,
-      debugLogs: true,
-      model: shared.MODEL,
-      serviceTier: shared.SERVICE_TIER || "(default)",
-      promptPreview,
-      promptFilePath: shared.PROMPT_FILE,
-      promptPreviewFound: promptPreview.length > 0,
-      userExchangeCount,
-      maxUserExchanges: shared.MAX_USER_EXCHANGES,
-      dailyCount,
-      maxDailyUsage: shared.MAX_DAILY_USAGE,
-    };
-    const headers = {};
-    const cookies = shared.parseCookieHeader(request.headers.get("cookie"));
-    if (!cookies.sessionId) {
-      headers["Set-Cookie"] = shared.sessionCookieHeader(sessionId);
-    }
-    return {
-      status: 200,
-      jsonBody: body,
-      headers,
-    };
-  },
-});
+// ---------------------------------------------------------------------------
+// Azure Functions HTTP endpoints
+// ---------------------------------------------------------------------------
 
 app.http("config", {
-  methods: ["GET"],
-  authLevel: "anonymous",
-  route: "config",
-  handler: async (request, context) => {
-    const body = {
-      devMode: !!shared.DEV,
-      model: shared.MODEL || null,
-      serviceTier: shared.SERVICE_TIER || null,
-    };
-    return {
-      status: 200,
-      jsonBody: body,
-    };
-  },
+	route: "config",
+	methods: ["GET"],
+	authLevel: "anonymous",
+	handler: async (request) => {
+		return {
+			status: 200,
+			jsonBody: { devMode: !!shared.DEV },
+		};
+	},
+});
+
+app.http("debug", {
+	route: "debug",
+	methods: ["GET"],
+	authLevel: "anonymous",
+	handler: async (request) => {
+		if (!shared.DEBUG_LOGS) {
+			return { status: 404, body: "" };
+		}
+		const sessionId = shared.getOrCreateSessionId(request);
+		const userExchangeCount = shared.userExchangeCounts.get(sessionId) ?? 0;
+		const dailyCount = dailyUsageStore.readDailyUsage();
+		return {
+			status: 200,
+			jsonBody: {
+				devMode: shared.DEV,
+				offline: shared.OFFLINE,
+				debugLogs: true,
+				model: shared.MODEL,
+				serviceTier: shared.SERVICE_TIER || "(default)",
+				userExchangeCount,
+				maxUserExchanges: shared.MAX_USER_EXCHANGES,
+				dailyCount,
+				maxDailyUsage: shared.MAX_DAILY_USAGE,
+			},
+			headers: {
+				"Set-Cookie": shared.sessionCookieHeader(sessionId),
+			},
+		};
+	},
 });
 
 app.http("chat", {
-  methods: ["POST"],
-  authLevel: "anonymous",
-  route: "chat",
-  handler: async (request, context) => {
-    const sessionId = shared.getOrCreateSessionId(request);
-    let message;
-    let contentWidthChars = null;
-    try {
-      const body = await request.json();
-      message = body?.message;
-      const raw = body?.contentWidthChars;
-      if (typeof raw === "number" && raw > 0) contentWidthChars = Math.round(raw);
-    } catch (_) {
-      message = null;
-    }
-    if (typeof message !== "string" || !message.trim()) {
-      return {
-        status: 400,
-        jsonBody: { error: "Missing or invalid message." },
-      };
-    }
-    const trimmed = message.trim();
+	route: "chat",
+	methods: ["POST"],
+	authLevel: "anonymous",
+	handler: async (request) => {
+		const sessionId = shared.getOrCreateSessionId(request);
+		let body;
+		try {
+			body = await request.json();
+		} catch (_) {
+			body = null;
+		}
+		const message = body && typeof body.message === "string" ? body.message : "";
+		if (!message.trim()) {
+			return {
+				status: 400,
+				jsonBody: { error: "Missing or invalid message." },
+				headers: {
+					"Set-Cookie": shared.sessionCookieHeader(sessionId),
+				},
+			};
+		}
+		const trimmed = message.trim();
+		const rawWidth = body && body.contentWidthChars;
+		const contentWidthChars =
+			typeof rawWidth === "number" && rawWidth > 0
+				? Math.round(rawWidth)
+				: undefined;
 
-    const headers = !request.headers.get("cookie")?.includes("sessionId=")
-      ? { "Set-Cookie": shared.sessionCookieHeader(sessionId) }
-      : {};
+		const result = await shared.handleChatRequest(sessionId, trimmed, {
+			openaiClient: client,
+			dailyUsageStore,
+			debug: shared.DEBUG_LOGS,
+			contentWidthChars,
+		});
 
-    if (!client && !shared.OFFLINE) {
-      return {
-        status: 500,
-        jsonBody: {
-          error:
-            shared.FRIENDLY_API_KEY_MESSAGE ||
-            "The keys to this universe are in your hand, but where is the lock?",
-          errorKind: "server_error",
-        },
-        headers,
-      };
-    }
+		if (result.status === 204) {
+			return {
+				status: 204,
+				body: "",
+				headers: {
+					"Set-Cookie": shared.sessionCookieHeader(sessionId),
+				},
+			};
+		}
 
-    const result = await shared.handleChatRequest(sessionId, trimmed, {
-      openaiClient: client,
-      dailyUsageStore,
-      debug: shared.DEBUG_LOGS,
-      contentWidthChars: contentWidthChars ?? undefined,
-    });
-
-    if (result.status === 204) {
-      return { status: 204, headers };
-    }
-    return {
-      status: result.status,
-      jsonBody: result.body,
-      headers,
-    };
-  },
+		return {
+			status: result.status,
+			jsonBody: result.body,
+			headers: {
+				"Set-Cookie": shared.sessionCookieHeader(sessionId),
+			},
+		};
+	},
 });
 
 app.http("philosopherDialog", {
-  methods: ["POST"],
-  authLevel: "anonymous",
-  route: "philosopher-dialog",
-  handler: async (request, context) => {
-    const sessionId = shared.getOrCreateSessionId(request);
-    const headers = !request.headers.get("cookie")?.includes("sessionId=")
-      ? { "Set-Cookie": shared.sessionCookieHeader(sessionId) }
-      : {};
-    let body = {};
-    try {
-      body = (await request.json()) || {};
-    } catch (_) {}
-    const result = await shared.handlePhilosopherDialogRequest(sessionId, body, {
-      openaiClient: client,
-      debug: shared.DEBUG_LOGS,
-    });
-    return {
-      status: result.status,
-      jsonBody: result.body,
-      headers,
-    };
-  },
+	route: "philosopher-dialog",
+	methods: ["POST"],
+	authLevel: "anonymous",
+	handler: async () => {
+		// Endpoint kept for backward compatibility; frontend no longer uses it.
+		return {
+			status: 410,
+			jsonBody: { error: "philosopher-dialog endpoint has been deprecated." },
+		};
+	},
 });

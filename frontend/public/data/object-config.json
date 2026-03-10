@@ -1,53 +1,60 @@
 {
   "mglass.webp": {
-    "padding_frac":0.18,
-    "width": 420,
-    "height": 600,
-    "transparent_x": 254,
-    "transparent_y": 190,
-    "glass_center_x": 254,
-    "glass_center_y": 190,
-    "transparent_radius": 136,
-    "scale": 1.5,
-    "rotation_range": 18
+        "scale": 1.6,
+        "rotation_range": 50,
+        "bounding_x_frac": 0.6,
+        "bounding_y_frac": 0.8,
+        "type": "special"
   },
-    "statuette.webp": {
-    "padding_frac":0.1,
-    "scale": 0.8,
-    "rotation_range": 50
-  },
-  "key_above.webp": {
-    "padding_frac":0.1,
-    "scale": 0.39,
-    "rotation_range": 100
-  },
-    "ace.webp": {
-    "width": 240,
-    "height": 280,
-    "padding_frac":0.09,
-    "scale": 1.0,
-    "rotation_range": 20
-  },
-    "camera.webp": {
-         "padding_frac":0.1,
-    "scale": 1.5,
-    "rotation_range": 39
-  },
-  "chess_piece.webp": {
-
-         "padding_frac":0.1,
-    "scale": 0.55,
-    "rotation_range": 125
-  },
-  "dice.webp": {
-
-         "padding_frac":0.1,
-    "scale": 0.5,
-    "rotation_range": 230
-  },
-  "tarot.webp": {
-     "padding_frac":0.02,
-    "scale": 1.4,
-    "rotation_range": 20
-  }
-}
+      "statuette.webp": {
+        "scale": 0.8,
+        "rotation_range": 50,
+        "bounding_x_frac": 0.55,
+        "bounding_y_frac": 0.87,
+        "type": "misc"
+      },
+      "key_above.webp": {
+        "scale": 0.43,
+        "rotation_range": 100,
+        "bounding_x_frac": 0.6,
+        "bounding_y_frac": 0.8,
+        "type": "misc"
+      },
+      "ace.webp": {
+        "width": 240,
+        "height": 280,
+        "scale": 1.0,
+        "rotation_range": 20,
+        "bounding_x_frac": 0.8,
+        "bounding_y_frac": 0.8,
+        "type": "misc"
+      },
+      "camera.webp": {
+        "scale": 1.6,
+        "rotation_range": 39,
+        "bounding_x_frac": 0.85,
+        "bounding_y_frac": 0.6,
+        "type": "misc"
+      },
+      "chess_piece.webp": {
+        "scale": 0.5,
+        "rotation_range": 125,
+        "bounding_x_frac": 0.54,
+        "bounding_y_frac": 0.8,
+        "type": "misc"
+      },
+      "dice.webp": {
+        "scale": 0.6,
+        "rotation_range": 230,
+        "bounding_x_frac": 0.7,
+        "bounding_y_frac": 0.7,
+        "type": "misc"
+      },
+      "tarot.webp": {
+        "scale": 1.46,
+        "rotation_range": 20,
+        "bounding_x_frac": 0.8,
+        "bounding_y_frac": 0.8,
+        "type": "misc"
+      }
+    }

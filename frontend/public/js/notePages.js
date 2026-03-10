@@ -26,8 +26,8 @@
   var DYNAMIC_ANCHOR_JITTER_PX = 40;
 
   var state = {
-    left: { currentNote: null, contentElement: null, usedHeight: 0, writingAreaHeight: 0 },
-    right: { currentNote: null, contentElement: null, usedHeight: 0, writingAreaHeight: 0 },
+    left: { currentNote: null, previousNote: null, contentElement: null, usedHeight: 0, writingAreaHeight: 0 },
+    right: { currentNote: null, previousNote: null, contentElement: null, usedHeight: 0, writingAreaHeight: 0 },
   };
 
   var paperListFallbackWarned = false;
@@ -288,7 +288,7 @@
   }
 
   function clearStateFor(side) {
-    state[side] = { currentNote: null, contentElement: null, usedHeight: 0, writingAreaHeight: 0 };
+    state[side] = { currentNote: null, previousNote: null, contentElement: null, usedHeight: 0, writingAreaHeight: 0 };
   }
 
   var LOG_PREFIX = "[note-pages]";
@@ -312,64 +312,52 @@
       data: data,
       timestamp: Date.now(),
     };
-    fetch("http://127.0.0.1:7889/ingest/ddcd2c66-b2ca-4bb8-8423-b269323dba2a", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "532d40" },
-      body: JSON.stringify(payload),
-    }).catch(function () {});
+    if (typeof console !== "undefined" && console.debug) {
+      console.debug("[notePages] debugLogFit", payload);
+    }
+    // Optional hook for custom ingest; no hard-coded localhost endpoint.
+    if (typeof window !== "undefined" && typeof window.EDANoteDebugIngest === "function") {
+      try {
+        window.EDANoteDebugIngest(payload);
+      } catch (e) {}
+    }
   }
   // #endregion
 
-  function getMinMaxPaperWritingArea(side) {
-    var papers = getPaperImages();
-    var minArea = Infinity;
-    var maxArea = 0;
-    for (var i = 0; i < papers.length; i++) {
-      var ha = NoteLayout.getPaperWritingAreaHeight(papers[i], side);
-      if (ha < minArea) minArea = ha;
-      if (ha > maxArea) maxArea = ha;
+  function getNoteSpaceInfoForWrapper(side, wrapper) {
+    if (!wrapper || !wrapper.isConnected) return null;
+    var contentEl = wrapper.querySelector(".note-page__content");
+    if (!contentEl || !contentEl.isConnected) return null;
+    var writingAreaHeight = contentEl.clientHeight;
+    if (!writingAreaHeight) {
+      var styleHeight = parseFloat(contentEl.style.height || "0");
+      if (!isNaN(styleHeight) && styleHeight > 0) writingAreaHeight = styleHeight;
     }
-    return { minArea: minArea === Infinity ? 0 : minArea, maxArea: maxArea };
+    if (!writingAreaHeight) return null;
+    var bounds = NoteLayout.getCurrentTextBounds(contentEl, side);
+    var baselineBottom = bounds ? bounds.top + bounds.height : 0;
+    var usedHeight = getContentUsedHeight(contentEl);
+    var currentBottom = Math.max(baselineBottom, usedHeight);
+    var paddingPx = NoteLayout.NOTE_BOX_PADDING_PX;
+    var spaceAfterBox = currentBottom + paddingPx;
+    return { writingAreaHeight: writingAreaHeight, spaceAfterBox: spaceAfterBox, usedHeight: usedHeight, contentEl: contentEl };
   }
 
   /** Returns null if no current note or space cannot be computed. */
   function getCurrentNoteSpaceInfo(side) {
     var s = state[side];
-    if (!s.currentNote || !s.contentElement) return null;
-    var contentEl = s.contentElement;
-    if (!contentEl.isConnected) return null;
-    var writingAreaHeight = contentEl.clientHeight;
-    if (!writingAreaHeight && s.writingAreaHeight > 0) writingAreaHeight = s.writingAreaHeight;
-    if (!writingAreaHeight) return null;
-    var bounds = NoteLayout.getCurrentTextBounds(contentEl, side);
-    var baselineBottom = bounds ? bounds.top + bounds.height : 0;
-    var usedHeight = (typeof s.usedHeight === "number") ? s.usedHeight : 0;
-    if (!usedHeight && contentEl.children.length > 0) usedHeight = getContentUsedHeight(contentEl);
-    var currentBottom = Math.max(baselineBottom, usedHeight);
-    var paddingPx = NoteLayout.NOTE_BOX_PADDING_PX;
-    var spaceAfterBox = currentBottom + paddingPx;
-    return { writingAreaHeight: writingAreaHeight, spaceAfterBox: spaceAfterBox, usedHeight: usedHeight };
+    if (!s.currentNote) return null;
+    var info = getNoteSpaceInfoForWrapper(side, s.currentNote);
+    if (!info) return null;
+    s.contentElement = info.contentEl;
+    s.writingAreaHeight = info.writingAreaHeight;
+    s.usedHeight = info.usedHeight;
+    return { writingAreaHeight: info.writingAreaHeight, spaceAfterBox: info.spaceAfterBox, usedHeight: info.usedHeight };
   }
 
   function fitsOnCurrentNote(spaceInfo, estimatedNextPx) {
     if (!spaceInfo) return false;
     return spaceInfo.spaceAfterBox + estimatedNextPx <= spaceInfo.writingAreaHeight;
-  }
-
-  /** Long-note heuristic: prefer new sheet when current is small or nearly full. */
-  function longNotePrefersNewSheet(nextText, estimatedNextPx, spaceInfo, maxArea) {
-    if (!nextText || !spaceInfo || maxArea <= 0) return false;
-    var longNoteThreshold = getLongNoteThreshold();
-    if (String(nextText).length < longNoteThreshold) return false;
-    var spaceRemaining = spaceInfo.writingAreaHeight - spaceInfo.spaceAfterBox;
-    var textLen = String(nextText).length;
-    var heightPerChar = estimatedNextPx > 0 && textLen > 0 ? (estimatedNextPx / textLen) : 0;
-    var remainingCharsApprox = heightPerChar > 0 ? spaceRemaining / heightPerChar : Infinity;
-    var remainingFraction = spaceInfo.writingAreaHeight > 0 ? (spaceRemaining / spaceInfo.writingAreaHeight) : 0;
-    var isCurrentSmallerThanMax = spaceInfo.writingAreaHeight < maxArea;
-    var isPageNearlyFull = remainingFraction < 0.25;
-    var remainingCharsLow = remainingCharsApprox < longNoteThreshold * 0.5;
-    return isCurrentSmallerThanMax || isPageNearlyFull || remainingCharsLow;
   }
 
   /**
@@ -385,19 +373,12 @@
 
     var spaceInfo = getCurrentNoteSpaceInfo(side);
     if (!spaceInfo) {
-      var areaBounds = getMinMaxPaperWritingArea(side);
-      var preferLarger = getPaperImages().length > 1 && estimatedNext > areaBounds.minArea;
-      if (!state[side].currentNote || !state[side].contentElement) {
-        console.log(LOG_PREFIX, "  -> need new: no current note", { preferLargerPaper: preferLarger });
-      } else {
-        console.log(LOG_PREFIX, "  -> need new: contentElement not in DOM or writingAreaHeight is 0");
-      }
-      return { needNew: true, preferLargerPaper: preferLarger };
+      console.log(LOG_PREFIX, "  -> need new: no current note or cannot compute space info");
+      return { needNew: true };
     }
 
     var fitsCurrent = fitsOnCurrentNote(spaceInfo, estimatedNext);
     console.log(LOG_PREFIX, "  writingAreaHeight:", spaceInfo.writingAreaHeight, "spaceAfterBox:", spaceInfo.spaceAfterBox, "estimatedNext:", estimatedNext, "fits:", fitsCurrent);
-    var areaBounds = getMinMaxPaperWritingArea(side);
 
     // #region agent log
     if (isDevDebugMode() && nextText != null) {
@@ -425,26 +406,37 @@
         linesUsed: linesUsed,
         expectedHeightFromEstimate: linesUsed != null && lineHeightPx != null ? linesUsed * lineHeightPx : null,
         currentPaperUrl: currentPaperUrl,
-        longNotePrefersNewSheet: fitsCurrent && longNotePrefersNewSheet(nextText, estimatedNext, spaceInfo, areaBounds.maxArea),
       });
     }
     // #endregion
-
-    if (fitsCurrent && longNotePrefersNewSheet(nextText, estimatedNext, spaceInfo, areaBounds.maxArea)) {
-      console.log(LOG_PREFIX, "  -> long note prefers new larger paper even though it fits", {
-        writingAreaHeight: spaceInfo.writingAreaHeight,
-        spaceRemaining: spaceInfo.writingAreaHeight - spaceInfo.spaceAfterBox,
-        estimatedNext: estimatedNext,
-        minArea: areaBounds.minArea,
-        maxArea: areaBounds.maxArea,
-      });
-      return { needNew: true, preferLargerPaper: true };
-    }
     if (fitsCurrent) return { needNew: false };
 
-    var preferLargerPaper = getPaperImages().length > 1 && estimatedNext > areaBounds.minArea;
-    console.log(LOG_PREFIX, "  -> need new", preferLargerPaper ? "(prefer larger paper)" : "");
-    return { needNew: true, preferLargerPaper: preferLargerPaper };
+    // If it does not fit on the current note, try the previous note for this side.
+    var s = state[side];
+    var prevWrapper = s && s.previousNote && s.previousNote.isConnected ? s.previousNote : null;
+    if (prevWrapper && nextText != null) {
+      var prevPaperUrl = prevWrapper.dataset && prevWrapper.dataset.paperUrl;
+      var prevEstimated = NoteLayout.estimateHeightForText(String(nextText), side, prevPaperUrl || undefined);
+      var prevSpaceInfo = getNoteSpaceInfoForWrapper(side, prevWrapper);
+      var fitsPrevious = prevSpaceInfo && fitsOnCurrentNote(prevSpaceInfo, prevEstimated);
+      console.log(LOG_PREFIX, "  previous note check -> writingAreaHeight:", prevSpaceInfo && prevSpaceInfo.writingAreaHeight, "spaceAfterBox:", prevSpaceInfo && prevSpaceInfo.spaceAfterBox, "estimatedNext:", prevEstimated, "fits:", fitsPrevious);
+      if (fitsPrevious) {
+        // Swap current and previous so subsequent writes target the reused note.
+        var newCurrent = prevWrapper;
+        var oldCurrent = s.currentNote;
+        s.currentNote = newCurrent;
+        s.previousNote = oldCurrent && oldCurrent !== newCurrent ? oldCurrent : null;
+        s.contentElement = prevSpaceInfo.contentEl;
+        s.writingAreaHeight = prevSpaceInfo.writingAreaHeight;
+        s.usedHeight = prevSpaceInfo.usedHeight;
+        console.log(LOG_PREFIX, "  -> reusing previous note instead of creating a new one");
+        return { needNew: false };
+      }
+    }
+
+    console.log(LOG_PREFIX, "  -> need new (no existing note can fit)"
+    );
+    return { needNew: true };
   }
 
   function getCurrentPaperUrl(side) {
@@ -628,8 +620,13 @@
     }
     NoteElement.bringNoteToFront(created.wrapper, side);
 
+    var prevState = state[side] || {};
+    var previousNote = prevState.currentNote && prevState.currentNote !== created.wrapper
+      ? prevState.currentNote
+      : prevState.previousNote || null;
     state[side] = {
       currentNote: created.wrapper,
+      previousNote: previousNote,
       contentElement: created.contentEl,
       usedHeight: 0,
       writingAreaHeight: sizing.writingAreaHeight || 0,
@@ -761,7 +758,12 @@
 
   function destroyNoteElement(wrapper, side) {
     NoteElement.destroyNoteElement(wrapper, side, function () {
-      if (state[side] && state[side].currentNote === wrapper) clearStateFor(side);
+      if (!state[side]) return;
+      if (state[side].currentNote === wrapper) {
+        clearStateFor(side);
+      } else if (state[side].previousNote === wrapper) {
+        state[side].previousNote = null;
+      }
     });
   }
 

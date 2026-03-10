@@ -1,16 +1,37 @@
 {
+  "paper1.webp": {
+    "text-padding": { "top": 16.2, "right": 1.0, "bottom": 25.5, "left": 2.0 },
+    "scale": 2.0,
+    "bounding_x_frac": 0.6,
+    "bounding_y_frac": 0.7,
+    "type": "full"
+  },
+  "paper2.webp": {
+    "text-padding": { "top": 7.2, "right": 1.0, "bottom": 13.5, "left": 16.5 },
+    "scale": 1.8,
+    "bounding_x_frac": 0.85,
+    "bounding_y_frac": 0.8,
+    "type": "full"
+  },
+  "paper3.webp": {
+    "text-padding": { "top": 17.2, "right": 11.0, "bottom": 21.5, "left": 15.0 },
+    "scale": 1.4,
+    "bounding_x_frac": 0.8,
+    "bounding_y_frac": 0.8,
+    "type": "small"
+  },
+  "paper4.webp": {
+    "text-padding": { "top": 11, "right": 9, "bottom": 12, "left": 21.5 },
+    "scale": 2.4,
+    "bounding_x_frac": 0.7,
+    "bounding_y_frac": 0.7,
+    "type": "full"
+  },
   "paper7.webp": {
     "text-padding": { "top": 19.7, "right": 3, "bottom": 18, "left": 5.1 },
     "scale": 1.0,
     "bounding_x_frac": 0.78,
     "bounding_y_frac": 0.7,
     "type": "small"
-  },
-  "paper8.webp": {
-    "text-padding": { "top": 37, "right": 6, "bottom": 19, "left": 5.1 },
-    "scale": 1.0,
-    "bounding_x_frac": 0.9,
-    "bounding_y_frac": 0.35,
-    "type": "medium"
   }
 }

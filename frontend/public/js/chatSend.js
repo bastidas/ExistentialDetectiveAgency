@@ -3,12 +3,6 @@
 
   var NOTE_DELAY_MS = 40;
 
-  // Philosopher self-dialog: delay before optional follow-up request (ms)
-  var PHILOSOPHER_SELF_DIALOG_TIME = 500;
-  // Probability we request left/right philosopher in the follow-up (0–1)
-  var LEFT_PHILOSOPHER_INTERACTION_RATE = 0.4;
-  var RIGHT_PHILOSOPHER_INTERACTION_RATE = 0.6;
-
   var leftPhilosopherHistory = [];
   var rightPhilosopherHistory = [];
 
@@ -167,49 +161,12 @@
     });
   }
 
-  function schedulePhilosopherDialog() {
-    setTimeout(function () {
-      var requestLeft = Math.random() < LEFT_PHILOSOPHER_INTERACTION_RATE;
-      var requestRight = Math.random() < RIGHT_PHILOSOPHER_INTERACTION_RATE;
-      console.log(
-        "[DEBUG] Philosopher self-dialog: requestLeft=" + requestLeft + " requestRight=" + requestRight,
-        "(left turns: " + leftPhilosopherHistory.length + ", right turns: " + rightPhilosopherHistory.length + ")"
-      );
-      if (!requestLeft && !requestRight) return;
-      var dialogPayload = {
-        leftPhilosopherTurns: leftPhilosopherHistory,
-        rightPhilosopherTurns: rightPhilosopherHistory,
-        requestLeft: requestLeft,
-        requestRight: requestRight,
-      };
-      fetch("/api/philosopher-dialog", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify(dialogPayload),
-      })
-        .then(function (res) {
-          return res.ok ? res.json() : res.json().then(function (j) { throw new Error(j.error || res.statusText); });
-        })
-        .then(function (dialogData) {
-          handlePhilosopherDialogResponse(normalizePhilosopherResponse(dialogData), requestLeft, requestRight);
-        })
-        .catch(function (err) {
-          console.warn("Margins still thinking marginally.", err.message);
-        });
-    }, PHILOSOPHER_SELF_DIALOG_TIME);
-  }
-
   function handlePhilosopherContent(data) {
     var normalized = normalizePhilosopherResponse(data);
-    if (!hasPhilosopherContent(normalized)) {
-      leftPhilosopherHistory.push({ response: "", notes: [] });
-      rightPhilosopherHistory.push({ response: "", notes: [] });
-      return;
+    if (hasPhilosopherContent(normalized)) {
+      var payload = toPhilosopherPayload(normalized);
+      applyPhilosopherResponse(payload, { pushHistory: true, appendLeft: true, appendRight: true });
     }
-    var payload = toPhilosopherPayload(normalized);
-    applyPhilosopherResponse(payload, { pushHistory: true, appendLeft: true, appendRight: true });
-    schedulePhilosopherDialog();
   }
 
   /**
@@ -362,9 +319,6 @@
       } else {
         EDAMessageUI.addMessage("assistant", displayMsg, editorRef);
       }
-      if (global.EDARandomMarginItems && typeof global.EDARandomMarginItems.maybeDropRandomItemForUserInput === "function") {
-        global.EDARandomMarginItems.maybeDropRandomItemForUserInput({});
-      }
       return;
     }
     EDAMessageUI.setStatus("");
@@ -381,8 +335,6 @@
     var philNormalized = normalizePhilosopherResponse(data);
     console.log("[DEBUG] Main chat response received; philosopher fields present:", hasPhilosopherContent(philNormalized));
 
-    applyCalloutsToLastUserMessage(data, lastSentUserMessage);
-
     var atLimit = data.debug && typeof data.debug.userExchanges === "number" && typeof data.debug.maxUserExchanges === "number" && data.debug.userExchanges >= data.debug.maxUserExchanges;
     var stampOpts = { limitReached: !!data.limitReached, debug: !!(document.body && document.body.dataset.devMode === "true") && atLimit };
     var leftHasContent = hasPhilosopherContentForSide(philNormalized, "left");
@@ -393,16 +345,17 @@
         if (stampOpts.limitReached) global.EDAClosingStamps.maybeShowStamps({ limitReached: true });
         else if (stampOpts.debug) global.EDAClosingStamps.maybeShowStamps({ debug: true });
       }
-      if (global.EDARandomMarginItems && typeof global.EDARandomMarginItems.maybeDropRandomItemForUserInput === "function") {
-        global.EDARandomMarginItems.maybeDropRandomItemForUserInput({ side: marginItemSideHint });
-      }
       if (EDAMessageUI.runReadyForNextInput) {
         EDAMessageUI.runReadyForNextInput();
       }
     };
     if (placeholderOpts && placeholderOpts.placeholderContent) {
       var contentEl = placeholderOpts.placeholderContent;
-      if (EDAUtils && EDAUtils.animateAssistantText) {
+      if (placeholderOpts.skipAssistantContent) {
+        // Streaming path: content was already appended chunk-by-chunk; just
+        // run completion hooks.
+        onAssistantDone();
+      } else if (EDAUtils && EDAUtils.animateAssistantText) {
         EDAUtils.animateAssistantText(contentEl, data.reply || "(No reply)", { onDone: onAssistantDone });
       } else {
         contentEl.textContent = data.reply || "(No reply)";
@@ -412,6 +365,10 @@
       EDAMessageUI.addMessage("assistant", data.reply || "(No reply)", editorRef, { onAssistantDone: onAssistantDone });
     }
     handlePhilosopherContent(data);
+
+    // Apply philosopher callouts (for annotations) directly from the
+    // main chat response, which now includes per-side callout arrays.
+    applyCalloutsToLastUserMessage(data, lastSentUserMessage);
 
     if (Array.isArray(data.philosopherNotes) && data.philosopherNotes.length > 0) {
       var seq = Promise.resolve();
@@ -499,6 +456,10 @@
     }
     // Always add user message via addMessage so it gets annotated (keyword/highlight/strike).
     EDAMessageUI.addMessage("user", messageToSend);
+    // Trigger a random margin object drop as soon as the user sends input.
+    if (global.EDARandomMarginItems && typeof global.EDARandomMarginItems.maybeDropRandomItemForUserInput === "function") {
+      global.EDARandomMarginItems.maybeDropRandomItemForUserInput({});
+    }
     if (EDAChatInput && EDAChatInput.clear && !deferInputClear) {
       EDAChatInput.clear();
     }
@@ -532,49 +493,155 @@
           payload.contentWidthChars = contentWidthChars;
         }
       }
-      fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify(payload),
-      })
-        .then(function (res) {
-          if (res.status === 204) {
-            if (placeholder && placeholder.node) placeholder.node.remove();
-            EDAMessageUI.setStatus("");
-            if (global.EDAClosingStamps && typeof global.EDAClosingStamps.maybeShowStamps === "function") {
-              global.EDAClosingStamps.maybeShowStamps({ noReply: true });
+      // Prefer streaming endpoint in local dev; fall back to JSON /api/chat
+      // if streaming is unavailable (404 or missing ReadableStream).
+
+      function runJsonFallback() {
+        return fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify(payload),
+        })
+          .then(function (res) {
+            if (res.status === 204) {
+              if (placeholder && placeholder.node) placeholder.node.remove();
+              EDAMessageUI.setStatus("");
+              if (global.EDAClosingStamps && typeof global.EDAClosingStamps.maybeShowStamps === "function") {
+                global.EDAClosingStamps.maybeShowStamps({ noReply: true });
+              }
+              if (EDAMessageUI.runReadyForNextInput) {
+                EDAMessageUI.runReadyForNextInput();
+              }
+              return null;
             }
-            if (EDAMessageUI.runReadyForNextInput) {
-              EDAMessageUI.runReadyForNextInput();
+            return res.json().catch(function () {
+              return {};
+            });
+          })
+          .then(function (data) {
+            if (!data) return;
+            if (!data.reply && data.error) {
+              var msg = chatErrorToMessage(data);
+              EDAMessageUI.setStatus(msg, true);
+              if (placeholder && placeholder.contentEl) {
+                placeholder.contentEl.textContent = msg;
+              } else {
+                EDAMessageUI.addMessage("assistant", msg, editorRef);
+              }
+              if (EDAMessageUI.runReadyForNextInput) {
+                EDAMessageUI.runReadyForNextInput();
+              }
+              return;
             }
-            return null;
-          }
-          return res.json().catch(function () {
-            return {};
+            var opts = placeholder && placeholder.contentEl
+              ? { placeholderContent: placeholder.contentEl }
+              : undefined;
+            handleChatResponse(data, editorRef, opts);
           });
+      }
+
+      function runStreaming() {
+        return fetch("/api/chat-stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify(payload),
         })
-        .then(function (data) {
-          if (!data) return;
-          if (!data.reply && data.error) {
-            var msg = chatErrorToMessage(data);
-            EDAMessageUI.setStatus(msg, true);
-            if (placeholder && placeholder.contentEl) {
-              placeholder.contentEl.textContent = msg;
-            } else {
-              EDAMessageUI.addMessage("assistant", msg, editorRef);
+          .then(function (res) {
+            if (res.status === 404 || !res.body || !res.body.getReader) {
+              // No streaming support; fall back to JSON endpoint.
+              throw { __streamFallback: true };
             }
-            if (EDAMessageUI.runReadyForNextInput) {
-              EDAMessageUI.runReadyForNextInput();
+            if (res.status === 204) {
+              if (placeholder && placeholder.node) placeholder.node.remove();
+              EDAMessageUI.setStatus("");
+              if (global.EDAClosingStamps && typeof global.EDAClosingStamps.maybeShowStamps === "function") {
+                global.EDAClosingStamps.maybeShowStamps({ noReply: true });
+              }
+              if (EDAMessageUI.runReadyForNextInput) {
+                EDAMessageUI.runReadyForNextInput();
+              }
+              return null;
             }
-            return;
-          }
-          var opts = placeholder && placeholder.contentEl
-            ? { placeholderContent: placeholder.contentEl }
-            : undefined;
-          handleChatResponse(data, editorRef, opts);
-        })
+
+            var reader = res.body.getReader();
+            var decoder = new TextDecoder("utf-8");
+            var buffer = "";
+            var finalEvent = null;
+
+            function processBuffer() {
+              var index;
+              while ((index = buffer.indexOf("\n")) !== -1) {
+                var line = buffer.slice(0, index).trim();
+                buffer = buffer.slice(index + 1);
+                if (!line) continue;
+                try {
+                  var evt = JSON.parse(line);
+                  if (evt.type === "delta" && evt.agent === "detective" && placeholder && placeholder.contentEl) {
+                    placeholder.contentEl.textContent += evt.text || "";
+                  } else if (evt.type === "final") {
+                    finalEvent = evt;
+                  }
+                } catch (e) {
+                  console.warn("[chat-stream] Failed to parse event:", e && e.message);
+                }
+              }
+            }
+
+            function readNext() {
+              return reader.read().then(function (result) {
+                if (result.done) {
+                  processBuffer();
+                  return;
+                }
+                buffer += decoder.decode(result.value, { stream: true });
+                processBuffer();
+                return readNext();
+              });
+            }
+
+            return readNext().then(function () {
+              if (!finalEvent) return;
+              var status = typeof finalEvent.status === "number" ? finalEvent.status : 200;
+              var body = finalEvent.body || {};
+              if (status === 204) {
+                if (placeholder && placeholder.node) placeholder.node.remove();
+                EDAMessageUI.setStatus("");
+                if (global.EDAClosingStamps && typeof global.EDAClosingStamps.maybeShowStamps === "function") {
+                  global.EDAClosingStamps.maybeShowStamps({ noReply: true });
+                }
+                if (EDAMessageUI.runReadyForNextInput) {
+                  EDAMessageUI.runReadyForNextInput();
+                }
+                return;
+              }
+              if (status !== 200 || (!body.reply && body.error)) {
+                var msg = chatErrorToMessage(body);
+                EDAMessageUI.setStatus(msg, true);
+                if (placeholder && placeholder.contentEl) {
+                  placeholder.contentEl.textContent = msg;
+                } else {
+                  EDAMessageUI.addMessage("assistant", msg, editorRef);
+                }
+                if (EDAMessageUI.runReadyForNextInput) {
+                  EDAMessageUI.runReadyForNextInput();
+                }
+                return;
+              }
+              var opts = placeholder && placeholder.contentEl
+                ? { placeholderContent: placeholder.contentEl, skipAssistantContent: true }
+                : { skipAssistantContent: true };
+              handleChatResponse(body, editorRef, opts);
+            });
+          });
+      }
+
+      runStreaming()
         .catch(function (err) {
+          if (err && err.__streamFallback) {
+            return runJsonFallback();
+          }
           EDAMessageUI.setStatus("Network error: " + err.message, true);
           if (placeholder && placeholder.contentEl) {
             placeholder.contentEl.textContent = "Network error: " + err.message;

@@ -1,0 +1,33 @@
+{
+  "type": "object",
+  "properties": {
+    "lumen_philosopher_user_response": {
+      "type": "string",
+      "description": "Short in-character response from the lumen philosopher, addressed to the user."
+    },
+    "lumen_philosopher_other_response": {
+      "type": "string",
+      "description": "Short in-character response addressed to the umbra philosopher (optional; use empty string if none). This is for philosophers to talk to each other and can be ignored if you prefer them to only address the user."
+    },
+    "lumen_philosopher_notes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Words or short phrases the lumen philosopher jots down. Use [] if none."
+    },
+    "lumen_philosopher_callouts": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": { "type": "string" }
+      },
+      "description": "Optional callouts: [[word_or_phrase, mode], ...] with mode one of keyword, highlight, strike."
+    }
+  },
+  "required": [
+    "lumen_philosopher_user_response",
+    "lumen_philosopher_other_response",
+    "lumen_philosopher_notes",
+    "lumen_philosopher_callouts"
+  ],
+  "additionalProperties": false
+}

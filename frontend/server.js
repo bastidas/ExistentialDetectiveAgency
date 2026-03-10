@@ -7,7 +7,7 @@ const express = require("express");
 const cookieParser = require("cookie-parser");
 const OpenAI = require("openai");
 
-const shared = require("./api/shared");
+const shared = require("./api/src/shared");
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = path.join(__dirname, "data");
@@ -65,16 +65,12 @@ app.get("/api/debug", (req, res) => {
   const sessionId = getOrCreateSessionId(req, res);
   const userExchangeCount = shared.userExchangeCounts.get(sessionId) ?? 0;
   const dailyCount = dailyUsageStore.readDailyUsage();
-  const promptPreview = shared.getPromptFirstLines(5);
   res.json({
     devMode: shared.DEV,
     offline: shared.OFFLINE,
     debugLogs: true,
     model: shared.MODEL,
     serviceTier: shared.SERVICE_TIER || "(default)",
-    promptPreview,
-    promptFilePath: shared.PROMPT_FILE,
-    promptPreviewFound: promptPreview.length > 0,
     userExchangeCount,
     maxUserExchanges: shared.MAX_USER_EXCHANGES,
     dailyCount,
@@ -107,24 +103,70 @@ app.post("/api/chat", async (req, res) => {
   return res.status(status).json(body);
 });
 
-app.post("/api/philosopher-dialog", async (req, res) => {
+// Streaming variant for local development only. Returns NDJSON events:
+// { type: "delta", agent: "detective", text }
+// { type: "final", status, body }
+app.post("/api/chat-stream", async (req, res) => {
   const sessionId = getOrCreateSessionId(req, res);
-  const result = await shared.handlePhilosopherDialogRequest(sessionId, req.body || {}, {
-    openaiClient: client,
-    debug: shared.DEBUG_LOGS,
-  });
-  const status = result.status;
-  const body = result.body;
-  return res.status(status).json(body);
+  const message = req.body?.message;
+  if (typeof message !== "string" || !message.trim()) {
+    res.status(400);
+    res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+    res.write(
+      JSON.stringify({
+        type: "final",
+        status: 400,
+        body: { error: "Missing or invalid message.", errorKind: "bad_request" },
+      }) + "\n"
+    );
+    return res.end();
+  }
+  const trimmed = message.trim();
+  const raw = req.body?.contentWidthChars;
+  const contentWidthChars =
+    typeof raw === "number" && raw > 0 ? Math.round(raw) : undefined;
+
+  res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+
+  const onEvent = async (evt) => {
+    try {
+      res.write(JSON.stringify(evt) + "\n");
+    } catch (err) {
+      console.warn("/api/chat-stream write error:", err && err.message);
+    }
+  };
+
+  try {
+    await shared.handleChatStream(sessionId, trimmed, {
+      openaiClient: client,
+      dailyUsageStore,
+      debug: shared.DEBUG_LOGS,
+      contentWidthChars,
+    }, onEvent);
+  } catch (err) {
+    console.error("/api/chat-stream handler error:", err && err.message);
+    try {
+      res.write(
+        JSON.stringify({
+          type: "final",
+          status: 500,
+          body: { error: "Server error.", errorKind: "server_error" },
+        }) + "\n"
+      );
+    } catch (_) {}
+  } finally {
+    res.end();
+  }
 });
 
 app.listen(PORT, () => {
   console.log(`Chat server running at http://localhost:${PORT}`);
   console.log(`Prompts dir: ${shared.PROMPTS_DIR}`);
   console.log(
-    `  prompt.md: ${fs.existsSync(shared.PROMPT_FILE) ? "found" : "NOT FOUND"}`,
-    `| closers.md: ${fs.existsSync(shared.CLOSERS_FILE) ? "found" : "NOT FOUND"}`,
-    `| phil_annotations.json: ${shared.resolvePhilAnnotationsFilePath() ? "found" : "NOT FOUND"}`
+    `  closers.md: ${fs.existsSync(shared.CLOSERS_FILE) ? "found" : "NOT FOUND"}`,
+    `| phil_annotations.json: ${fs.existsSync(shared.PHIL_ANNOTATIONS_FILE) ? "found" : "NOT FOUND"}`
   );
   if (shared.OFFLINE) {
     console.log("OFFLINE=1: AI backend disabled, returning generic replies.");
@@ -138,9 +180,6 @@ app.listen(PORT, () => {
       "[DEBUG] Service tier:",
       shared.SERVICE_TIER || "(default)"
     );
-    const lines = shared.getPromptFirstLines(5);
-    console.log("[DEBUG] Prompt file first 5 lines:");
-    lines.forEach((line, i) => console.log(`  ${i + 1}: ${line}`));
     const dailyUsageFile = path.join(DATA_DIR, "daily_usage.json");
     try {
       if (fs.existsSync(dailyUsageFile)) {

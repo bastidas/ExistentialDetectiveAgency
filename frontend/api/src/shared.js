@@ -1,7 +1,7 @@
 "use strict";
 
 const crypto = require("crypto");
-const chatShared = require("../shared");
+const chatShared = require("./chatService");
 
 function parseCookieHeader(cookieHeader) {
   const out = {};

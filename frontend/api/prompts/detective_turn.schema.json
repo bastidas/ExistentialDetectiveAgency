@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "detective_response": {
+      "type": "string",
+      "description": "Your reply in character as the existential detective."
+    }
+  },
+  "required": ["detective_response"],
+  "additionalProperties": false
+}

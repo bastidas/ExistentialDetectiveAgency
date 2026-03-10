@@ -48,32 +48,39 @@
       if (typeof config.height === "number" && config.height > 0) baseHeight = config.height;
     }
 
-    // Visual scale applied first.
+    // Visual scale: per-object scale * responsive note scale (same as notes).
     var scale = typeof config.scale === "number" && config.scale > 0 ? config.scale : 1;
-    var visualWidth = baseWidth * scale;
-    var visualHeight = baseHeight * scale;
-
-    // Optional padding fraction: how much to shrink the selectable region
-    // inward on EACH side, as a fraction of the visual size.
-    var paddingFrac = 0;
-    if (config && typeof config.padding_frac === "number" && isFinite(config.padding_frac)) {
-      paddingFrac = config.padding_frac;
-      if (paddingFrac < 0) paddingFrac = 0;
-      if (paddingFrac > 0.45) paddingFrac = 0.45; // avoid disappearing hit box
+    var responsiveScale = 1;
+    if (NoteFormatConfig && typeof NoteFormatConfig.getResponsiveNoteScale === "function") {
+      responsiveScale = NoteFormatConfig.getResponsiveNoteScale();
     }
+    var visualWidth = baseWidth * scale * responsiveScale;
+    var visualHeight = baseHeight * scale * responsiveScale;
 
-    var hitWidth = visualWidth * (1 - 2 * paddingFrac);
-    var hitHeight = visualHeight * (1 - 2 * paddingFrac);
-    if (hitWidth <= 0) hitWidth = Math.max(visualWidth * 0.2, 10);
-    if (hitHeight <= 0) hitHeight = Math.max(visualHeight * 0.2, 10);
+    // Logical bounding box: centered fraction of the visual size, like papers.
+    var bx = config && typeof config.bounding_x_frac === "number" ? config.bounding_x_frac : 1;
+    var by = config && typeof config.bounding_y_frac === "number" ? config.bounding_y_frac : 1;
+    if (!(bx > 0)) bx = 1;
+    if (!(by > 0)) by = 1;
+    if (bx > 1) bx = 1;
+    if (by > 1) by = 1;
+    var boundingWidth = visualWidth * bx;
+    var boundingHeight = visualHeight * by;
+    if (!(boundingWidth > 0)) boundingWidth = visualWidth;
+    if (!(boundingHeight > 0)) boundingHeight = visualHeight;
+
+    // Bounding box is the wrapper; offsets are 0 in wrapper coordinates.
+    var offsetX = 0;
+    var offsetY = 0;
 
     return {
       visualWidth: visualWidth,
       visualHeight: visualHeight,
-      hitWidth: hitWidth,
-      hitHeight: hitHeight,
+      boundingWidth: boundingWidth,
+      boundingHeight: boundingHeight,
+      offsetX: offsetX,
+      offsetY: offsetY,
       scale: scale,
-      paddingFrac: paddingFrac,
     };
   }
 
@@ -100,6 +107,7 @@
 
   var NoteLayout = global.NoteLayout;
   var NoteElement = global.NoteElement;
+  var NoteFormatConfig = global.NoteFormatConfig || null;
 
   function hasRemainingItems() {
     return remainingItems.length > 0;
@@ -134,6 +142,7 @@
     wrapper.style.transformOrigin = "top left";
     wrapper.style.setProperty("--note-rotation", rotationDeg + "deg");
     wrapper.style.transform = "rotate(" + rotationDeg + "deg)";
+    wrapper.dataset.rotationDeg = String(rotationDeg);
     if (pos.left != null) wrapper.style.left = pos.left + "px";
     if (pos.right != null) wrapper.style.right = pos.right + "px";
     wrapper.style.top = pos.top + "px";
@@ -142,9 +151,13 @@
     var config = getConfigForImage(imageUrl);
     var size = getItemSizeFromConfig(config);
 
-    // Hit/bounding box uses the shrunken dimensions (after padding_frac).
-    wrapper.style.width = size.hitWidth + "px";
-    wrapper.style.height = size.hitHeight + "px";
+    // Wrapper size matches the logical bounding box.
+    wrapper.style.width = size.boundingWidth + "px";
+    wrapper.style.height = size.boundingHeight + "px";
+    wrapper.dataset.boundingWidth = String(size.boundingWidth);
+    wrapper.dataset.boundingHeight = String(size.boundingHeight);
+    wrapper.dataset.boundingOffsetX = String(size.offsetX);
+    wrapper.dataset.boundingOffsetY = String(size.offsetY);
 
     // Inner wrapper holds the visual image, which can extend outside the
     // hit box but remains non-interactive.
@@ -153,8 +166,8 @@
     imgWrap.style.position = "absolute";
     imgWrap.style.width = size.visualWidth + "px";
     imgWrap.style.height = size.visualHeight + "px";
-    imgWrap.style.left = ((size.hitWidth - size.visualWidth) / 2) + "px";
-    imgWrap.style.top = ((size.hitHeight - size.visualHeight) / 2) + "px";
+    imgWrap.style.left = ((size.boundingWidth - size.visualWidth) / 2) + "px";
+    imgWrap.style.top = ((size.boundingHeight - size.visualHeight) / 2) + "px";
     imgWrap.style.pointerEvents = "none";
 
     var img = document.createElement("img");
@@ -167,43 +180,6 @@
     img.style.width = "100%";
     img.style.height = "100%";
     imgWrap.appendChild(img);
-
-    // Optional: add a glass lens overlay and image cut-out for objects
-    // that define a transparent region in object-config.json (e.g. mglass.webp).
-    var tx = Number(config && config.transparent_x);
-    var ty = Number(config && config.transparent_y);
-    var tr = Number(config && config.transparent_radius);
-    if (isFinite(tx) && isFinite(ty) && isFinite(tr) && tr > 0) {
-      wrapper.className += " margin-item--glass";
-
-      // Express the glass center as percentages of the visual image size
-      // so CSS masks can reference it. transparent_x / transparent_y are
-      // in wrapper (hit-box) coordinates, so convert them into image
-      // coordinates using the same centering offset as imgWrap.
-      if (size.visualWidth > 0 && size.visualHeight > 0) {
-        var imgOffsetX = (size.hitWidth - size.visualWidth) / 2;
-        var imgOffsetY = (size.hitHeight - size.visualHeight) / 2;
-        var centerXPercent = ((tx - imgOffsetX) / size.visualWidth) * 100;
-        var centerYPercent = ((ty - imgOffsetY) / size.visualHeight) * 100;
-        wrapper.style.setProperty("--glass-center-x", centerXPercent + "%");
-        wrapper.style.setProperty("--glass-center-y", centerYPercent + "%");
-        wrapper.style.setProperty("--glass-hole-radius", tr + "px");
-      }
-
-      var lens = document.createElement("div");
-      lens.className = "margin-item__glass-lens";
-      lens.setAttribute("aria-hidden", "true");
-
-      var diameter = tr * 2;
-      lens.style.position = "absolute";
-      lens.style.left = tx - tr + "px";
-      lens.style.top = ty - tr + "px";
-      lens.style.width = diameter + "px";
-      lens.style.height = diameter + "px";
-      lens.style.pointerEvents = "none";
-
-      wrapper.appendChild(lens);
-    }
 
     wrapper.appendChild(imgWrap);
 
@@ -273,15 +249,15 @@
     // Use same placement as notes: stacked in zone and, when applicable, anchored near last user message.
     var pos;
     if (zoneEl && typeof notePages.getPositionInZone === "function") {
-      pos = notePages.getPositionInZone(zoneEl, side, rotationDeg, size.hitWidth, size.hitHeight, index);
+      pos = notePages.getPositionInZone(zoneEl, side, rotationDeg, size.boundingWidth, size.boundingHeight, index);
     } else if (typeof NoteLayout.stackedPositionInRegion === "function" && zoneEl) {
-      pos = NoteLayout.stackedPositionInRegion(zoneEl, side, rotationDeg, size.hitWidth, size.hitHeight, index);
+      pos = NoteLayout.stackedPositionInRegion(zoneEl, side, rotationDeg, size.boundingWidth, size.boundingHeight, index);
     } else {
       pos = { left: side === "left" ? 0 : undefined, right: side === "right" ? 0 : undefined, top: 0 };
     }
 
     var wrapper = createMarginItemElement(side, imageUrl, pos, rotationDeg);
-    var zoneOffsetLeft = pos.left != null ? pos.left : (zoneBounds.width - pos.right - size.hitWidth);
+    var zoneOffsetLeft = pos.left != null ? pos.left : (zoneBounds.width - pos.right - size.boundingWidth);
     var zoneOffsetTop = pos.top;
     wrapper.style.left = (zoneBounds.left + zoneOffsetLeft) + "px";
     wrapper.style.right = "";

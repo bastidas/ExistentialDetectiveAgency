@@ -106,7 +106,7 @@
     if (charsPerLine == null || charsPerLine <= 0) charsPerLine = ESTIMATE_CHARS_PER_LINE_FALLBACK;
     var lines = Math.max(1, Math.ceil(text.length / charsPerLine));
     var estimatedPx = lines * lineHeight;
-    // #region agent log
+    // #region agent log (local debug only; no external network by default)
     if (typeof document !== "undefined" && document.body && document.body.dataset && document.body.dataset.devMode === "true") {
       var payload = {
         sessionId: "532d40",
@@ -124,11 +124,15 @@
         },
         timestamp: Date.now(),
       };
-      fetch("http://127.0.0.1:7889/ingest/ddcd2c66-b2ca-4bb8-8423-b269323dba2a", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "532d40" },
-        body: JSON.stringify(payload),
-      }).catch(function () {});
+      if (typeof console !== "undefined" && console.debug) {
+        console.debug("[noteLayout] estimateHeightForText", payload);
+      }
+      // If a custom ingest hook is provided, call it instead of hitting a hard-coded localhost endpoint.
+      if (typeof global.EDANoteDebugIngest === "function") {
+        try {
+          global.EDANoteDebugIngest(payload);
+        } catch (e) {}
+      }
     }
     // #endregion
     return estimatedPx;
