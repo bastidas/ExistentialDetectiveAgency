@@ -6,9 +6,9 @@
   // least this multiple of the required characters, if available.
   var PREFERRED_CAPACITY_RATIO = 1.5;
 
-  var notePages = global.notePages || null;
-  var capacityApi = global.NoteCapacity || null;
-  var cfg = global.NoteFormatConfig || null;
+  var EDANotePages = global.EDANotePages || null;
+  var capacityApi = global.EDANoteCapacity || null;
+  var cfg = global.EDANoteFormatConfig || null;
 
   function delay(ms) {
     if (!ms || ms <= 0) return Promise.resolve();
@@ -242,8 +242,8 @@
   var allocator = createAllocator();
 
   function executeJob(job) {
-    notePages = notePages || global.notePages;
-    if (!notePages || !job || !job.text) return Promise.resolve();
+    EDANotePages = EDANotePages || global.EDANotePages;
+    if (!EDANotePages || !job || !job.text) return Promise.resolve();
     var side = job.side === "right" ? "right" : "left";
     var text = String(job.text);
     if (!text.trim()) return Promise.resolve();
@@ -251,45 +251,53 @@
     if (text.length > longNoteThreshold) {
       console.info(LOG_PREFIX, "Long note candidate", { side: side, length: text.length });
     }
-    var decision = notePages.need_new_note(side, text) || { needNew: true };
+    var decision = EDANotePages.need_new_note(side, text) || { needNew: true };
     var writeStep = Promise.resolve();
     if (decision.needNew) {
       // Paper selection: allocator is the single source when config is loaded (enqueue is gated by whenPaperConfigLoaded).
-      // When allocator returns no selection, notePages uses preferLargerPaper/avoidPaperUrl with the same policy.
-      var currentPaperUrl = (notePages.getCurrentPaperUrl && notePages.getCurrentPaperUrl(side)) || null;
+      // When allocator returns no selection, EDANotePages uses preferLargerPaper/avoidPaperUrl with the same policy.
+      // Require pixel fit (not just character capacity) so we don't assign long text to a too-small paper.
+      var currentPaperUrl = (EDANotePages.getCurrentPaperUrl && EDANotePages.getCurrentPaperUrl(side)) || null;
       var selection = allocator.reserve(side, text.length, !!decision.preferLargerPaper, { avoidPaperUrl: currentPaperUrl });
       var noteOptions = { avoidPaperUrl: currentPaperUrl };
+      var EDANoteLayout = global.EDANoteLayout;
+      var estimatedH = EDANoteLayout && typeof EDANoteLayout.estimateHeightForText === "function"
+        ? EDANoteLayout.estimateHeightForText(text, side, selection && selection.paperUrl ? selection.paperUrl : undefined)
+        : 0;
       if (selection && selection.paperUrl) {
-        var textLen = text.length;
-        var longThreshold = (cfg && typeof cfg.getLongNoteThreshold === "function") ? cfg.getLongNoteThreshold() : 350;
-        var isLongText = textLen > Math.min(200, longThreshold);
-        if (isLongText) {
-          var NoteLayout = global.NoteLayout;
-          var estimatedH = NoteLayout && typeof NoteLayout.estimateHeightForText === "function"
-            ? NoteLayout.estimateHeightForText(text, side, selection.paperUrl)
-            : 0;
-          var writingAreaH = NoteLayout && typeof NoteLayout.getPaperWritingAreaHeight === "function"
-            ? NoteLayout.getPaperWritingAreaHeight(selection.paperUrl, side)
-            : Infinity;
-          if (writingAreaH > 0 && estimatedH > writingAreaH * 0.95) {
-            noteOptions.preferLargerPaper = true;
-          } else {
-            noteOptions.paperUrl = selection.paperUrl;
-          }
-        } else {
+        var writingAreaH = EDANoteLayout && typeof EDANoteLayout.getPaperWritingAreaHeight === "function"
+          ? EDANoteLayout.getPaperWritingAreaHeight(selection.paperUrl, side)
+          : Infinity;
+        // Pixel-based fit: require estimated height <= writable height (with margin). Trigger preferLargerPaper earlier (0.85) to avoid barely-fits overflow.
+        var PIXEL_FIT_MARGIN_RATIO = 0.15;
+        var PREFER_LARGER_THRESHOLD = 0.85;
+        var fitsPixels = writingAreaH > 0 && estimatedH <= writingAreaH * (1 - PIXEL_FIT_MARGIN_RATIO);
+        var preferLargerByPixels = writingAreaH > 0 && estimatedH > writingAreaH * PREFER_LARGER_THRESHOLD;
+        if (fitsPixels && !preferLargerByPixels) {
           noteOptions.paperUrl = selection.paperUrl;
+        } else {
+          noteOptions.preferLargerPaper = true;
+        }
+        if (typeof document !== "undefined" && document.body && document.body.dataset && document.body.dataset.devMode === "true") {
+          console.debug(LOG_PREFIX, "new note paper choice", {
+            paperUrl: selection.paperUrl,
+            estimatedH: estimatedH,
+            writingAreaH: writingAreaH,
+            fitsPixels: fitsPixels,
+            preferLargerByPixels: preferLargerByPixels,
+          });
         }
       } else if (decision.preferLargerPaper) {
         noteOptions.preferLargerPaper = true;
       }
-      var newNoteResult = notePages.write_new_note(side, noteOptions);
+      var newNoteResult = EDANotePages.write_new_note(side, noteOptions);
       if (newNoteResult == null) {
         return Promise.reject(new Error("write_new_note failed: no region for side " + side));
       }
       writeStep = Promise.resolve(newNoteResult);
     }
     return writeStep.then(function () {
-      return notePages.write_on_current_note(side, text, job.writeOptions || {});
+      return EDANotePages.write_on_current_note(side, text, job.writeOptions || {});
     });
   }
 
@@ -308,5 +316,5 @@
     },
   };
 
-  global.NoteQueueManager = manager;
+  global.EDANoteQueueManager = manager;
 })(typeof window !== "undefined" ? window : this);

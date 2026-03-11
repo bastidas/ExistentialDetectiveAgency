@@ -27,6 +27,8 @@
     }
     .note-debug-controls label { display: flex; align-items: center; gap: 0.5rem; }
     .note-debug-controls input[type="number"] { width: 4ch; }
+    .note-debug-preview-form { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+    .note-debug-preview-form input[type="text"] { padding: 0.25rem 0.5rem; }
     .note-debug-fake-chat { min-height: 120px; }
   </style>
 </head>
@@ -39,7 +41,7 @@
       <h2 class="philosopher-notes-title">Left philosopher</h2>
       <div id="left-philosopher-content" class="philosopher-notes-content"></div>
     </aside>
-    <div id="notes-layer" class="notes-layer" aria-hidden="true"></div>
+    <div id="notes-layer" class="notes-layer"></div>
     <main>
       <div class="note-debug-controls">
         <label>
@@ -49,6 +51,12 @@
           Interval (s): <input type="number" id="note-debug-interval" value="3" min="1" max="60" step="1">
         </label>
         <button type="button" id="note-debug-fire-once">Fire once</button>
+        <form id="note-debug-preview-form" class="note-debug-preview-form">
+          <label>
+            <input type="text" id="note-debug-preview-input" placeholder="Preview text (user response)" size="28">
+          </label>
+          <button type="submit" id="note-debug-preview-styles">Preview styles</button>
+        </form>
       </div>
       <div id="messages" class="messages note-debug-fake-chat"></div>
     </main>
@@ -61,19 +69,22 @@
     <div id="mobile-shared-notes-content" class="philosopher-notes-content"></div>
   </div>
 
-  <script src="js/utils.js"></script>
-  <script src="js/noteFormatConfig.js"></script>
-  <script src="js/noteLayout.js"></script>
-  <script src="js/noteElement.js"></script>
-  <script src="js/noteCapacity.js"></script>
-  <script src="js/handwriter.js"></script>
-  <script src="js/notePages.js"></script>
-  <script src="js/noteQueueManager.js"></script>
-  <script src="js/philosopherRules.js"></script>
+  <script src="js/shared.utils.js"></script>
+  <script src="js/shared.typingConfig.js"></script>
+  <script src="js/viewport.breakpointsConfig.js"></script>
+  <script src="js/notes.formatConfig.js"></script>
+  <script src="js/notes.layout.js"></script>
+  <script src="js/notes.element.js"></script>
+  <script src="js/notes.capacity.js"></script>
+  <script src="js/notes.handwriter.js"></script>
+  <script src="js/notes.pages.js"></script>
+  <script src="js/notes.queueManager.js"></script>
+  <script src="js/notes.philosopherRules.js"></script>
   <script src="https://unpkg.com/rough-notation@0.5.1/lib/rough-notation.iife.js"></script>
-  <script src="js/annotationConfig.js"></script>
-  <script src="js/annotation.js"></script>
-  <script src="js/viewportNotes.js"></script>
+  <script src="js/philosopherDisplay.config.js"></script>
+  <script src="js/annotation.config.js"></script>
+  <script src="js/annotation.markup.js"></script>
+  <script src="js/viewport.notes.js"></script>
   <script>
 (function () {
   "use strict";
@@ -136,6 +147,25 @@
     right: { baseDelayMs: 0, variationMs: 0, useLinedLayout: true, disableScroll: true },
   };
 
+  /** Sample text for style preview: user, other, note (so all three segment types are visible). */
+  var PREVIEW_USER_DEFAULT = "A thought for the querent.";
+  var PREVIEW_OTHER_DEFAULT = "A marginal remark to the other philosopher.";
+  var PREVIEW_NOTE_DEFAULT = "A short note.";
+
+  function firePreviewStyles() {
+    var input = document.getElementById("note-debug-preview-input");
+    var userText = (input && input.value && input.value.trim()) ? input.value.trim() : PREVIEW_USER_DEFAULT;
+    var payload = {
+      userResponse: userText,
+      otherResponse: PREVIEW_OTHER_DEFAULT,
+      notes: [PREVIEW_NOTE_DEFAULT],
+    };
+    if (window.EDARules && typeof EDARules.appendPhilosopherContent === "function") {
+      EDARules.appendPhilosopherContent("left", payload, FAST_WRITE_OPTS.left).catch(function (e) { console.warn("[note-debug] preview left:", e); });
+      EDARules.appendPhilosopherContent("right", payload, FAST_WRITE_OPTS.right).catch(function (e) { console.warn("[note-debug] preview right:", e); });
+    }
+  }
+
   function fireOneTick() {
     appendFakeMessage("user", pick(LOREM_USER));
     appendFakeMessage("assistant", pick(LOREM_ASSISTANT));
@@ -184,14 +214,17 @@
   }
 
   function runInit() {
-    var cfg = window.NoteFormatConfig;
+    var cfg = window.EDANoteFormatConfig;
     if (cfg && typeof cfg.applyNoteFormatToPanels === "function") {
       cfg.applyNoteFormatToPanels();
+    }
+    if (window.EDAPhilosopherDisplayConfig && typeof EDAPhilosopherDisplayConfig.applyDisplayConfigToPanels === "function") {
+      EDAPhilosopherDisplayConfig.applyDisplayConfigToPanels();
     }
     if (typeof window.initViewportNotes === "function") {
       window.initViewportNotes();
     }
-    var q = window.NoteQueueManager;
+    var q = window.EDANoteQueueManager;
     if (q && typeof q.init === "function") {
       q.init({ pauseMs: 2000 });
     }
@@ -217,6 +250,13 @@
       }
       if (fireOnce) {
         fireOnce.addEventListener("click", fireOneTick);
+      }
+      var previewForm = document.getElementById("note-debug-preview-form");
+      if (previewForm) {
+        previewForm.addEventListener("submit", function (e) {
+          e.preventDefault();
+          firePreviewStyles();
+        });
       }
 
       if (toggle && toggle.checked) {

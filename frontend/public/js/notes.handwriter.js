@@ -22,16 +22,52 @@
     return escaped;
   }
 
+  /** Infer side from note content element (data-side) or philosopher panel id. */
+  function inferSide(containerElement) {
+    if (!containerElement) return "left";
+    var dataSide = containerElement.getAttribute && containerElement.getAttribute("data-side");
+    if (dataSide === "left" || dataSide === "right") return dataSide;
+    if (containerElement.id && containerElement.id.indexOf("right") !== -1) return "right";
+    return "left";
+  }
+
+  /** Segment wrapper with class and inline font/color from philosopher display config so styles always match config. */
+  function createSegmentWrapper(containerElement, options) {
+    var responseType = options.responseType || "userResponse";
+    var side = options.side != null ? options.side : inferSide(containerElement);
+    var wrapper = document.createElement("div");
+    wrapper.className = "philosopher-segment philosopher-" + responseType;
+    var displayConfig = global.EDAPhilosopherDisplayConfig;
+    if (displayConfig && displayConfig.getSegmentStyle) {
+      var style = displayConfig.getSegmentStyle(side, responseType);
+      if (style) {
+        if (style.fontFamily) wrapper.style.fontFamily = style.fontFamily;
+        if (style.color) wrapper.style.color = style.color;
+        if (responseType === "otherResponse") {
+          if (style.opacity != null) wrapper.style.opacity = String(style.opacity);
+          if (style.fontStyle) wrapper.style.fontStyle = style.fontStyle;
+          /* Set font-size inline like color/fontFamily so it always applies. Scale from viewport via --note-responsive-font-scale on root/panel. */
+          var baseSize = style.fontSize != null && String(style.fontSize).trim() !== "" ? style.fontSize : "2rem";
+          wrapper.style.fontSize = "calc(" + baseSize + " * var(--note-responsive-font-scale, 1))";
+        }
+      }
+    }
+    containerElement.appendChild(wrapper);
+    return wrapper;
+  }
+
   /**
    * Append and reveal text with a handwriter effect.
    * @param {HTMLElement} containerElement - Parent to append into (#left-philosopher-content or #right-philosopher-content)
    * @param {string} rawText - Plain text to reveal
-   * @param {Object} options - { baseDelayMs, variationMs, useLinedLayout, keywords, shortNoteRotationDeg }
+   * @param {Object} options - { baseDelayMs, variationMs, useLinedLayout, keywords, shortNoteRotationDeg, responseType, side }
    *   - baseDelayMs: base delay per character (e.g. 90)
    *   - variationMs: random 0..variationMs added per character (e.g. 30)
    *   - useLinedLayout: if true, use right-panel lined layout (no keyword underlining in philosopher notes)
    *   - keywords: optional array; if useLinedLayout and keywords.length > 0, underline those words in the note (not used for philosopher notes; only user chat is annotated)
    *   - shortNoteRotationDeg: optional number; if set, rotate the text block (e.g. for 1–3 word jots)
+   *   - responseType: "userResponse" | "otherResponse" | "note" for segment font/color styling (default "userResponse")
+   *   - side: optional "left" | "right" (inferred from container id if omitted)
    * @returns {Promise} Resolves when full text has been revealed
    */
   function appendText(containerElement, rawText, options) {
@@ -43,13 +79,14 @@
 
     if (!containerElement || !rawText) return Promise.resolve();
 
+    var segmentWrapper = createSegmentWrapper(containerElement, options);
     var useRight = useLinedLayout;
     var keywordsForRight = (useLinedLayout && Array.isArray(keywords)) ? keywords : [];
 
     if (!useRight) {
-      return appendTextLeft(containerElement, rawText, baseDelayMs, variationMs, options);
+      return appendTextLeft(segmentWrapper, rawText, baseDelayMs, variationMs, options);
     }
-    return appendTextRight(containerElement, rawText, baseDelayMs, variationMs, keywordsForRight, options);
+    return appendTextRight(segmentWrapper, rawText, baseDelayMs, variationMs, keywordsForRight, options);
   }
 
   function nextDelay(baseMs, variationMs) {
@@ -60,10 +97,10 @@
     options = options || {};
     var div = document.createElement("div");
     div.className = "handwritten";
+    div.style.whiteSpace = "pre-wrap"; /* preserve newlines (LINE_BREAK_CONFIG blank lines) and leading spaces */
     if (options.shortNoteRotationDeg != null) {
       div.style.transform = "rotate(" + options.shortNoteRotationDeg + "deg)";
       div.style.transformOrigin = "top left";
-      div.style.whiteSpace = "pre-wrap"; /* preserve leading spaces */
     }
     container.appendChild(div);
     var i = 0;
@@ -146,7 +183,7 @@
     }
   }
 
-  global.handwriter = {
+  global.EDAHandwriter = {
     appendText: appendText,
     wrapKeywords: wrapKeywords,
   };

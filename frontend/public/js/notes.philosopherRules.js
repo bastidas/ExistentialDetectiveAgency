@@ -18,7 +18,7 @@
   var LEFT_RIGHT_BIAS = 0.5;
 
   var philosopherRules = [];
-  var noteQueueManager = global.NoteQueueManager || null;
+  var noteQueueManager = global.EDANoteQueueManager || null;
   if (noteQueueManager && typeof noteQueueManager.init === "function") {
     noteQueueManager.init({ pauseMs: NOTE_PAUSE_MS });
   }
@@ -27,17 +27,17 @@
     if (!text) return Promise.resolve();
     var targetId = side === "right" ? "right-philosopher-content" : "left-philosopher-content";
     var target = typeof document !== "undefined" ? document.getElementById(targetId) : null;
-    if (!target || typeof handwriter === "undefined") return Promise.resolve();
-    return handwriter.appendText(target, text, opts || {});
+    if (!target || typeof EDAHandwriter === "undefined") return Promise.resolve();
+    return EDAHandwriter.appendText(target, text, opts || {});
   }
 
   function queueNoteWrite(side, text, opts) {
     if (!text) return Promise.resolve();
     var normalizedSide = side === "right" ? "right" : "left";
-    if (noteQueueManager && typeof noteQueueManager.enqueue === "function" && typeof notePages !== "undefined") {
+    if (noteQueueManager && typeof noteQueueManager.enqueue === "function" && typeof EDANotePages !== "undefined") {
       var writeOptions = Object.assign({}, opts || {});
       var job = { side: normalizedSide, text: text, writeOptions: writeOptions };
-      var noteFormatConfig = global.NoteFormatConfig;
+      var noteFormatConfig = global.EDANoteFormatConfig;
       if (noteFormatConfig && typeof noteFormatConfig.whenPaperConfigLoaded === "function") {
         return noteFormatConfig.whenPaperConfigLoaded().then(function () {
           return noteQueueManager.enqueue(job);
@@ -130,26 +130,72 @@
     },
   };
 
-  function appendPhilosopherContent(side, responseText, notesArray) {
-    var pieces = [];
-    if (responseText && responseText.trim()) pieces.push(responseText.trim());
-    if (Array.isArray(notesArray)) {
-      notesArray.forEach(function (note) {
-        if (note != null && String(note).trim() !== "") pieces.push(String(note).trim());
+  /**
+   * Build ordered segments with configurable newlines. Payload: { userResponse, otherResponse, notes }.
+   * Each segment has { type: "userResponse"|"otherResponse"|"note", text }.
+   * Blank lines after userResponse/otherResponse come from LINE_BREAK_CONFIG in philosopherDisplay.config.js.
+   */
+  function buildSegments(payload) {
+    var displayConfig = global.EDAPhilosopherDisplayConfig;
+    var newlinesAfterUser = 6;
+    var newlinesAfterOther = 3;
+    var otherPrefix = "[To the other philosopher] ";
+    if (displayConfig && displayConfig.getLineBreakConfig) {
+      var lb = displayConfig.getLineBreakConfig();
+      var nUser = lb.newlinesAfterUserResponse;
+      var nOther = lb.newlinesAfterOtherResponse;
+      if (typeof nUser === "number" && nUser >= 0) newlinesAfterUser = nUser;
+      else if (nUser != null && !isNaN(parseInt(nUser, 10))) newlinesAfterUser = parseInt(nUser, 10);
+      if (typeof nOther === "number" && nOther >= 0) newlinesAfterOther = nOther;
+      else if (nOther != null && !isNaN(parseInt(nOther, 10))) newlinesAfterOther = parseInt(nOther, 10);
+    }
+    if (displayConfig && displayConfig.getOtherResponsePrefix) {
+      otherPrefix = displayConfig.getOtherResponsePrefix();
+    }
+    /** N blank lines = N newline characters after the content. */
+    function blankLines(n) {
+      return n > 0 ? Array(n + 1).join("\n") : "";
+    }
+    var segments = [];
+    var userText = (payload.userResponse != null ? String(payload.userResponse) : "").trim();
+    if (userText) {
+      segments.push({ type: "userResponse", text: userText + blankLines(newlinesAfterUser) });
+    }
+    var otherText = (payload.otherResponse != null ? String(payload.otherResponse) : "").trim();
+    if (otherText) {
+      segments.push({ type: "otherResponse", text: otherPrefix + otherText + blankLines(newlinesAfterOther) });
+    }
+    if (Array.isArray(payload.notes)) {
+      payload.notes.forEach(function (note) {
+        if (note != null && String(note).trim() !== "") {
+          segments.push({ type: "note", text: String(note).trim() });
+        }
       });
     }
-    if (!pieces.length) return Promise.resolve();
+    return segments;
+  }
+
+  /**
+   * @param {string} side - "left" or "right"
+   * @param {{ userResponse?: string, otherResponse?: string, notes?: string[] }} payload
+   * @param {Object} [writeOverrides] - Optional options merged into each segment write (e.g. { baseDelayMs: 0, variationMs: 0 } for style preview).
+   */
+  function appendPhilosopherContent(side, payload, writeOverrides) {
+    var segments = buildSegments(payload);
+    if (!segments.length) return Promise.resolve();
     var normalizedSide = side === "right" ? "right" : "left";
     var baseOpts = SIDE_OPTS[normalizedSide];
+    var overrides = writeOverrides && typeof writeOverrides === "object" ? writeOverrides : {};
     var labelPrefix = normalizedSide === "right" ? "R" : "L";
     var chain = Promise.resolve();
-    pieces.forEach(function (text, idx) {
+    segments.forEach(function (seg, idx) {
       chain = chain.then(function () {
-        console.log("[philosopherRules]", normalizedSide, "piece", idx + 1, "/", pieces.length, "len:", text.length);
-        var opts = Object.assign({}, baseOpts, {
-          debugLabel: labelPrefix + " " + (idx + 1) + "/" + pieces.length,
+        console.log("[philosopherRules]", normalizedSide, "piece", idx + 1, "/", segments.length, "type:", seg.type, "len:", seg.text.length);
+        var opts = Object.assign({}, baseOpts, overrides, {
+          debugLabel: labelPrefix + " " + (idx + 1) + "/" + segments.length,
+          responseType: seg.type,
         });
-        return queueNoteWrite(normalizedSide, text, opts);
+        return queueNoteWrite(normalizedSide, seg.text, opts);
       });
     });
     return chain;

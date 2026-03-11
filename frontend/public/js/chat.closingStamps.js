@@ -1,9 +1,17 @@
 /**
- * Closing stamps: when the user hits their chat limit, show 1–3 rubber-stamp overlays
+ * Closing stamps: when the user hits their chat limit, show rubber-stamp overlays
  * on the chat area. Content and styling from data/closing_stamps.json.
+ *
+ * Stamp schedule (post-limit rounds):
+ * - Round 1 (bonus final at MAX_USER_EXCHANGES): "stashed"
+ * - Round 2 (first 204, MAX_USER_EXCHANGES+1): "tracked"
+ * - Round 3 (second 204, MAX_USER_EXCHANGES+2): "anomaly"
+ * - Round 4+: with ANOMALY_STAMP_PROB, maybe show "anomaly"
  */
 (function (global) {
   "use strict";
+
+  var ANOMALY_STAMP_PROB = 0.3;
 
   var STAMP_TYPES = ["stashed", "tracked", "anomaly"];
   var STAMP_FORMATS = {
@@ -39,7 +47,7 @@
   }
 
   function getLocale(config) {
-    var override = (global.ChatConfig && global.ChatConfig.stampLocale) || null;
+    var override = (global.EDAChatConfig && global.EDAChatConfig.stampLocale) || null;
     if (override && typeof override === "string") return override;
     if (config.defaultLocale) return config.defaultLocale;
     var types = ["stashed", "tracked", "anomaly"];
@@ -75,8 +83,13 @@
   }
 
   /**
-   * Call when a "final exchange" occurs: limitReached (200 with closer), noReply (204 when already at limit), or debug in dev when at limit.
-   * Stamps only when user exchange count is at or above max. Shows one stamp per exchange: 1st = stashed, 2nd = tracked, 3rd = anomaly, 4th = none, 5th+ = anomaly 33%.
+   * Call when a post-limit event occurs:
+   * - limitReached: 200 response from bonus final exchange (MAX_USER_EXCHANGES)
+   * - noReply: 204 response (MAX_USER_EXCHANGES+1, +2, ...)
+   * - debug: dev-only trigger when already at limit
+   *
+   * Stamp schedule: round 1 = stashed, round 2 = tracked, round 3 = anomaly,
+   * round 4+ = anomaly with ANOMALY_STAMP_PROB.
    */
   function maybeShowStamps(options) {
     var limitReached = options && options.limitReached;
@@ -93,10 +106,10 @@
 
     var n = finalExchangeCount;
     var typeToShow = null;
-    if (n === 1) typeToShow = "stashed";
-    else if (n === 2) typeToShow = "tracked";
-    else if (n === 3) typeToShow = "anomaly";
-    else if (n >= 5 && Math.random() < 0.2) typeToShow = "anomaly";
+    if (n === 1) typeToShow = "stashed";   /* bonus final (MAX_USER_EXCHANGES) */
+    else if (n === 2) typeToShow = "tracked"; /* first 204 (MAX_USER_EXCHANGES+1) */
+    else if (n === 3) typeToShow = "anomaly";  /* second 204 (MAX_USER_EXCHANGES+2) */
+    else if (n >= 4 && Math.random() < ANOMALY_STAMP_PROB) typeToShow = "anomaly";
     if (!typeToShow) return;
 
     renderOneStamp(typeToShow, debug);

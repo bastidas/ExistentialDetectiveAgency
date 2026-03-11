@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cutive+Mono&display=swap" rel="stylesheet">
+  <!-- Philosopher note fonts loaded from philosopherDisplay.config.js (PHILOSOPHER_FONTS) when script runs -->
   <link rel="stylesheet" href="css/theme.css">
   <link rel="stylesheet" href="css/landing.css">
   <link rel="stylesheet" href="css/poem.css">
@@ -88,7 +89,7 @@
           <h2 class="philosopher-notes-title">Left philosopher</h2>
           <div id="left-philosopher-content" class="philosopher-notes-content"></div>
         </aside>
-        <div id="notes-layer" class="notes-layer" aria-hidden="true"></div>
+        <div id="notes-layer" class="notes-layer"></div>
         <main>
           <form id="form" class="form form--hidden">
             <div class="messages-wrap">
@@ -206,29 +207,31 @@
     </div>
   </div>
 
-  <script src="js/utils.js"></script>
-  <script src="js/typingConfig.js"></script>
-  <script src="js/breakpointsConfig.js"></script>
+  <!-- Load order: see public/js/README.md. Do not reorder without updating that file. -->
+  <script src="js/shared.utils.js"></script>
+  <script src="js/shared.typingConfig.js"></script>
+  <script src="js/viewport.breakpointsConfig.js"></script>
   <script src="https://unpkg.com/rough-notation@0.5.1/lib/rough-notation.iife.js"></script>
-  <script src="js/noteFormatConfig.js"></script>
-  <script src="js/noteLayout.js"></script>
-  <script src="js/noteElement.js"></script>
-  <script src="js/noteCapacity.js"></script>
-  <script src="js/chatConfig.js"></script>
-  <script src="js/handwriter.js"></script>
-  <script src="js/notePages.js"></script>
-  <script src="js/randomMarginItems.js"></script>
-  <script src="js/noteQueueManager.js"></script>
-  <script src="js/philosopherRules.js"></script>
-  <script src="js/annotationConfig.js"></script>
-  <script src="js/annotation.js"></script>
-  <script src="js/messageUI.js"></script>
-  <script src="js/closingStamps.js"></script>
-  <script src="js/chatInput.js"></script>
-  <script src="js/chatSend.js"></script>
-  <script src="js/viewportNotes.js"></script>
+  <script src="js/notes.formatConfig.js"></script>
+  <script src="js/notes.layout.js"></script>
+  <script src="js/notes.element.js"></script>
+  <script src="js/notes.capacity.js"></script>
+  <script src="js/chat.config.js"></script>
+  <script src="js/notes.handwriter.js"></script>
+  <script src="js/notes.pages.js"></script>
+  <script src="js/notes.randomMarginItems.js"></script>
+  <script src="js/notes.queueManager.js"></script>
+  <script src="js/notes.philosopherRules.js"></script>
+  <script src="js/philosopherDisplay.config.js"></script>
+  <script src="js/annotation.config.js"></script>
+  <script src="js/annotation.markup.js"></script>
+  <script src="js/chat.messageUI.js"></script>
+  <script src="js/chat.closingStamps.js"></script>
+  <script src="js/chat.input.js"></script>
+  <script src="js/chat.send.js"></script>
+  <script src="js/viewport.notes.js"></script>
   <script src="app.js"></script>
-  <script src="js/chat.js"></script>
+  <script src="js/chat.route.js"></script>
   <script src="js/poem.js"></script>
   <script src="js/router.js"></script>
 </body>

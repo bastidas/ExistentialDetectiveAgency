@@ -1,134 +1,20 @@
+"use strict";
+
 const fs = require("fs");
 const path = require("path");
-
-const SHARED_DIR = __dirname;
-const FRONTEND_DIR = path.join(SHARED_DIR, "..");
-
-function resolvePromptsDir() {
-  if (process.env.PROMPTS_DIR) {
-    const envDir = path.resolve(process.cwd(), process.env.PROMPTS_DIR);
-    if (fs.existsSync(envDir)) return envDir;
-    if (fs.existsSync(process.env.PROMPTS_DIR)) {
-      return path.resolve(process.env.PROMPTS_DIR);
-    }
-  }
-  const apiLocalPrompts = path.resolve(__dirname, "..", "prompts");
-  if (fs.existsSync(apiLocalPrompts)) return apiLocalPrompts;
-  const candidates = [
-    path.join(FRONTEND_DIR, "api", "prompts"),
-    path.resolve(process.cwd(), "api", "prompts"),
-    path.resolve(process.cwd(), "frontend", "api", "prompts"),
-    path.resolve(process.cwd(), "prompts"),
-  ];
-  for (const dir of candidates) {
-    try {
-      if (fs.existsSync(dir)) return path.resolve(dir);
-    } catch (_) {}
-  }
-  return path.resolve(FRONTEND_DIR, "api", "prompts");
-}
-
-const PROMPTS_DIR = resolvePromptsDir();
-
-// Persona markdown (kept as rich system prompt text)
-const DETECTIVE_PERSONA_FILE = path.join(PROMPTS_DIR, "detective_persona.md");
-const LUMEN_PERSONA_FILE = path.join(PROMPTS_DIR, "lumen_persona.md");
-const UMBRA_PERSONA_FILE = path.join(PROMPTS_DIR, "umbra_persona.md");
-
-// Instruction markdown (agent-specific instructions)
-const DETECTIVE_INSTRUCTIONS_FILE = path.join(
-  PROMPTS_DIR,
-  "detective_instructions.md"
-);
-const LUMEN_INSTRUCTIONS_FILE = path.join(
-  PROMPTS_DIR,
-  "lumen_instructions.md"
-);
-const UMBRA_INSTRUCTIONS_FILE = path.join(
-  PROMPTS_DIR,
-  "umbra_instructions.md"
-);
-
-// Closers / closing behavior
-const CLOSERS_FILE =
-  process.env.CLOSERS_FILE || path.join(PROMPTS_DIR, "closers.md");
-const CLOSING_INSTRUCTIONS_FILE =
-  process.env.CLOSING_INSTRUCTIONS_FILE ||
-  path.join(PROMPTS_DIR, "closing_instructions.md");
-
-// Phil annotations can still be JSON under prompts (used by dev server logs)
-const PHIL_ANNOTATIONS_FILE =
-  process.env.PHIL_ANNOTATIONS_FILE ||
-  path.join(PROMPTS_DIR, "phil_annotations.json");
-
-
-// Runtime configuration
-const MODEL = process.env.OPENAI_MODEL || "gpt-4o";
-const SERVICE_TIER = process.env.OPENAI_SERVICE_TIER || null;
-const MAX_HISTORY_LENGTH = 6000; // characters; adjust as needed
-const MAX_USER_EXCHANGES = parseInt(process.env.MAX_USER_EXCHANGES, 10) || 5;
-const CLOSURE_TURN_THRESHOLD = Math.max(2, MAX_USER_EXCHANGES - 2);
-const MAX_DAILY_USAGE = parseInt(process.env.MAX_DAILY_USAGE, 10) || 100;
-const DEV = /^(1|true|yes)$/i.test(process.env.DEV || "");
-const OFFLINE = /^(1|true|yes)$/i.test(process.env.OFFLINE || "");
-const DEBUG_LOGS = /^(1|true|yes)$/i.test(process.env.DEBUG_LOGS || "");
-
-const FRIENDLY_API_KEY_MESSAGE =
-  "The keys to this universe are in your hand, but where is the lock?";
-
-// Use a longer timeout for flex tier if needed (Responses API)
-const requestOptions =
-  SERVICE_TIER === "flex" ? { timeout: 15 * 60 * 1000 } : undefined;
-
-// Turn schema files (structured output contracts for each agent)
-const DETECTIVE_TURN_SCHEMA_FILE = path.join(
-  PROMPTS_DIR,
-  "detective_turn.schema.json"
-);
-const LUMEN_TURN_SCHEMA_FILE = path.join(
-  PROMPTS_DIR,
-  "lumen_philosopher_turn.schema.json"
-);
-const UMBRA_TURN_SCHEMA_FILE = path.join(
-  PROMPTS_DIR,
-  "umbra_philosopher_turn.schema.json"
-);
-
-// ---------------------------------------------------------------------------
-// Small file helpers
-// ---------------------------------------------------------------------------
-
-function loadTextFileOrEmpty(filePath) {
-  try {
-    if (fs.existsSync(filePath)) {
-      const text = fs.readFileSync(filePath, "utf8");
-      return text.trim();
-    }
-  } catch (_) {}
-  return "";
-}
-
-function loadJsonFileOrNull(filePath) {
-  try {
-    if (fs.existsSync(filePath)) {
-      const raw = fs.readFileSync(filePath, "utf8");
-      return JSON.parse(raw);
-    }
-  } catch (_) {}
-  return null;
-}
+const config = require("./config");
 
 // ---------------------------------------------------------------------------
 // Logging helpers
 // ---------------------------------------------------------------------------
 
 function logInfo(...args) {
-  console.log("[chatService2]", ...args);
+  console.log("[chatService]", ...args);
 }
 
 function logDebug(...args) {
-  if (DEBUG_LOGS) {
-    console.log("[chatService2 DEBUG]", ...args);
+  if (config.DEBUG_LOGS) {
+    console.log("[chatService DEBUG]", ...args);
   }
 }
 
@@ -220,73 +106,6 @@ function createMemoryDailyUsageStore() {
 
 
 
-// Config: Load Prompts From Files
-const detectivePersona = loadTextFileOrEmpty(DETECTIVE_PERSONA_FILE);
-const lumenPersona = loadTextFileOrEmpty(LUMEN_PERSONA_FILE);
-const umbraPersona = loadTextFileOrEmpty(UMBRA_PERSONA_FILE);
-
-const detectiveInstructions = loadTextFileOrEmpty(DETECTIVE_INSTRUCTIONS_FILE);
-const lumenInstructions = loadTextFileOrEmpty(LUMEN_INSTRUCTIONS_FILE);
-const umbraInstructions = loadTextFileOrEmpty(UMBRA_INSTRUCTIONS_FILE);
-
-// Optional closing instructions (used for final closure turns)
-const closingInstructions = loadTextFileOrEmpty(CLOSING_INSTRUCTIONS_FILE);
-
-const detectiveClosureRule = `
-System note: You receive a conversation_state object each turn.
-If conversation_state.should_begin_closure is true or
-conversation_state.mode === "closure", gently encourage the user
-to wrap up the conversation, offering a reflective closing
-question or summary.`;
-
-const agentPrompts = {
-  detective: {
-    self: [
-      detectivePersona,
-      detectiveInstructions,
-      detectiveClosureRule,
-    ]
-      .filter(Boolean)
-      .join("\n\n"),
-    others: [
-      "The Lumen Philosopher is warm, metaphorical, and hopeful.",
-      "The Umbra Philosopher is sharp, cynical, and wounded.",
-    ].join(" \n"),
-  },
-
-  lumen: {
-    self: [lumenPersona, lumenInstructions].filter(Boolean).join("\n\n"),
-    others: [
-      "The Detective is analytical and speaks only to the user.",
-      "The Umbra Philosopher is dry, logical, and skeptical of hope.",
-    ].join(" \n"),
-  },
-
-  umbra: {
-    self: [umbraPersona, umbraInstructions].filter(Boolean).join("\n\n"),
-    others: [
-      "The Detective is grounded and speaks only to the user.",
-      "The Lumen Philosopher is hopeful and metaphorical.",
-    ].join(" \n"),
-  },
-
-  // Special closure-only detective agent: detective_persona + closing_instructions
-  closure_detective: {
-    self: [detectivePersona, closingInstructions]
-      .filter(Boolean)
-      .join("\n\n"),
-    others: "",
-  },
-};
-
-// Per-agent output schemas (loaded from JSON files)
-const agentSchemas = {
-  detective: loadJsonFileOrNull(DETECTIVE_TURN_SCHEMA_FILE),
-  lumen: loadJsonFileOrNull(LUMEN_TURN_SCHEMA_FILE),
-  umbra: loadJsonFileOrNull(UMBRA_TURN_SCHEMA_FILE),
-  closure_detective: loadJsonFileOrNull(DETECTIVE_TURN_SCHEMA_FILE),
-};
-
 // ---------------------------------------------------------------------------
 // Conversation state helpers
 // ---------------------------------------------------------------------------
@@ -300,17 +119,9 @@ function normalizeConversationState(state) {
 
   next.turn_count = currentTurn + 1;
 
-  const shouldBeginClosure = next.turn_count >= CLOSURE_TURN_THRESHOLD;
+  const shouldBeginClosure = next.turn_count >= config.CLOSURE_TURN_THRESHOLD;
   next.should_begin_closure = shouldBeginClosure;
   next.mode = shouldBeginClosure ? "closure" : "normal";
-
-   // Track how many closure responses we have already given
-   if (
-     typeof next.closure_response_count !== "number" ||
-     !Number.isFinite(next.closure_response_count)
-   ) {
-     next.closure_response_count = 0;
-   }
 
   return next;
 }
@@ -442,9 +253,8 @@ function getOrCreateSessionState(sessionId) {
 // - Its required output schema
 
 function buildSystemMessageForAgent(agentKey, conversationState) {
-  const prompts = agentPrompts[agentKey] || { self: "", others: "" };
-  const schema = agentSchemas[agentKey] || null;
-//self, others = agentPrompts[agentKey] || { self: "", others: "" };
+  const prompts = config.agentPrompts[agentKey] || { self: "", others: "" };
+  const schema = config.agentSchemas[agentKey] || null;
 
   return {
     role: "system",
@@ -579,12 +389,12 @@ async function callAgent({
 }) {
   const systemMessage = buildSystemMessageForAgent(agentKey, conversationState);
   const userMessage = buildUserMessage(history, userInput);
-  const schema = agentSchemas[agentKey] || null;
+  const schema = config.agentSchemas[agentKey] || null;
 
   // OFFLINE mode: do everything but call the model
-  if (OFFLINE) {
+  if (config.OFFLINE) {
     logInfo(`OFFLINE=1: skipping model call for agent "${agentKey}"`);
-    if (agentKey === "detective" || agentKey === "closure_detective") {
+    if (agentKey === "detective" || agentKey === "final_detective") {
       return {
         detective_response:
           "[OFFLINE] Detective is unavailable. This is a stub response.",
@@ -613,7 +423,7 @@ async function callAgent({
   ];
 
   const params = {
-    model: MODEL,
+    model: config.MODEL,
     messages,
     ...(schema
       ? {
@@ -627,7 +437,7 @@ async function callAgent({
           },
         }
       : {}),
-    ...(SERVICE_TIER === "flex" && { service_tier: "flex" }),
+    ...(config.SERVICE_TIER === "flex" && { service_tier: "flex" }),
   };
 
   logDebug("callAgent params for", agentKey, JSON.stringify(params, null, 2));
@@ -635,7 +445,7 @@ async function callAgent({
   try {
     const response = await openai.chat.completions.create(
       params,
-      requestOptions
+      config.requestOptions
     );
     logDebug(
       "callAgent raw response for",
@@ -680,7 +490,7 @@ async function callAgent({
     return { text: trimmed };
   } catch (err) {
     logInfo("OpenAI error in callAgent for", agentKey, "-", err.message || err);
-    if (DEBUG_LOGS) {
+    if (config.DEBUG_LOGS) {
       console.error(err);
     }
     return {};
@@ -718,11 +528,11 @@ async function callUmbra(openai, state, history, userInput) {
   });
 }
 
-// Special closure-only detective call
-async function callClosureDetective(openai, state, history, userInput) {
+// Bonus final exchange: detective persona + final (closing) instructions only
+async function callFinalDetective(openai, state, history, userInput) {
   return callAgent({
     openai,
-    agentKey: "closure_detective",
+    agentKey: "final_detective",
     conversationState: state,
     history,
     userInput,
@@ -740,54 +550,11 @@ async function runTurn(openai, state, history, userInput) {
   // 1. Summarize if needed
   history = await maybeSummarize(openai, history);
 
-  // 2. Advance conversation_state (turn_count, mode, should_begin_closure)
+  // 2. Advance conversation_state (turn_count, should_begin_closure for detective)
   state = normalizeConversationState(state);
   logDebug("conversation_state after normalize", JSON.stringify(state, null, 2));
 
-  const closureCount = state.closure_response_count || 0;
-
-  // 3. Closure logic: beyond threshold, only closure detective responds
-  // up to three times total, then no further responses.
-  if (state.should_begin_closure) {
-    if (closureCount >= 3) {
-      logInfo(
-        "Closure limit reached; no further model responses will be generated."
-      );
-      const envelope = buildTurnEnvelope(state, userInput);
-      return { history, state, merged: "", envelope };
-    }
-
-    logInfo(
-      `In closure mode; generating closure response #${closureCount + 1} (of 3)`
-    );
-
-    const closureResult = await callClosureDetective(
-      openai,
-      state,
-      history,
-      userInput
-    );
-
-    const merged = mergeAgentOutputs({
-      userMessage: userInput,
-      lumen: null,
-      umbra: null,
-      detective: closureResult,
-    });
-
-    history = appendTurnToHistory(history, merged);
-    state.closure_response_count = closureCount + 1;
-
-    const envelope = buildTurnEnvelope(state, userInput);
-    const agents = {
-      detective: closureResult,
-      lumen: null,
-      umbra: null,
-    };
-    return { history, state, merged, envelope, agents };
-  }
-
-  // Normal multi‑agent turn (before closure threshold)
+  // 3. Normal multi‑agent turn (detective always sees should_begin_closure in state)
   const [lumenResult, umbraResult, detectiveResult] = await Promise.all([
     callLumen(openai, state, history, userInput),
     callUmbra(openai, state, history, userInput),
@@ -818,10 +585,10 @@ async function runTurn(openai, state, history, userInput) {
 
 async function summarizeHistory(openai, history) {
   // In OFFLINE mode, we cannot call the model; return a crude truncation.
-  if (OFFLINE) {
+  if (config.OFFLINE) {
     logInfo("OFFLINE=1: skipping summarizeHistory model call");
-    if (history.length <= MAX_HISTORY_LENGTH) return history;
-    return history.slice(-MAX_HISTORY_LENGTH);
+    if (history.length <= config.MAX_HISTORY_LENGTH) return history;
+    return history.slice(-config.MAX_HISTORY_LENGTH);
   }
 
   const prompt = `
@@ -842,7 +609,7 @@ Summary:
 `;
   try {
     const response = await openai.chat.completions.create({
-      model: MODEL,
+      model: config.MODEL,
       messages: [{ role: "user", content: prompt }],
     });
 
@@ -850,19 +617,29 @@ Summary:
     return String(content || "").trim();
   } catch (err) {
     logInfo("Error in summarizeHistory:", err.message || err);
-    if (DEBUG_LOGS) console.error(err);
-    if (history.length <= MAX_HISTORY_LENGTH) return history;
-    return history.slice(-MAX_HISTORY_LENGTH);
+    if (config.DEBUG_LOGS) console.error(err);
+    if (history.length <= config.MAX_HISTORY_LENGTH) return history;
+    return history.slice(-config.MAX_HISTORY_LENGTH);
   }
 }
 
-async function maybeSummarize(openai, history, maxLength = MAX_HISTORY_LENGTH) {
+// Keep a trailing slice of history so the model still sees recent dialogue after summarization
+const RECENT_HISTORY_TAIL_LENGTH = Math.min(
+  2000,
+  Math.floor(config.MAX_HISTORY_LENGTH / 2)
+);
+
+async function maybeSummarize(openai, history, maxLength = config.MAX_HISTORY_LENGTH) {
   if (!history || history.length < maxLength) return history || "";
 
   logInfo("History exceeds max length; summarizing.");
   const summary = await summarizeHistory(openai, history);
+  const recentTail =
+    history.length > RECENT_HISTORY_TAIL_LENGTH
+      ? history.slice(-RECENT_HISTORY_TAIL_LENGTH).trim()
+      : history.trim();
 
-  return `# MEMORY SUMMARY\n${summary}\n\n# RECENT HISTORY\n`;
+  return `# MEMORY SUMMARY\n${summary}\n\n# RECENT HISTORY\n${recentTail}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -872,20 +649,20 @@ async function maybeSummarize(openai, history, maxLength = MAX_HISTORY_LENGTH) {
 function buildDebugBody(userExchanges, dailyUsage) {
   return {
     userExchanges,
-    maxUserExchanges: MAX_USER_EXCHANGES,
+    maxUserExchanges: config.MAX_USER_EXCHANGES,
     dailyUsage,
-    maxDailyUsage: MAX_DAILY_USAGE,
+    maxDailyUsage: config.MAX_DAILY_USAGE,
   };
 }
 
 async function handleChatRequest(sessionId, trimmed, options) {
   const { openaiClient, dailyUsageStore, debug } = options || {};
 
-  if (!openaiClient && !OFFLINE) {
+  if (!openaiClient && !config.OFFLINE) {
     return {
       status: 500,
       body: {
-        error: FRIENDLY_API_KEY_MESSAGE,
+        error: config.FRIENDLY_API_KEY_MESSAGE,
         errorKind: "bad_request",
       },
     };
@@ -902,15 +679,15 @@ async function handleChatRequest(sessionId, trimmed, options) {
   if (debug) {
     console.log(
       "[DEBUG] chat user exchanges:",
-      prevUserCount + "/" + MAX_USER_EXCHANGES
+      prevUserCount + "/" + config.MAX_USER_EXCHANGES
     );
     console.log(
       "[DEBUG] chat daily usage:",
-      dailyCount + "/" + MAX_DAILY_USAGE
+      dailyCount + "/" + config.MAX_DAILY_USAGE
     );
   }
 
-  if (dailyCount >= MAX_DAILY_USAGE) {
+  if (dailyCount >= config.MAX_DAILY_USAGE) {
     return {
       status: 429,
       body: {
@@ -920,9 +697,82 @@ async function handleChatRequest(sessionId, trimmed, options) {
     };
   }
 
-  const session = getOrCreateSessionState(sessionId);
+  // Over limit: no response, log only; frontend sees 204 and shows nothing (mysterious)
+  if (prevUserCount > config.MAX_USER_EXCHANGES) {
+    logInfo("max_user_exchanges exceeded; returning 204 (no body).");
+    return { status: 204, body: null };
+  }
 
+  const session = getOrCreateSessionState(sessionId);
   const { history: prevHistory, state: prevState } = session;
+
+  // Bonus final exchange: one more turn with final_detective (persona + closing instructions) only
+  if (prevUserCount === config.MAX_USER_EXCHANGES) {
+    let history = await maybeSummarize(client, prevHistory);
+    let state = normalizeConversationState(prevState);
+    const finalResult = await callFinalDetective(client, state, history, trimmed);
+    const merged = mergeAgentOutputs({
+      userMessage: trimmed,
+      lumen: null,
+      umbra: null,
+      detective: finalResult,
+    });
+    history = appendTurnToHistory(history, merged);
+    session.history = history;
+    session.state = state;
+
+    const nextUserCount = prevUserCount + 1;
+    userExchangeCounts.set(sessionId, nextUserCount);
+    const newDailyCount = dailyCount + 1;
+    if (
+      dailyUsageStore &&
+      typeof dailyUsageStore.writeDailyUsage === "function"
+    ) {
+      dailyUsageStore.writeDailyUsage(newDailyCount);
+    }
+
+    let reply = "";
+    if (finalResult && finalResult.detective_response != null) {
+      reply = String(finalResult.detective_response).trim();
+    }
+    if (!reply && merged) {
+      const marker = "[DETECTIVE]:";
+      const idx = merged.lastIndexOf(marker);
+      if (idx >= 0) reply = merged.slice(idx + marker.length).trim();
+    }
+
+    const envelope = buildTurnEnvelope(state, trimmed);
+    const body = {
+      reply: reply || "(No reply.)",
+      leftPhilosopherUserResponse: "",
+      leftPhilosopherOtherResponse: "",
+      leftPhilosopherNotes: [],
+      leftPhilosopherCallouts: [],
+      rightPhilosopherUserResponse: "",
+      rightPhilosopherOtherResponse: "",
+      rightPhilosopherNotes: [],
+      rightPhilosopherCallouts: [],
+      philosophers: {
+        lumen: {
+          userResponse: "",
+          otherResponse: "",
+          notes: [],
+          callouts: [],
+        },
+        umbra: {
+          userResponse: "",
+          otherResponse: "",
+          notes: [],
+          callouts: [],
+        },
+      },
+      envelope,
+    };
+    body.debug = buildDebugBody(nextUserCount, newDailyCount);
+    body.limitReached = true;
+
+    return { status: 200, body };
+  }
 
   const { history, state, merged, envelope, agents } = await runTurn(
     client,
@@ -1064,12 +914,7 @@ async function handleChatRequest(sessionId, trimmed, options) {
 
   body.debug = buildDebugBody(nextUserCount, newDailyCount);
 
-  // limitReached is true once conversation_state enters closure mode
-  const isClosureMode =
-    envelope &&
-    envelope.conversation_state &&
-    envelope.conversation_state.mode === "closure";
-  body.limitReached = !!isClosureMode;
+  // limitReached is set only in the bonus-final response (detective's closing message), never in normal turns.
 
   return { status: 200, body };
 }
@@ -1155,25 +1000,25 @@ async function handleChatStream(sessionId, trimmed, options, onEvent) {
 // if (userEmotion == "distress") narrative_phase = "rising_action";
 // if (optimistRevealedSecret && pessimistReacted) narrative_phase = "climax";
 module.exports = {
-  // Paths and configuration
-  PROMPTS_DIR,
-  DETECTIVE_PERSONA_FILE,
-  LUMEN_PERSONA_FILE,
-  UMBRA_PERSONA_FILE,
-  DETECTIVE_INSTRUCTIONS_FILE,
-  LUMEN_INSTRUCTIONS_FILE,
-  UMBRA_INSTRUCTIONS_FILE,
-  CLOSERS_FILE,
-  CLOSING_INSTRUCTIONS_FILE,
-  PHIL_ANNOTATIONS_FILE,
-  MODEL,
-  SERVICE_TIER,
-  MAX_HISTORY_LENGTH,
-  MAX_USER_EXCHANGES,
-  MAX_DAILY_USAGE,
-  DEV,
-  OFFLINE,
-  DEBUG_LOGS,
+  // Paths and configuration (re-exported from config for shared/server)
+  PROMPTS_DIR: config.PROMPTS_DIR,
+  DETECTIVE_PERSONA_FILE: config.DETECTIVE_PERSONA_FILE,
+  LUMEN_PERSONA_FILE: config.LUMEN_PERSONA_FILE,
+  UMBRA_PERSONA_FILE: config.UMBRA_PERSONA_FILE,
+  DETECTIVE_INSTRUCTIONS_FILE: config.DETECTIVE_INSTRUCTIONS_FILE,
+  LUMEN_INSTRUCTIONS_FILE: config.LUMEN_INSTRUCTIONS_FILE,
+  UMBRA_INSTRUCTIONS_FILE: config.UMBRA_INSTRUCTIONS_FILE,
+  CLOSERS_FILE: config.CLOSERS_FILE,
+  CLOSING_INSTRUCTIONS_FILE: config.CLOSING_INSTRUCTIONS_FILE,
+  PHIL_ANNOTATIONS_FILE: config.PHIL_ANNOTATIONS_FILE,
+  MODEL: config.MODEL,
+  SERVICE_TIER: config.SERVICE_TIER,
+  MAX_HISTORY_LENGTH: config.MAX_HISTORY_LENGTH,
+  MAX_USER_EXCHANGES: config.MAX_USER_EXCHANGES,
+  MAX_DAILY_USAGE: config.MAX_DAILY_USAGE,
+  DEV: config.DEV,
+  OFFLINE: config.OFFLINE,
+  DEBUG_LOGS: config.DEBUG_LOGS,
 
   // In-memory usage state
   userExchangeCounts,

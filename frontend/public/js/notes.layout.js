@@ -1,14 +1,14 @@
 /**
  * Pure layout and height-estimation logic for philosopher notes.
- * No DOM mutation, no note state. Depends on NoteFormatConfig.
+ * No DOM mutation, no note state. Depends on EDANoteFormatConfig.
  */
 (function (global) {
   "use strict";
 
-  var cfg = global.NoteFormatConfig;
+  var cfg = global.EDANoteFormatConfig;
   var getPaperPadding = cfg ? cfg.getPaperPadding : function () { return { top: 17.5, right: 17.5, bottom: 17.5, left: 17.5 }; };
   var getPaperSize = cfg ? cfg.getPaperSize : function () { return { width: 440, height: 560 }; };
-  var FALLBACK_LINE_HEIGHT_PX = (cfg && cfg.ESTIMATE_LINE_HEIGHT_PX) ? cfg.ESTIMATE_LINE_HEIGHT_PX : { left: 28, right: 52 };
+  var FALLBACK_LINE_HEIGHT_PX = { left: 28, right: 99 };
   var getEstimatedLineHeightPx = (cfg && cfg.getEstimatedLineHeightPx)
     ? cfg.getEstimatedLineHeightPx
     : function (side) {
@@ -18,8 +18,9 @@
   var getEstimateCharsPerLine = (cfg && cfg.getEstimateCharsPerLine) ? cfg.getEstimateCharsPerLine : null;
   var getEstimateCharsPerLineForPaper = (cfg && typeof cfg.estimateCharsPerLineForPaper === "function") ? cfg.estimateCharsPerLineForPaper : null;
 
+
   var ROTATION_MIN_DEG = -12;
-  var ROTATION_MAX_DEG = 15;
+  var ROTATION_MAX_DEG = 14;
   var ESTIMATE_CHARS_PER_LINE_FALLBACK = 80;
 
   /** Padding (px) below current text box when deciding if next chunk fits on same note. */
@@ -55,10 +56,47 @@
   }
 
   /**
-   * Position for a new note: first at top, then each subsequent note NOTE_STACK_OFFSET_PCT % lower +/- NOTE_STACK_JITTER_PCT %.
-   * AABB is kept inside the region.
+   * AABB of a rectangle at (offsetX, offsetY) with size (width, height) rotated by rotationDeg around (0,0).
+   * Use this when placing by the paper's bounding box (content area) which is inset from the wrapper.
    */
-  function stackedPositionInRegion(region, side, rotationDeg, noteWidth, noteHeight, noteIndex) {
+  function rotatedNoteAABBWithOffset(rotationDeg, offsetX, offsetY, width, height) {
+    var rad = (rotationDeg * Math.PI) / 180;
+    var c = Math.cos(rad);
+    var s = Math.sin(rad);
+    var x0 = offsetX * c - offsetY * s;
+    var y0 = offsetX * s + offsetY * c;
+    var x1 = (offsetX + width) * c - offsetY * s;
+    var y1 = (offsetX + width) * s + offsetY * c;
+    var x2 = (offsetX + width) * c - (offsetY + height) * s;
+    var y2 = (offsetX + width) * s + (offsetY + height) * c;
+    var x3 = offsetX * c - (offsetY + height) * s;
+    var y3 = offsetX * s + (offsetY + height) * c;
+    var minX = Math.min(x0, x1, x2, x3);
+    var maxX = Math.max(x0, x1, x2, x3);
+    var minY = Math.min(y0, y1, y2, y3);
+    var maxY = Math.max(y0, y1, y2, y3);
+    return { minX: minX, maxX: maxX, minY: minY, maxY: maxY, width: maxX - minX, height: maxY - minY };
+  }
+
+  /**
+   * X offset from wrapper left to the center of a rectangle at (offsetX, offsetY) with size (width, height)
+   * after the wrapper is rotated by rotationDeg around (0,0). Used to place by bounding box center.
+   */
+  function boundingBoxCenterOffsetX(rotationDeg, offsetX, offsetY, width, height) {
+    var rad = (rotationDeg * Math.PI) / 180;
+    var c = Math.cos(rad);
+    var s = Math.sin(rad);
+    var centerX = offsetX + width / 2;
+    var centerY = offsetY + height / 2;
+    return centerX * c - centerY * s;
+  }
+
+  /**
+   * Position for a new note: first at top, then each subsequent note NOTE_STACK_OFFSET_PCT % lower +/- jitter.
+   * AABB is kept inside the region.
+   * @param {Object} [options] - Overrides: verticalJitterPct (number, % of region height; 0 = no jitter). Caller controls variation from one place.
+   */
+  function stackedPositionInRegion(region, side, rotationDeg, noteWidth, noteHeight, noteIndex, options) {
     var w = region.clientWidth;
     var h = region.clientHeight;
     var aabb = rotatedNoteAABB(rotationDeg, noteWidth, noteHeight);
@@ -66,9 +104,9 @@
     var topMax = Math.min(h, h - aabb.maxY);
 
     var offsetPct = NOTE_STACK_OFFSET_PCT / 100;
-    var jitterPct = NOTE_STACK_JITTER_PCT / 100;
+    var jitterPct = (options && typeof options.verticalJitterPct === "number") ? options.verticalJitterPct / 100 : NOTE_STACK_JITTER_PCT / 100;
     var baseTop = noteIndex * offsetPct * h;
-    var jitter = (Math.random() * 2 - 1) * jitterPct * h;
+    var jitter = jitterPct === 0 ? 0 : (Math.random() * 2 - 1) * jitterPct * h;
     var top = Math.max(topMin, Math.min(topMax, Math.round(baseTop + jitter)));
 
     if (side === "left") {
@@ -89,6 +127,7 @@
 
   /**
    * Estimated height (px) the next chunk will need.
+   * Each explicit \n consumes one line (matches handwriter: right creates one .line per \n; left wraps visually).
    * @param {string} text - Text to measure
    * @param {string} side - "left" or "right"
    * @param {string} [paperUrl] - Optional. When provided, use this paper's chars-per-line so the estimate is correct for that note.
@@ -104,7 +143,12 @@
       charsPerLine = getEstimateCharsPerLine ? getEstimateCharsPerLine(side) : ESTIMATE_CHARS_PER_LINE_FALLBACK;
     }
     if (charsPerLine == null || charsPerLine <= 0) charsPerLine = ESTIMATE_CHARS_PER_LINE_FALLBACK;
-    var lines = Math.max(1, Math.ceil(text.length / charsPerLine));
+    var parts = text.split("\n");
+    var lines = 0;
+    for (var i = 0; i < parts.length; i++) {
+      lines += Math.max(1, Math.ceil(parts[i].length / charsPerLine));
+    }
+    if (lines < 1) lines = 1;
     var estimatedPx = lines * lineHeight;
     // #region agent log (local debug only; no external network by default)
     if (typeof document !== "undefined" && document.body && document.body.dataset && document.body.dataset.devMode === "true") {
@@ -219,8 +263,10 @@
     return ROTATION_MIN_DEG + Math.random() * (ROTATION_MAX_DEG - ROTATION_MIN_DEG);
   }
 
-  global.NoteLayout = {
+  global.EDANoteLayout = {
     rotatedNoteAABB: rotatedNoteAABB,
+    rotatedNoteAABBWithOffset: rotatedNoteAABBWithOffset,
+    boundingBoxCenterOffsetX: boundingBoxCenterOffsetX,
     stackedPositionInRegion: stackedPositionInRegion,
     estimateHeightForText: estimateHeightForText,
     getCurrentTextBounds: getCurrentTextBounds,

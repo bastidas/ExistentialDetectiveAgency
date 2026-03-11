@@ -79,23 +79,15 @@
     };
   }
 
-  /** Normalize API response to payload { left: { response, notes }, right: { response, notes } }.
-   *  Combines user-facing and other-philosopher-facing responses into a single stream per side,
-   *  marking the other-philosopher response so it reads as a distinct marginal remark.
+  /** Normalize API response to structured payload { left: { userResponse, otherResponse, notes }, right: { ... } }.
+   *  Line breaks and segment styling (font/color) are applied when appending; see notes.philosopherRules and philosopherDisplay.config.js.
    */
   function toPhilosopherPayload(data) {
     function buildSidePayload(userKey, otherKey, notesKey) {
-      var userText = (data[userKey] || "").trim();
-      var otherText = (data[otherKey] || "").trim();
-      var pieces = [];
-      if (userText) pieces.push(userText);
-      if (otherText) {
-        // Visually distinguish philosopher-to-philosopher remarks without changing layout.
-        pieces.push("[To the other philosopher] " + otherText);
-      }
-      var combined = pieces.join("\n\n");
+      var userResponse = (data[userKey] != null ? String(data[userKey]) : "").trim();
+      var otherResponse = (data[otherKey] != null ? String(data[otherKey]) : "").trim();
       var notes = Array.isArray(data[notesKey]) ? data[notesKey] : [];
-      return { response: combined, notes: notes };
+      return { userResponse: userResponse, otherResponse: otherResponse, notes: notes };
     }
     return {
       left: buildSidePayload(
@@ -113,7 +105,7 @@
 
   /**
    * Apply philosopher response: optionally push to history and append to panels.
-   * @param payload - { left: { response, notes }, right: { response, notes } }
+   * @param payload - { left: { userResponse, otherResponse, notes }, right: { userResponse, otherResponse, notes } }
    * @param options - pushHistory (push both), or pushHistoryLeft/pushHistoryRight (per-side); appendLeft, appendRight
    */
   function applyPhilosopherResponse(payload, options) {
@@ -128,16 +120,16 @@
     if (pushRight) rightPhilosopherHistory.push(payload.right);
 
     var promises = [];
-    if (appendLeft && (payload.left.response || payload.left.notes.length)) {
+    if (appendLeft && (payload.left.userResponse || payload.left.otherResponse || payload.left.notes.length)) {
       promises.push(
-        EDARules.appendPhilosopherContent("left", payload.left.response, payload.left.notes).catch(function (err) {
+        EDARules.appendPhilosopherContent("left", payload.left).catch(function (err) {
           console.warn("[chatSend] philosopher left panel:", err);
         })
       );
     }
-    if (appendRight && (payload.right.response || payload.right.notes.length)) {
+    if (appendRight && (payload.right.userResponse || payload.right.otherResponse || payload.right.notes.length)) {
       promises.push(
-        EDARules.appendPhilosopherContent("right", payload.right.response, payload.right.notes).catch(function (err) {
+        EDARules.appendPhilosopherContent("right", payload.right).catch(function (err) {
           console.warn("[chatSend] philosopher right panel:", err);
         })
       );
@@ -469,7 +461,7 @@
     var wrapper = editorRef && editorRef.parentNode;
     if (wrapper) wrapper.classList.add("chat-editor-wrapper--hidden");
 
-    var agentLabel = (global.ChatConfig && global.ChatConfig.AGENT_CHAT_LABEL) || "DETECTIVE";
+    var agentLabel = (global.EDAChatConfig && global.EDAChatConfig.AGENT_CHAT_LABEL) || "DETECTIVE";
     var placeholder = EDAMessageUI.addAssistantPlaceholder && EDAMessageUI.addAssistantPlaceholder(editorRef);
     if (placeholder) {
       if (EDAUtils && EDAUtils.typeLabelIntoElement) {
@@ -487,12 +479,6 @@
     function runFetch() {
       console.log("[DEBUG] Sending main chat request", messageToSend ? "(message length: " + messageToSend.length + ")" : "");
       var payload = { message: messageToSend };
-      if (typeof global.NoteFormatConfig !== "undefined" && global.NoteFormatConfig.getContentWidthCharsForHint) {
-        var contentWidthChars = global.NoteFormatConfig.getContentWidthCharsForHint();
-        if (typeof contentWidthChars === "number" && contentWidthChars > 0) {
-          payload.contentWidthChars = contentWidthChars;
-        }
-      }
       // Prefer streaming endpoint in local dev; fall back to JSON /api/chat
       // if streaming is unavailable (404 or missing ReadableStream).
 

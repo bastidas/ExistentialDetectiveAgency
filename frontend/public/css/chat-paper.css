@@ -1,4 +1,4 @@
-/* Paper sheet: main chat column. Values from ChatConfig via --chat-* (set at runtime). */
+/* Paper sheet: main chat column. Values from EDAChatConfig via --chat-* (set at runtime). */
 main {
   background-color: var(--chat-bg, #e8e4d8);
   margin: clamp(1rem, 2vw, 3rem);

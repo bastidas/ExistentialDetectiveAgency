@@ -1,7 +1,7 @@
 (function (global) {
   "use strict";
 
-  var config = global.AnnotationConfig || {};
+  var config = global.EDAAnnotationConfig || {};
   var DEFAULT_COLOR = config.ANNOTATION_DEFAULT_COLOR != null ? config.ANNOTATION_DEFAULT_COLOR : "#5452ad";
   var MODE_TO_TYPES = config.ANNOTATION_MODE_TO_TYPES || {
     keyword: ["circle", "box", "underline"],

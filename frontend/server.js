@@ -85,15 +85,11 @@ app.post("/api/chat", async (req, res) => {
     return res.status(400).json({ error: "Missing or invalid message." });
   }
   const trimmed = message.trim();
-  const raw = req.body?.contentWidthChars;
-  const contentWidthChars =
-    typeof raw === "number" && raw > 0 ? Math.round(raw) : undefined;
 
   const result = await shared.handleChatRequest(sessionId, trimmed, {
     openaiClient: client,
     dailyUsageStore,
     debug: shared.DEBUG_LOGS,
-    contentWidthChars,
   });
   const status = result.status;
   const body = result.body;
@@ -122,9 +118,6 @@ app.post("/api/chat-stream", async (req, res) => {
     return res.end();
   }
   const trimmed = message.trim();
-  const raw = req.body?.contentWidthChars;
-  const contentWidthChars =
-    typeof raw === "number" && raw > 0 ? Math.round(raw) : undefined;
 
   res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
   res.setHeader("Cache-Control", "no-cache");
@@ -143,7 +136,6 @@ app.post("/api/chat-stream", async (req, res) => {
       openaiClient: client,
       dailyUsageStore,
       debug: shared.DEBUG_LOGS,
-      contentWidthChars,
     }, onEvent);
   } catch (err) {
     console.error("/api/chat-stream handler error:", err && err.message);
@@ -164,10 +156,6 @@ app.post("/api/chat-stream", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Chat server running at http://localhost:${PORT}`);
   console.log(`Prompts dir: ${shared.PROMPTS_DIR}`);
-  console.log(
-    `  closers.md: ${fs.existsSync(shared.CLOSERS_FILE) ? "found" : "NOT FOUND"}`,
-    `| phil_annotations.json: ${fs.existsSync(shared.PHIL_ANNOTATIONS_FILE) ? "found" : "NOT FOUND"}`
-  );
   if (shared.OFFLINE) {
     console.log("OFFLINE=1: AI backend disabled, returning generic replies.");
   } else {

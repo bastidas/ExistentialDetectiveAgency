@@ -78,7 +78,6 @@ body[data-dev-mode="true"] #right-philosopher::before {
   color: #000;
   pointer-events: none;
 }
-/* abc */
 body[data-dev-mode="true"] #left-philosopher-content {
   outline: 2px dashed rgba(100, 180, 255, 0.7);
   outline-offset: 2px;
@@ -345,11 +344,12 @@ body[data-dev-mode="true"] #mobile-shared-notes-content::before {
   }
 }
 
-/* Values from NoteFormatConfig applied via --note-* on .note-page__content */
+/* Values from EDANoteFormatConfig applied via --note-* on .note-page__content */
 .note-page__content {
   position: absolute;
   overflow: hidden;
-  font-size: clamp(0.8rem, calc(var(--note-fontSize, 0.875rem) * var(--note-responsive-font-scale, 1)), 1.35rem);
+  /* Base size from philosopherDisplay.config.js (--note-fontSize); responsive scale from viewport. Max 3rem so config values (e.g. 2.5rem) apply. */
+  font-size: clamp(0.8rem, calc(var(--note-fontSize, 0.875rem) * var(--note-responsive-font-scale, 1)), 3rem);
   line-height: var(--note-lineHeight, 1.45);
   padding-top: var(--note-paddingTop, 0);
   padding-right: var(--note-paddingRight, 0);
@@ -358,6 +358,7 @@ body[data-dev-mode="true"] #mobile-shared-notes-content::before {
   opacity: var(--note-opacity, 1);
   color: var(--note-color, #333);
   font-family: var(--note-fontFamily, inherit);
+  font-weight: var(--note-fontWeight, normal);
   box-sizing: border-box;
   background: transparent;
   border: none;
@@ -429,6 +430,32 @@ body:not([data-dev-mode="true"]) .note-page__debug-padding-box,
 body:not([data-dev-mode="true"]) .margin-item__debug-box {
   display: none !important;
 }
+
+/* Segment-type styling: handwriter sets font/color on segment wrapper from philosopherDisplay.config; children inherit. Vars below are fallback if JS not run. */
+.note-page__content .philosopher-user-response .handwritten,
+.note-page__content .philosopher-other-response .handwritten,
+.note-page__content .philosopher-note .handwritten {
+  font-family: inherit;
+  color: inherit;
+}
+.note-page__content .philosopher-user-response .line span,
+.note-page__content .philosopher-other-response .line span,
+.note-page__content .philosopher-note .line span {
+  color: inherit;
+}
+.note-page__content .philosopher-user-response { font-family: var(--note-fontFamily-userResponse, inherit); }
+.note-page__content .philosopher-other-response {
+  font-family: var(--note-fontFamily-otherResponse, inherit);
+  /* Base from OTHER_RESPONSE_STYLE.size (set on element by handwriter); scale from viewport. Fallback 2rem so otherResponse is always large when var missing. */
+  font-size: calc(var(--segment-fontSize-base, 2rem) * var(--note-responsive-font-scale, 1)) !important;
+}
+.note-page__content .philosopher-other-response .container,
+.note-page__content .philosopher-other-response .line,
+.note-page__content .philosopher-other-response .line span,
+.note-page__content .philosopher-other-response .handwritten {
+  font-size: inherit;
+}
+.note-page__content .philosopher-note { font-family: var(--note-fontFamily-notes, inherit); }
 
 /* Left philosopher: use full width of note content (override panel’s fixed 205px) */
 .left-philosopher .note-page__content .handwritten {

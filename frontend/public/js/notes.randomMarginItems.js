@@ -51,8 +51,8 @@
     // Visual scale: per-object scale * responsive note scale (same as notes).
     var scale = typeof config.scale === "number" && config.scale > 0 ? config.scale : 1;
     var responsiveScale = 1;
-    if (NoteFormatConfig && typeof NoteFormatConfig.getResponsiveNoteScale === "function") {
-      responsiveScale = NoteFormatConfig.getResponsiveNoteScale();
+    if (noteFormatConfig && typeof noteFormatConfig.getResponsiveNoteScale === "function") {
+      responsiveScale = noteFormatConfig.getResponsiveNoteScale();
     }
     var visualWidth = baseWidth * scale * responsiveScale;
     var visualHeight = baseHeight * scale * responsiveScale;
@@ -105,9 +105,9 @@
     xhr.send();
   }
 
-  var NoteLayout = global.NoteLayout;
-  var NoteElement = global.NoteElement;
-  var NoteFormatConfig = global.NoteFormatConfig || null;
+  var EDANoteLayout = global.EDANoteLayout;
+  var EDANoteElement = global.EDANoteElement;
+  var noteFormatConfig = global.EDANoteFormatConfig || null;
 
   function hasRemainingItems() {
     return remainingItems.length > 0;
@@ -228,13 +228,13 @@
     if (!hasRemainingItems()) return;
     if (Math.random() >= RANDOM_OBJECT_CHANCE) return;
 
-    var notePages = global.notePages;
-    if (!notePages || !NoteLayout) return;
-    if (typeof notePages.getOrCreateNotesLayer !== "function") return;
+    var notePages = global.EDANotePages;
+    if (!notePages || !EDANoteLayout) return;
+    if (typeof EDANotePages.getOrCreateNotesLayer !== "function") return;
 
     var side = pickSide(opts.side);
-    var layer = notePages.getOrCreateNotesLayer();
-    var zoneBounds = notePages.getZoneBoundsInLayer && notePages.getZoneBoundsInLayer(side);
+    var layer = EDANotePages.getOrCreateNotesLayer();
+    var zoneBounds = EDANotePages.getZoneBoundsInLayer && EDANotePages.getZoneBoundsInLayer(side);
     if (!layer || !zoneBounds) return;
 
     var imageUrl = consumeRandomItem();
@@ -245,19 +245,21 @@
     var size = getItemSizeFromConfig(config);
 
     var index = layer.querySelectorAll('.note-page[data-note-side="' + side + '"], .margin-item[data-note-side="' + side + '"]').length;
-    var zoneEl = notePages.getPanel(side);
+    var zoneEl = EDANotePages.getPanel(side);
     // Use same placement as notes: stacked in zone and, when applicable, anchored near last user message.
     var pos;
-    if (zoneEl && typeof notePages.getPositionInZone === "function") {
-      pos = notePages.getPositionInZone(zoneEl, side, rotationDeg, size.boundingWidth, size.boundingHeight, index);
-    } else if (typeof NoteLayout.stackedPositionInRegion === "function" && zoneEl) {
-      pos = NoteLayout.stackedPositionInRegion(zoneEl, side, rotationDeg, size.boundingWidth, size.boundingHeight, index);
+    if (zoneEl && typeof EDANotePages.getPositionInZone === "function") {
+      var bounding = { offsetX: size.offsetX || 0, offsetY: size.offsetY || 0, width: size.boundingWidth, height: size.boundingHeight };
+      pos = EDANotePages.getPositionInZone(zoneEl, side, rotationDeg, bounding, size.visualWidth, size.visualHeight, index);
+    } else if (typeof EDANoteLayout.stackedPositionInRegion === "function" && zoneEl) {
+      pos = EDANoteLayout.stackedPositionInRegion(zoneEl, side, rotationDeg, size.boundingWidth, size.boundingHeight, index);
     } else {
       pos = { left: side === "left" ? 0 : undefined, right: side === "right" ? 0 : undefined, top: 0 };
     }
 
     var wrapper = createMarginItemElement(side, imageUrl, pos, rotationDeg);
-    var zoneOffsetLeft = pos.left != null ? pos.left : (zoneBounds.width - pos.right - size.boundingWidth);
+    var wrapperW = size.visualWidth;
+    var zoneOffsetLeft = pos.left != null ? pos.left : (zoneBounds.width - pos.right - wrapperW);
     var zoneOffsetTop = pos.top;
     wrapper.style.left = (zoneBounds.left + zoneOffsetLeft) + "px";
     wrapper.style.right = "";
@@ -266,24 +268,24 @@
     wrapper.dataset.zoneOffsetTop = String(zoneOffsetTop);
 
     layer.appendChild(wrapper);
-    if (NoteElement && typeof NoteElement.bringNoteToFront === "function") {
-      NoteElement.bringNoteToFront(wrapper, side);
+    if (EDANoteElement && typeof EDANoteElement.bringNoteToFront === "function") {
+      EDANoteElement.bringNoteToFront(wrapper, side);
     }
-    if (notePages && typeof notePages.addEntranceAnimation === "function") {
-      notePages.addEntranceAnimation(wrapper);
+    if (notePages && typeof EDANotePages.addEntranceAnimation === "function") {
+      EDANotePages.addEntranceAnimation(wrapper);
     }
 
-    if (NoteElement && typeof NoteElement.registerNoteInteractions === "function") {
-      NoteElement.registerNoteInteractions(wrapper, side, {
+    if (EDANoteElement && typeof EDANoteElement.registerNoteInteractions === "function") {
+      EDANoteElement.registerNoteInteractions(wrapper, side, {
         onDestroy: function (w, s) {
-          if (NoteElement && typeof NoteElement.destroyNoteElement === "function") {
-            NoteElement.destroyNoteElement(w, s);
+          if (EDANoteElement && typeof EDANoteElement.destroyNoteElement === "function") {
+            EDANoteElement.destroyNoteElement(w, s);
           } else if (w && w.parentNode) {
             w.parentNode.removeChild(w);
           }
         },
         onDragEnd: function (w, s) {
-          var zone = notePages.getZoneBoundsInLayer && notePages.getZoneBoundsInLayer(s);
+          var zone = EDANotePages.getZoneBoundsInLayer && EDANotePages.getZoneBoundsInLayer(s);
           if (!zone) return;
           var left = parseFloat(w.style.left, 10);
           var top = parseFloat(w.style.top, 10);

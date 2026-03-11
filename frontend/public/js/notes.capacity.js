@@ -1,7 +1,7 @@
 (function (global) {
   "use strict";
 
-  var cfg = global.NoteFormatConfig || null;
+  var cfg = global.EDANoteFormatConfig || null;
   var capacityCache = Object.create(null);
 
   function getScaleSignature() {
@@ -17,17 +17,9 @@
   }
 
   function getLineHeightPx(side) {
-    if (cfg) {
-      if (typeof cfg.getEstimatedLineHeightPx === "function") {
-        return cfg.getEstimatedLineHeightPx(side);
-      }
-      var fallback = cfg.ESTIMATE_LINE_HEIGHT_PX || {};
-      if (typeof fallback[side] === "number" && fallback[side] > 0) {
-        return fallback[side];
-      }
-      if (typeof fallback.left === "number" && fallback.left > 0) {
-        return fallback.left;
-      }
+    if (cfg && typeof cfg.getEstimatedLineHeightPx === "function") {
+      var px = cfg.getEstimatedLineHeightPx(side);
+      if (typeof px === "number" && px > 0) return px;
     }
     return 32;
   }
@@ -93,7 +85,7 @@
     capacityCache = Object.create(null);
   }
 
-  global.NoteCapacity = {
+  global.EDANoteCapacity = {
     getCapacity: computeCapacity,
     getAllCapacities: getAllCapacities,
     invalidate: invalidate,

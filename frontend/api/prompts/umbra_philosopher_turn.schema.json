@@ -7,12 +7,12 @@
     },
     "umbra_philosopher_other_response": {
       "type": "string",
-      "description": "Short in-character response addressed to the lumen philosopher (optional; use empty string if none). This is for philosophers to talk to each other and can be ignored if you prefer them to only address the user."
+      "description": "Short in-character response addressed to the lumen philosopher (optional; use empty string if none)."
     },
     "umbra_philosopher_notes": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Words or short phrases the umbra philosopher jots down. Use [] if none."
+      "description": "Optional notes: Words or short phrases the umbra philosopher jots down. Use [] if none."
     },
     "umbra_philosopher_callouts": {
       "type": "array",

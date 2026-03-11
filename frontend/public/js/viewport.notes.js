@@ -69,7 +69,7 @@
     if (!layer || !mobileSharedContentEl) return;
     if (layer.parentNode === mobileSharedContentEl) return;
     mobileSharedContentEl.appendChild(layer);
-    var notePages = typeof window !== "undefined" ? window.notePages : null;
+    var notePages = typeof window !== "undefined" ? window.EDANotePages : null;
     if (notePages && typeof notePages.updateNotePositionsInLayer === "function") {
       notePages.updateNotePositionsInLayer();
     }
@@ -85,7 +85,7 @@
     } else {
       appLayoutEl.appendChild(layer);
     }
-    var notePages = typeof window !== "undefined" ? window.notePages : null;
+    var notePages = typeof window !== "undefined" ? window.EDANotePages : null;
     if (notePages && typeof notePages.updateNotePositionsInLayer === "function") {
       notePages.updateNotePositionsInLayer();
     }

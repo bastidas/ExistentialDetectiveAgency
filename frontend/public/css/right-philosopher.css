@@ -55,13 +55,40 @@
   left: 25ch;
 }
 
+/* Segment-type styling: values from philosopherDisplay.config via --note-* vars only (no fallback colors/fonts here) */
+.right-philosopher .philosopher-user-response {
+  font-family: var(--note-fontFamily-userResponse, inherit);
+}
+.right-philosopher .philosopher-user-response .line span {
+  color: var(--note-color-userResponse, inherit);
+}
+.right-philosopher .philosopher-other-response {
+  font-family: var(--note-fontFamily-otherResponse, inherit);
+  /* Base from OTHER_RESPONSE_STYLE.size (set on element by handwriter). Fallback 2rem so otherResponse is always large. */
+  font-size: calc(var(--segment-fontSize-base, 2rem) * var(--note-responsive-font-scale, 1)) !important;
+}
+.right-philosopher .philosopher-other-response .container,
+.right-philosopher .philosopher-other-response .line,
+.right-philosopher .philosopher-other-response .line span {
+  font-size: inherit;
+}
+.right-philosopher .philosopher-other-response .line span {
+  color: var(--note-color-otherResponse, inherit);
+}
+.right-philosopher .philosopher-note {
+  font-family: var(--note-fontFamily-notes, inherit);
+}
+.right-philosopher .philosopher-note .line span {
+  color: var(--note-color-notes, inherit);
+}
+
 /* Keyword underline (strong) - SVG jagged underline behind text */
 .right-philosopher strong {
   position: relative;
   font-weight: 400;
 }
 
-.right-philosopher strong::after {
+/* .right-philosopher strong::after {
   content: "";
   position: absolute;
   bottom: -0.125rem;
@@ -72,7 +99,7 @@
   background-image: url("https://s3-us-west-2.amazonaws.com/s.cdpn.io/664131/underline.svg");
   background-repeat: no-repeat;
   background-size: cover;
-}
+} */
 
 @media (max-width: 768px) {
   .right-philosopher .philosopher-notes-content {

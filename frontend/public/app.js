@@ -101,11 +101,14 @@
       return;
     }
 
-  if (typeof ChatConfig !== "undefined" && ChatConfig.applyChatStyle) {
-    ChatConfig.applyChatStyle();
+  if (typeof EDAChatConfig !== "undefined" && EDAChatConfig.applyChatStyle) {
+    EDAChatConfig.applyChatStyle();
   }
-  if (typeof NoteFormatConfig !== "undefined" && NoteFormatConfig.applyNoteFormatToPanels) {
-    NoteFormatConfig.applyNoteFormatToPanels();
+  if (typeof EDANoteFormatConfig !== "undefined" && EDANoteFormatConfig.applyNoteFormatToPanels) {
+    EDANoteFormatConfig.applyNoteFormatToPanels();
+  }
+  if (typeof EDAPhilosopherDisplayConfig !== "undefined" && EDAPhilosopherDisplayConfig.applyDisplayConfigToPanels) {
+    EDAPhilosopherDisplayConfig.applyDisplayConfigToPanels();
   }
   EDARules.loadRules();
 

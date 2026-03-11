@@ -8,22 +8,28 @@
    */
   var NOTE_DEBUG = true;
 
-  var cfg = global.NoteFormatConfig;
-  var getPaperPadding = cfg ? cfg.getPaperPadding : function () { return { top: 17.5, right: 17.5, bottom: 17.5, left: 17.5 }; };
+  var cfg = global.EDANoteFormatConfig;
+  var getPaperPadding = cfg ? cfg.getPaperPadding : function () { return { top: 17.5, right: 157.5, bottom: 17.5, left: 157.5 }; };
   var getPaperSize = cfg ? cfg.getPaperSize : function () { return { width: 440, height: 560 }; };
   var getNoteFormat = cfg ? cfg.getNoteFormat : function () { return {}; };
   var getContentHeightScale = cfg ? cfg.getContentHeightScale : function () { return 1; };
   var getLongNoteThreshold = cfg && typeof cfg.getLongNoteThreshold === "function" ? cfg.getLongNoteThreshold : function () { return 350; };
 
-  var NoteLayout = global.NoteLayout;
-  var NoteElement = global.NoteElement;
+  var NoteLayout = global.EDANoteLayout;
+  var NoteElement = global.EDANoteElement;
 
-  // When viewport is large (desktop >1440px) and the chat has begun scrolling,
-  // new notes can be positioned near the user's most recent message.
-  // Base vertical offset from the last user entry (px).
-  var DYNAMIC_ANCHOR_BASE_OFFSET_PX = 40;
-  // Random jitter added to the base offset for each note (±px).
-  var DYNAMIC_ANCHOR_JITTER_PX = 40;
+  /**
+   * Note placement: all variation and horizontal centering in one place.
+   * Vertical: anchor near last user message; jitter below controls variation.
+   * Horizontal: note CENTER is placed at zone center; band and variation are % of zone width.
+   */
+  var NOTE_PLACEMENT = {
+    anchorBaseOffsetPx: 40,
+    anchorVerticalJitterPx: 40,
+    stackVerticalJitterPct: 5,
+    horizBandPct: 50,
+    horizVariationPct: 90,
+  };
 
   var state = {
     left: { currentNote: null, previousNote: null, contentElement: null, usedHeight: 0, writingAreaHeight: 0 },
@@ -58,14 +64,15 @@
     return docEl.scrollHeight > docEl.clientHeight + 1;
   }
 
-  function randomJitterPx() {
-    return (Math.random() * 2 - 1) * DYNAMIC_ANCHOR_JITTER_PX;
+  function anchorVerticalJitterPx() {
+    var px = NOTE_PLACEMENT.anchorVerticalJitterPx;
+    return px === 0 ? 0 : (Math.random() * 2 - 1) * px;
   }
 
   // Base path for paper note images (used when constructing actual image URLs)
   var PAPER_NOTES_PATH = "assets/imgs/paper";
 
-  // Canonical paper IDs come from NoteFormatConfig.getPaperImages() and must
+  // Canonical paper IDs come from EDANoteFormatConfig.getPaperImages() and must
   // match the keys in PAPER_CONFIG (e.g. "paper4.webp").
   function getPaperImages() {
     if (cfg && typeof cfg.getPaperImages === "function") {
@@ -74,7 +81,7 @@
     }
     if (!paperListFallbackWarned) {
       paperListFallbackWarned = true;
-      console.warn("[notePages] Using fallback paper list; NoteFormatConfig may not be loaded.");
+      console.warn("[notePages] Using fallback paper list; EDANoteFormatConfig may not be loaded.");
     }
     return ["paper4.webp"];
   }
@@ -93,6 +100,13 @@
     return document.getElementById(id);
   }
 
+  /** Placement zone for notes: optional placement_zone_left/right, else the philosopher content panel. */
+  function getPlacementZone(side) {
+    var id = side === "right" ? "placement_zone_right" : "placement_zone_left";
+    var el = document.getElementById(id);
+    return el && el.isConnected ? el : getPanel(side);
+  }
+
   /** Returns the single notes layer (sibling to panels in .app-layout). All note wrappers live here. */
   function getOrCreateNotesLayer() {
     var layer = document.getElementById("notes-layer");
@@ -102,7 +116,6 @@
     layer = document.createElement("div");
     layer.id = "notes-layer";
     layer.className = "notes-layer";
-    layer.setAttribute("aria-hidden", "true");
     appLayout.appendChild(layer);
     return layer;
   }
@@ -212,8 +225,8 @@
 
   function handleResponsiveScaleUpdate() {
     refreshAllNotesDimensions();
-    if (global.NoteCapacity && typeof global.NoteCapacity.invalidate === "function") {
-      global.NoteCapacity.invalidate();
+    if (global.EDANoteCapacity && typeof global.EDANoteCapacity.invalidate === "function") {
+      global.EDANoteCapacity.invalidate();
     }
   }
 
@@ -237,29 +250,30 @@
     var noteHeight = size.height;
     paperEl.style.width = noteWidth + "px";
     paperEl.style.height = noteHeight + "px";
-    // Define the writable text region inside the logical bounding box. The
-    // text-padding values are now interpreted relative to the bounding box,
-    // not the full paper.
-    var topInset = bounding.height * (padding.top / 100);
-    var bottomInset = bounding.height * (padding.bottom / 100);
-    var leftInset = bounding.width * (padding.left / 100);
-    var rightInset = bounding.width * (padding.right / 100);
-    var writingAreaWidth = bounding.width - leftInset - rightInset;
-    var writingAreaHeight = bounding.height - topInset - bottomInset;
-    if (writingAreaWidth < 0) writingAreaWidth = 0;
-    if (writingAreaHeight < 0) writingAreaHeight = 0;
-    var contentLeft = bounding.offsetX + leftInset;
-    var contentTop = bounding.offsetY + topInset;
+    var geo = cfg && typeof cfg.getContentBoxGeometry === "function"
+      ? cfg.getContentBoxGeometry(bounding, padding)
+      : null;
+    if (!geo) {
+      var topInset = bounding.height * (padding.top / 100);
+      var bottomInset = bounding.height * (padding.bottom / 100);
+      var leftInset = bounding.width * (padding.left / 100);
+      var rightInset = bounding.width * (padding.right / 100);
+      geo = {
+        contentTop: bounding.offsetY + topInset,
+        contentLeft: bounding.offsetX + leftInset,
+        writingAreaWidth: Math.max(0, bounding.width - leftInset - rightInset),
+        writingAreaHeight: Math.max(0, bounding.height - topInset - bottomInset),
+      };
+    }
 
-    contentEl.style.top = contentTop + "px";
-    contentEl.style.left = contentLeft + "px";
+    contentEl.style.top = geo.contentTop + "px";
+    contentEl.style.left = geo.contentLeft + "px";
     contentEl.style.right = "";
     contentEl.style.bottom = "";
-    contentEl.style.width = writingAreaWidth + "px";
-    contentEl.style.height = writingAreaHeight + "px";
+    contentEl.style.width = geo.writingAreaWidth + "px";
+    contentEl.style.height = geo.writingAreaHeight + "px";
 
     if (NOTE_DEBUG) {
-      // Visualize paper padding and computed writing area in dev mode only.
       var debugBox = paperEl.querySelector(".note-page__debug-padding-box");
       if (!debugBox) {
         debugBox = document.createElement("div");
@@ -267,12 +281,10 @@
         debugBox.setAttribute("aria-hidden", "true");
         paperEl.appendChild(debugBox);
       }
-
-      debugBox.style.top = contentTop + "px";
-      debugBox.style.left = contentLeft + "px";
-      debugBox.style.width = writingAreaWidth + "px";
-      debugBox.style.height = writingAreaHeight + "px";
-
+      debugBox.style.top = geo.contentTop + "px";
+      debugBox.style.left = geo.contentLeft + "px";
+      debugBox.style.width = geo.writingAreaWidth + "px";
+      debugBox.style.height = geo.writingAreaHeight + "px";
       var label = debugBox.querySelector("span");
       if (!label) {
         label = document.createElement("span");
@@ -281,10 +293,10 @@
       label.textContent =
         "pad T:" + padding.top + " R:" + padding.right +
         " B:" + padding.bottom + " L:" + padding.left +
-        " | area " + Math.round(writingAreaWidth) + "x" + Math.round(writingAreaHeight);
+        " | area " + Math.round(geo.writingAreaWidth) + "x" + Math.round(geo.writingAreaHeight);
     }
 
-    return { noteWidth: noteWidth, noteHeight: noteHeight, writingAreaHeight: writingAreaHeight };
+    return { noteWidth: noteWidth, noteHeight: noteHeight, writingAreaHeight: geo.writingAreaHeight };
   }
 
   function clearStateFor(side) {
@@ -337,7 +349,8 @@
     var bounds = NoteLayout.getCurrentTextBounds(contentEl, side);
     var baselineBottom = bounds ? bounds.top + bounds.height : 0;
     var usedHeight = getContentUsedHeight(contentEl);
-    var currentBottom = Math.max(baselineBottom, usedHeight);
+    // Use same "bottom" as handwriter (bounds-based) so remaining space matches where next text is placed. For right philosopher, bounds are trimmed so we avoid overstating used space.
+    var currentBottom = bounds ? baselineBottom : usedHeight;
     var paddingPx = NoteLayout.NOTE_BOX_PADDING_PX;
     var spaceAfterBox = currentBottom + paddingPx;
     return { writingAreaHeight: writingAreaHeight, spaceAfterBox: spaceAfterBox, usedHeight: usedHeight, contentEl: contentEl };
@@ -355,9 +368,34 @@
     return { writingAreaHeight: info.writingAreaHeight, spaceAfterBox: info.spaceAfterBox, usedHeight: info.usedHeight };
   }
 
+  /** Extra px required below estimated height to absorb estimate error and avoid overflow. */
+  var FIT_SAFETY_MARGIN_PX = 20;
+
   function fitsOnCurrentNote(spaceInfo, estimatedNextPx) {
     if (!spaceInfo) return false;
-    return spaceInfo.spaceAfterBox + estimatedNextPx <= spaceInfo.writingAreaHeight;
+    return spaceInfo.spaceAfterBox + estimatedNextPx + FIT_SAFETY_MARGIN_PX <= spaceInfo.writingAreaHeight;
+  }
+
+  /** If the previous note can fit nextText, swap state to reuse it and return true; otherwise false. */
+  function tryReusePreviousNote(side, nextText) {
+    var s = state[side];
+    var prevWrapper = s && s.previousNote && s.previousNote.isConnected ? s.previousNote : null;
+    if (!prevWrapper || nextText == null) return false;
+    var prevPaperUrl = prevWrapper.dataset && prevWrapper.dataset.paperUrl;
+    var prevEstimated = NoteLayout.estimateHeightForText(String(nextText), side, prevPaperUrl || undefined);
+    var prevSpaceInfo = getNoteSpaceInfoForWrapper(side, prevWrapper);
+    var fitsPrevious = prevSpaceInfo && fitsOnCurrentNote(prevSpaceInfo, prevEstimated);
+    console.log(LOG_PREFIX, "  previous note check -> writingAreaHeight:", prevSpaceInfo && prevSpaceInfo.writingAreaHeight, "spaceAfterBox:", prevSpaceInfo && prevSpaceInfo.spaceAfterBox, "estimatedNext:", prevEstimated, "fits:", fitsPrevious);
+    if (!fitsPrevious) return false;
+    var newCurrent = prevWrapper;
+    var oldCurrent = s.currentNote;
+    s.currentNote = newCurrent;
+    s.previousNote = oldCurrent && oldCurrent !== newCurrent ? oldCurrent : null;
+    s.contentElement = prevSpaceInfo.contentEl;
+    s.writingAreaHeight = prevSpaceInfo.writingAreaHeight;
+    s.usedHeight = prevSpaceInfo.usedHeight;
+    console.log(LOG_PREFIX, "  -> reusing previous note instead of creating a new one");
+    return true;
   }
 
   /**
@@ -379,6 +417,16 @@
 
     var fitsCurrent = fitsOnCurrentNote(spaceInfo, estimatedNext);
     console.log(LOG_PREFIX, "  writingAreaHeight:", spaceInfo.writingAreaHeight, "spaceAfterBox:", spaceInfo.spaceAfterBox, "estimatedNext:", estimatedNext, "fits:", fitsCurrent);
+    if (isDevDebugMode() && nextText != null) {
+      var spaceRemainingPx = spaceInfo.writingAreaHeight - spaceInfo.spaceAfterBox - FIT_SAFETY_MARGIN_PX;
+      console.debug(LOG_PREFIX, "fit decision", {
+        writingAreaHeight: spaceInfo.writingAreaHeight,
+        spaceAfterBox: spaceInfo.spaceAfterBox,
+        estimatedNextPx: estimatedNext,
+        spaceRemainingPx: spaceRemainingPx,
+        fits: fitsCurrent,
+      });
+    }
 
     // #region agent log
     if (isDevDebugMode() && nextText != null) {
@@ -410,29 +458,7 @@
     }
     // #endregion
     if (fitsCurrent) return { needNew: false };
-
-    // If it does not fit on the current note, try the previous note for this side.
-    var s = state[side];
-    var prevWrapper = s && s.previousNote && s.previousNote.isConnected ? s.previousNote : null;
-    if (prevWrapper && nextText != null) {
-      var prevPaperUrl = prevWrapper.dataset && prevWrapper.dataset.paperUrl;
-      var prevEstimated = NoteLayout.estimateHeightForText(String(nextText), side, prevPaperUrl || undefined);
-      var prevSpaceInfo = getNoteSpaceInfoForWrapper(side, prevWrapper);
-      var fitsPrevious = prevSpaceInfo && fitsOnCurrentNote(prevSpaceInfo, prevEstimated);
-      console.log(LOG_PREFIX, "  previous note check -> writingAreaHeight:", prevSpaceInfo && prevSpaceInfo.writingAreaHeight, "spaceAfterBox:", prevSpaceInfo && prevSpaceInfo.spaceAfterBox, "estimatedNext:", prevEstimated, "fits:", fitsPrevious);
-      if (fitsPrevious) {
-        // Swap current and previous so subsequent writes target the reused note.
-        var newCurrent = prevWrapper;
-        var oldCurrent = s.currentNote;
-        s.currentNote = newCurrent;
-        s.previousNote = oldCurrent && oldCurrent !== newCurrent ? oldCurrent : null;
-        s.contentElement = prevSpaceInfo.contentEl;
-        s.writingAreaHeight = prevSpaceInfo.writingAreaHeight;
-        s.usedHeight = prevSpaceInfo.usedHeight;
-        console.log(LOG_PREFIX, "  -> reusing previous note instead of creating a new one");
-        return { needNew: false };
-      }
-    }
+    if (tryReusePreviousNote(side, nextText)) return { needNew: false };
 
     console.log(LOG_PREFIX, "  -> need new (no existing note can fit)"
     );
@@ -483,39 +509,109 @@
     return paperUrl;
   }
 
-  function computeNotePosition(region, side, rotationDeg, noteWidth, noteHeight, noteIndex) {
-    var pos = NoteLayout.stackedPositionInRegion(region, side, rotationDeg, noteWidth, noteHeight, noteIndex);
+  function stackPlacementOptions() {
+    return { verticalJitterPct: NOTE_PLACEMENT.stackVerticalJitterPct };
+  }
+
+  /**
+   * Compute horizontal position so the bounding box center is at targetCenterX.
+   * Uses boundingBoxCenterOffsetX (wrapper-relative) so placement is by the paper's bounding box only.
+   * Returns { left, right } (one undefined) in panel coordinates, clamped so AABB stays in zone.
+   */
+  function computeHorizontalCenterPosition(zoneCenterX, zoneWidth, zoneLeftInPanel, regionWidth, side, aabb, boundingCenterOffsetX, wrapperWidth) {
+    var aabbCenterOffsetX = boundingCenterOffsetX;
+    var halfBand = (zoneWidth * (NOTE_PLACEMENT.horizBandPct / 100)) / 2;
+    var bandMin = zoneCenterX - halfBand;
+    var bandMax = zoneCenterX + halfBand;
+    var variationPx = zoneWidth * (NOTE_PLACEMENT.horizVariationPct / 100);
+    var targetCenterX = zoneCenterX + (variationPx === 0 ? 0 : (Math.random() * 2 - 1) * variationPx);
+    targetCenterX = Math.max(bandMin, Math.min(bandMax, targetCenterX));
+
+    if (side === "left") {
+      var left = targetCenterX - aabbCenterOffsetX;
+      var leftMin = Math.max(0, zoneLeftInPanel + Math.max(0, -aabb.minX));
+      var leftMax = Math.min(regionWidth - aabb.maxX, zoneLeftInPanel + zoneWidth - aabb.maxX);
+      leftMax = Math.max(leftMin, leftMax);
+      left = Math.max(leftMin, Math.min(leftMax, left));
+      return { left: left, right: undefined };
+    }
+    var right = regionWidth - wrapperWidth - targetCenterX + aabbCenterOffsetX;
+    var rightMin = Math.max(0, regionWidth - wrapperWidth - zoneLeftInPanel - zoneWidth + aabb.maxX);
+    var rightMax = Math.min(regionWidth - wrapperWidth, regionWidth - wrapperWidth - zoneLeftInPanel + aabb.minX);
+    rightMax = Math.max(rightMin, rightMax);
+    right = Math.max(rightMin, Math.min(rightMax, right));
+    return { left: undefined, right: right };
+  }
+
+  /**
+   * Compute note position within the placement zone (placement_zone_left / placement_zone_right).
+   * Placement uses only the paper's bounding box (content area); wrapper is full paper size.
+   * bounding: { offsetX, offsetY, width, height }. wrapperWidth/wrapperHeight: full paper size.
+   */
+  function computeNotePosition(region, side, rotationDeg, bounding, wrapperWidth, wrapperHeight, noteIndex) {
+    var zoneEl = getPlacementZone(side);
+    var regionWidth = region.clientWidth;
+    var regionHeight = region.clientHeight;
+    var zoneWidth = zoneEl.clientWidth;
+    var zoneHeight = zoneEl.clientHeight;
+    var zoneLeftInPanel = 0;
+    var zoneTopInPanel = 0;
+    if (zoneEl !== region) {
+      var zoneRect = zoneEl.getBoundingClientRect();
+      var panelRect = region.getBoundingClientRect();
+      zoneLeftInPanel = zoneRect.left - panelRect.left;
+      zoneTopInPanel = zoneRect.top - panelRect.top;
+      zoneWidth = zoneRect.width;
+      zoneHeight = zoneRect.height;
+    }
+    var zoneCenterX = zoneLeftInPanel + zoneWidth / 2;
+    var aabb = NoteLayout.rotatedNoteAABBWithOffset(rotationDeg, bounding.offsetX, bounding.offsetY, bounding.width, bounding.height);
+    var boundingCenterOffsetX = NoteLayout.boundingBoxCenterOffsetX(rotationDeg, bounding.offsetX, bounding.offsetY, bounding.width, bounding.height);
+
+    function clampTopToZone(top) {
+      var topMin = Math.max(0, zoneTopInPanel + Math.max(0, -aabb.minY));
+      var topMax = Math.min(regionHeight, zoneTopInPanel + (zoneHeight - aabb.maxY));
+      topMax = Math.max(topMin, topMax);
+      return Math.max(topMin, Math.min(topMax, top));
+    }
+
+    function applyPlacementInZone(pos) {
+      var top = clampTopToZone(pos.top);
+      var horz = computeHorizontalCenterPosition(zoneCenterX, zoneWidth, zoneLeftInPanel, regionWidth, side, aabb, boundingCenterOffsetX, wrapperWidth);
+      return { left: horz.left, right: horz.right, top: top };
+    }
+
+    function zoneToPanelCoords(p) {
+      if (zoneEl === region) return p;
+      var out = { top: (p.top != null ? zoneTopInPanel + p.top : p.top) };
+      if (p.left != null) out.left = zoneLeftInPanel + p.left;
+      if (p.right != null) out.right = regionWidth - zoneLeftInPanel - zoneWidth + p.right;
+      return out;
+    }
+
+    var pos;
     if (isLargeViewport() && chatHasStartedScrolling()) {
       var anchorEl = getLastUserMessageElement();
       if (anchorEl && typeof anchorEl.getBoundingClientRect === "function") {
         var regionRect = region.getBoundingClientRect();
         var anchorRect = anchorEl.getBoundingClientRect();
-        var aabb = NoteLayout.rotatedNoteAABB(rotationDeg, noteWidth, noteHeight);
-        var regionHeight = region.clientHeight;
-        var topMin = Math.max(0, -aabb.minY);
-        var topMax = Math.min(regionHeight, regionHeight - aabb.maxY);
-        var baseOffset = DYNAMIC_ANCHOR_BASE_OFFSET_PX + randomJitterPx();
-        var idealTop = (anchorRect.bottom - regionRect.top) + baseOffset;
-        var anchoredTop = Math.max(topMin, Math.min(topMax, idealTop));
-        var regionWidth = region.clientWidth;
-        if (side === "left") {
-          var leftMin = Math.max(0, -aabb.minX);
-          var leftMax = Math.min(regionWidth, regionWidth - aabb.maxX);
-          var leftRange = Math.max(0, Math.floor(leftMax - leftMin));
-          var left = leftRange > 0 ? leftMin + Math.floor(Math.random() * (leftRange + 1)) : leftMin;
-          left = Math.max(leftMin, Math.min(left, leftMax));
-          pos = { left: left, right: undefined, top: anchoredTop };
-        } else {
-          var rightMin = Math.max(0, aabb.maxX - noteWidth);
-          var rightMax = Math.min(regionWidth, regionWidth - noteWidth + aabb.minX);
-          var rightRange = Math.max(0, Math.floor(rightMax - rightMin));
-          var right = rightRange > 0 ? rightMin + Math.floor(Math.random() * (rightRange + 1)) : rightMin;
-          right = Math.max(rightMin, Math.min(right, rightMax));
-          pos = { left: undefined, right: right, top: anchoredTop };
-        }
+        var idealTop = (anchorRect.bottom - regionRect.top) + NOTE_PLACEMENT.anchorBaseOffsetPx + anchorVerticalJitterPx();
+        pos = applyPlacementInZone({ left: 0, right: 0, top: idealTop });
+      } else {
+        pos = zoneToPanelCoords(NoteLayout.stackedPositionInRegion(zoneEl, side, rotationDeg, bounding.width, bounding.height, noteIndex, stackPlacementOptions()));
+        pos = applyPlacementInZone(pos);
       }
+    } else {
+      pos = zoneToPanelCoords(NoteLayout.stackedPositionInRegion(zoneEl, side, rotationDeg, bounding.width, bounding.height, noteIndex, stackPlacementOptions()));
+      pos = applyPlacementInZone(pos);
     }
     return pos;
+  }
+
+  /** Apply note format (--note-*) and content box sizing to a newly created note. Returns sizing. */
+  function applyFormatAndSizingToNewNote(wrapper, contentEl, side, paperUrl, size) {
+    applyNoteFormatStyles(contentEl, side);
+    return applyPaperSizing(wrapper, side, paperUrl, size) || { noteWidth: size.width, noteHeight: size.height, writingAreaHeight: 0 };
   }
 
   function write_new_note(side, options) {
@@ -535,11 +631,9 @@
       : { width: noteWidth, height: noteHeight, offsetX: 0, offsetY: 0 };
     var noteIndex = layer.querySelectorAll('.note-page[data-note-side="' + side + '"]').length;
     var zoneEl = getPanel(side);
-    // Use the logical bounding box for placement math; visual size remains noteWidth/noteHeight.
-    var pos = computeNotePosition(zoneEl, side, rotationDeg, bounding.width, bounding.height, noteIndex);
+    var pos = computeNotePosition(zoneEl, side, rotationDeg, bounding, noteWidth, noteHeight, noteIndex);
 
     var created = NoteElement.createNoteElement(side, paperUrl, pos, rotationDeg, size);
-    // Expose bounding box geometry for debug overlays and size the hit area.
     created.wrapper.dataset.boundingWidth = String(bounding.width);
     created.wrapper.dataset.boundingHeight = String(bounding.height);
     created.wrapper.dataset.boundingOffsetX = String(bounding.offsetX);
@@ -551,12 +645,9 @@
       hitEl.style.left = bounding.offsetX + "px";
       hitEl.style.width = bounding.width + "px";
       hitEl.style.height = bounding.height + "px";
-      // Hit area is used only for geometric checks; keep it non-interactive
-      // so hover/cursor behavior is driven by the full paper.
       hitEl.style.pointerEvents = "none";
     }
-    applyNoteFormatStyles(created.contentEl, side);
-    var sizing = applyPaperSizing(created.wrapper, side, paperUrl, size) || { noteWidth: noteWidth, noteHeight: noteHeight, writingAreaHeight: 0 };
+    var sizing = applyFormatAndSizingToNewNote(created.wrapper, created.contentEl, side, paperUrl, size);
 
     var zoneOffsetLeft = pos.left != null ? pos.left : (zoneBounds.width - pos.right - noteWidth);
     var zoneOffsetTop = pos.top;
@@ -638,6 +729,7 @@
 
   /**
    * Apply philosopher-specific note format from config via CSS custom properties.
+   * Also sets segment-type vars (userResponse, otherResponse, notes) from philosopher display config so notes in #notes-layer get correct font/color.
    */
   function applyNoteFormatStyles(contentEl, side) {
     var format = getNoteFormat(side);
@@ -652,11 +744,27 @@
       ["color", format.color],
       ["fontSize", format.fontSize],
       ["fontFamily", format.fontFamily],
+      ["fontWeight", format.fontWeight],
     ];
     for (var i = 0; i < vars.length; i++) {
       var key = vars[i][0];
       var val = vars[i][1];
       if (val != null) contentEl.style.setProperty("--note-" + key, val);
+    }
+    var displayConfig = global.EDAPhilosopherDisplayConfig;
+    if (displayConfig && displayConfig.PHILOSOPHER_FONTS && displayConfig.PHILOSOPHER_COLORS) {
+      var fonts = displayConfig.PHILOSOPHER_FONTS[side];
+      var colors = displayConfig.PHILOSOPHER_COLORS[side];
+      if (fonts) {
+        contentEl.style.setProperty("--note-fontFamily-userResponse", fonts.userResponse);
+        contentEl.style.setProperty("--note-fontFamily-otherResponse", fonts.otherResponse);
+        contentEl.style.setProperty("--note-fontFamily-notes", fonts.notes);
+      }
+      if (colors) {
+        contentEl.style.setProperty("--note-color-userResponse", colors.userResponse);
+        contentEl.style.setProperty("--note-color-otherResponse", colors.otherResponse);
+        contentEl.style.setProperty("--note-color-notes", colors.userResponse);
+      }
     }
   }
 
@@ -678,7 +786,7 @@
   function write_on_current_note(side, text, options) {
     var s = state[side];
     var contentEl = s && s.contentElement;
-    if (!contentEl || typeof handwriter === "undefined" || !text) return Promise.resolve();
+    if (!contentEl || typeof EDAHandwriter === "undefined" || !text) return Promise.resolve();
 
     options = options || {};
     var debugLabel = options.debugLabel;
@@ -714,7 +822,7 @@
       }
     }
 
-    return handwriter.appendText(contentEl, text, options).then(function () {
+    return EDAHandwriter.appendText(contentEl, text, options).then(function () {
       if (state[side] && state[side].contentElement === contentEl) {
         var prev = state[side].usedHeight;
         state[side].usedHeight = getContentUsedHeight(contentEl);
@@ -777,7 +885,7 @@
     });
   }
 
-  global.notePages = {
+  global.EDANotePages = {
     need_new_note: need_new_note,
     getCurrentPaperUrl: getCurrentPaperUrl,
     write_new_note: write_new_note,
@@ -793,6 +901,7 @@
     getZoneBoundsInLayer: getZoneBoundsInLayer,
     /** Same position logic as notes: stacked in zone, or anchored near last user message when applicable. */
     getPositionInZone: computeNotePosition,
+    getPlacementConfig: function () { return NOTE_PLACEMENT; },
     updateNotePositionsInLayer: updateNotePositionsInLayer,
     addEntranceAnimation: addEntranceAnimation,
     bring_note_to_front: bringNoteToFront,

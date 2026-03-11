@@ -78,17 +78,11 @@ app.http("chat", {
 			};
 		}
 		const trimmed = message.trim();
-		const rawWidth = body && body.contentWidthChars;
-		const contentWidthChars =
-			typeof rawWidth === "number" && rawWidth > 0
-				? Math.round(rawWidth)
-				: undefined;
 
 		const result = await shared.handleChatRequest(sessionId, trimmed, {
 			openaiClient: client,
 			dailyUsageStore,
 			debug: shared.DEBUG_LOGS,
-			contentWidthChars,
 		});
 
 		if (result.status === 204) {

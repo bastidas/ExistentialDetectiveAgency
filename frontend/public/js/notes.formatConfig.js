@@ -1,33 +1,38 @@
 /**
  * Unified note format configuration for left and right philosopher notes.
- * Single source of truth for line height, padding, opacity, color, and
- * content-height scaling. Load before notePages.js.
+ * Layout/sizing only: line height, padding, font scaling, areas. Font size, color, weight, and
+ * opacity come from philosopherDisplay.config.js (getPhilosopherBaseStyle). Load before notePages.js.
  */
 (function (global) {
   "use strict";
 
-  // Central responsive configuration for note scaling is provided by
-  // EDABreakpoints (breakpointsConfig.js). Fall back to legacy literals if
-  // that config is not loaded for any reason.
-  var Breakpoints = global.EDABreakpoints || {};
-  // Fallback bands mirror the defaults in breakpointsConfig.js so that note
-  // behavior stays consistent even if EDABreakpoints is not loaded.
-  var RESPONSIVE_BANDS = Breakpoints.RESPONSIVE_BANDS || [
+  // Single source of truth: viewport.breakpointsConfig.js (EDABreakpoints.RESPONSIVE_BANDS).
+  // Bands are read at runtime via getResponsiveBands() so viewport always wins. Fallback only when viewport not loaded; do not edit.
+  var FALLBACK_RESPONSIVE_BANDS = [
     { mode: "mobile-xs",   min: 0,    max: 480,  noteScale: 0.58, fontScale: 0.8 },
     { mode: "mobile-sm",   min: 481,  max: 640,  noteScale: 0.65, fontScale: 0.85 },
     { mode: "mobile",      min: 641,  max: 768,  noteScale: 0.76, fontScale: 0.9 },
     { mode: "medium",      min: 769,  max: 1440, noteScale: 0.8,  fontScale: 0.9 },
-    { mode: "desktop-base",min: 1441, max: 1999, noteScale: 1,    fontScale: 1 },
-    { mode: "desktop-wide",min: 2000, max: Infinity, noteScale: 1.05, fontScale: 1.02 },
+    { mode: "desktop-base",min: 1441, max: 1999, noteScale: 1,    fontScale: 1.0 },
+    { mode: "desktop-wide",min: 2000, max: Infinity, noteScale: 1.05, fontScale: 1.05 },
   ];
 
+  function getResponsiveBands() {
+    var bp = global.EDABreakpoints;
+    if (bp && bp.RESPONSIVE_BANDS && bp.RESPONSIVE_BANDS.length) {
+      return bp.RESPONSIVE_BANDS;
+    }
+    return FALLBACK_RESPONSIVE_BANDS;
+  }
+
   var RESPONSIVE_BASE = (function () {
-    for (var i = 0; i < RESPONSIVE_BANDS.length; i++) {
-      if (RESPONSIVE_BANDS[i].mode === "desktop-base") {
+    var bands = getResponsiveBands();
+    for (var i = 0; i < bands.length; i++) {
+      if (bands[i].mode === "desktop-base") {
         return {
-          mode: RESPONSIVE_BANDS[i].mode,
-          noteScale: RESPONSIVE_BANDS[i].noteScale,
-          fontScale: RESPONSIVE_BANDS[i].fontScale,
+          mode: bands[i].mode,
+          noteScale: bands[i].noteScale,
+          fontScale: bands[i].fontScale,
         };
       }
     }
@@ -41,33 +46,24 @@
   var NOTE_BASE_SIZE = { width: 340, height: 440 };
 
   /**
-   * Philosopher-specific note content styles (note-page__content). Keys match CSS vars --note-*.
-   * Optional paperPaddingRightOverride: use this value instead of the paper's padding.right for
-   * the writable area (e.g. 0 to reduce the left philosopher's right margin).
+   * Philosopher-specific layout/sizing (line height, padding). Font size, color, weight, opacity, and
+   * fontFamily come from philosopherDisplay.config.js and are merged in getNoteFormat().
    */
   var NOTE_FORMAT = {
     left: {
-      lineHeight: 1.45,
+      lineHeight: 0.9,
       paddingTop: "1%",
       paddingRight: "1%",
       paddingBottom: "1%",
       paddingLeft: "1%",
-      opacity: 0.98,
-      color: "#202024",
-      fontSize: "1.05rem",
-      fontFamily: '"Annie Use Your Telescope", cursive',
       /*paperPaddingRightOverride: 0,*/
     },
     right: {
-      lineHeight: 1.65,
+      lineHeight: 1.35,
       paddingTop: "1%",
       paddingRight: "1%",
       paddingBottom: "1%",
       paddingLeft: "1%",
-      opacity: 0.93,
-      color: "#284283",
-      fontSize: "1.12rem",
-      fontFamily: '"Homemade Apple", cursive',
     },
   };
 
@@ -86,18 +82,14 @@
   };
 
   /**
-   * Estimated line height in px for height estimation (need_new_note, estimateHeightForText).
-   * Must match the actual visual line height so we don't underestimate and draw new text on top of existing.
-   * Right: .line height + padding-bottom = 3rem + 24px + 1.5em (see note-pages.css .right-philosopher .note-page__content .line).
-  Used in getEstimatedLineHeightPx(side), which is used by:
-NoteLayout.estimateHeightForText() (and thus need_new_note) to estimate how many pixels the next text will need.
-noteCapacity.js for capacity.
-if we use 0 the code doesn't use this constant; it fell back to fontSize × lineHeight from NOTE_FORMAT (~29.57 px). 
-  */
-  var ESTIMATE_LINE_HEIGHT_PX = {
-    left:  20,
-    right: 26,
-  };
+   * Right philosopher .line box: CSS constants that must match note-pages.css
+   * .right-philosopher .note-page__content .line (height + padding-bottom).
+   * Used to derive getEstimatedLineHeightPx("right") so JS and CSS stay in sync.
+   */
+  var RIGHT_LINE_HEIGHT_REM = 3;
+  var RIGHT_LINE_PADDING_BOTTOM_PX = 24;
+  var RIGHT_LINE_PADDING_BOTTOM_EM = 1.5;
+  var REM_PX = 16;
 
   /** Default text padding (percent) when paper is not in PAPER_CONFIG */
   var DEFAULT_PAPER_PADDING = { top: 17.5, right: 17.5, bottom: 17.5, left: 17.5 };
@@ -241,6 +233,30 @@ if we use 0 the code doesn't use this constant; it fell back to fontSize × line
   }
 
   /**
+   * Content box geometry inside the paper bounding box: position and size of the writable area.
+   * Single source for positioning/sizing .note-page__content. Caller applies to DOM.
+   * @param {{ width: number, height: number, offsetX: number, offsetY: number }} bounding
+   * @param {{ top: number, right: number, bottom: number, left: number }} padding - percent 0..100
+   * @returns {{ contentTop: number, contentLeft: number, writingAreaWidth: number, writingAreaHeight: number }}
+   */
+  function getContentBoxGeometry(bounding, padding) {
+    var topInset = bounding.height * (padding.top / 100);
+    var bottomInset = bounding.height * (padding.bottom / 100);
+    var leftInset = bounding.width * (padding.left / 100);
+    var rightInset = bounding.width * (padding.right / 100);
+    var writingAreaWidth = bounding.width - leftInset - rightInset;
+    var writingAreaHeight = bounding.height - topInset - bottomInset;
+    if (writingAreaWidth < 0) writingAreaWidth = 0;
+    if (writingAreaHeight < 0) writingAreaHeight = 0;
+    return {
+      contentTop: bounding.offsetY + topInset,
+      contentLeft: bounding.offsetX + leftInset,
+      writingAreaWidth: writingAreaWidth,
+      writingAreaHeight: writingAreaHeight,
+    };
+  }
+
+  /**
    * Paper image URLs in config order. Use this as the single source for the note paper list.
    */
   function getPaperImages() {
@@ -343,8 +359,39 @@ if we use 0 the code doesn't use this constant; it fell back to fontSize × line
     });
   }
 
+  /** Fallback display values when philosopherDisplay.config.js is not loaded (e.g. notedebug without that script). */
+  var NOTE_FORMAT_DISPLAY_FALLBACK = {
+    left: { fontSize: "1.05rem", color: "#202024", opacity: 0.98, fontWeight: "normal", fontFamily: '"Annie Use Your Telescope", cursive' },
+    right: { fontSize: "1.12rem", color: "#284283", opacity: 0.93, fontWeight: "normal", fontFamily: '"Homemade Apple", cursive' },
+  };
+
+  /**
+   * Merged format: layout (lineHeight, padding) from NOTE_FORMAT plus display (fontSize, color,
+   * opacity, fontWeight, fontFamily) from philosopherDisplay.config.js when loaded.
+   */
   function getNoteFormat(side) {
-    return NOTE_FORMAT[side] || NOTE_FORMAT.left;
+    var base = NOTE_FORMAT[side] || NOTE_FORMAT.left;
+    var format = {};
+    for (var k in base) if (Object.prototype.hasOwnProperty.call(base, k)) format[k] = base[k];
+    var displayConfig = global.EDAPhilosopherDisplayConfig;
+    if (displayConfig && typeof displayConfig.getPhilosopherBaseStyle === "function") {
+      var display = displayConfig.getPhilosopherBaseStyle(side);
+      if (display) {
+        if (display.fontSize != null) format.fontSize = display.fontSize;
+        if (display.color != null) format.color = display.color;
+        if (display.opacity != null) format.opacity = display.opacity;
+        if (display.fontWeight != null) format.fontWeight = display.fontWeight;
+        if (display.fontFamily != null) format.fontFamily = display.fontFamily;
+      }
+    } else {
+      var fallback = NOTE_FORMAT_DISPLAY_FALLBACK[side] || NOTE_FORMAT_DISPLAY_FALLBACK.left;
+      if (fallback.fontSize != null) format.fontSize = fallback.fontSize;
+      if (fallback.color != null) format.color = fallback.color;
+      if (fallback.opacity != null) format.opacity = fallback.opacity;
+      if (fallback.fontWeight != null) format.fontWeight = fallback.fontWeight;
+      if (fallback.fontFamily != null) format.fontFamily = fallback.fontFamily;
+    }
+    return format;
   }
 
   function getContentHeightScale(side) {
@@ -353,17 +400,16 @@ if we use 0 the code doesn't use this constant; it fell back to fontSize × line
   }
 
   /**
-   * Per-line height (px) for height estimation. Right philosopher uses a fixed .line box in CSS:
-   * height 3rem + padding-bottom calc(24px + 1.5em), so we must match that here to avoid underestimating.
+   * Per-line height (px) for height estimation. Single source: derived from getNoteFormat (fontSize from philosopherDisplay) and (for right) CSS .line constants.
+   * Right: must match note-pages.css .right-philosopher .note-page__content .line (height 3rem + padding-bottom calc(24px + 1.5em)) so need_new_note and capacity stay correct. If long text overflows or short text gets unnecessary new notes, verify the computed height of a .line element matches this value (e.g. in dev: getComputedStyle(lineEl).height and lineEl.offsetHeight).
+   * Left: fontSize × lineHeight from merged format.
+   * estimateCharsPerLineForPaper: should reflect actual wrap at that paper's writable width; if estimates are off, compare with a measured line at getWritableAreaSize(paperUrl, side).width.
    */
   function getEstimatedLineHeightPx(side) {
-    var explicit = ESTIMATE_LINE_HEIGHT_PX[side];
-    if (typeof explicit === "number" && explicit > 0) return explicit;
-    var format = NOTE_FORMAT[side] || NOTE_FORMAT.left || {};
+    var format = getNoteFormat(side) || {};
     var fontSizePx = parseFontSizePx(format.fontSize);
     if (side === "right") {
-      var remPx = 16;
-      return 3 * remPx + 24 + 1.5 * fontSizePx;
+      return RIGHT_LINE_HEIGHT_REM * REM_PX + RIGHT_LINE_PADDING_BOTTOM_PX + RIGHT_LINE_PADDING_BOTTOM_EM * fontSizePx;
     }
     var lineHeight = typeof format.lineHeight === "number" ? format.lineHeight : parseFloat(format.lineHeight);
     if (!lineHeight || !isFinite(lineHeight)) lineHeight = 1.4;
@@ -464,7 +510,7 @@ if we use 0 the code doesn't use this constant; it fell back to fontSize × line
     var rightEl = document.getElementById("right-philosopher");
     var leftFormat = getNoteFormat("left");
     var rightFormat = getNoteFormat("right");
-    var propKeys = ["lineHeight", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "opacity", "color", "fontSize", "fontFamily"];
+    var propKeys = ["lineHeight", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "opacity", "color", "fontSize", "fontFamily", "fontWeight"];
     function apply(el, format) {
       if (!el || !format) return;
       for (var i = 0; i < propKeys.length; i++) {
@@ -482,8 +528,9 @@ if we use 0 the code doesn't use this constant; it fell back to fontSize × line
     if (typeof width !== "number" || !isFinite(width) || width <= 0) {
       return { mode: RESPONSIVE_BASE.mode, noteScale: RESPONSIVE_BASE.noteScale, fontScale: RESPONSIVE_BASE.fontScale };
     }
-    for (var i = 0; i < RESPONSIVE_BANDS.length; i++) {
-      var band = RESPONSIVE_BANDS[i];
+    var bands = getResponsiveBands();
+    for (var i = 0; i < bands.length; i++) {
+      var band = bands[i];
       var minOk = typeof band.min === "number" ? width >= band.min : true;
       var maxOk = typeof band.max === "number" && isFinite(band.max) ? width <= band.max : true;
       if (minOk && maxOk) {
@@ -514,10 +561,27 @@ if we use 0 the code doesn't use this constant; it fell back to fontSize × line
       nextState.noteScale !== responsiveState.noteScale ||
       nextState.fontScale !== responsiveState.fontScale;
     responsiveState = nextState;
+    var scaleStr = String(responsiveState.noteScale);
+    var fontScaleStr = String(responsiveState.fontScale);
     if (typeof document !== "undefined" && document.documentElement) {
       var root = document.documentElement;
-      root.style.setProperty("--note-responsive-scale", String(responsiveState.noteScale));
-      root.style.setProperty("--note-responsive-font-scale", String(responsiveState.fontScale));
+      root.style.setProperty("--note-responsive-scale", scaleStr);
+      root.style.setProperty("--note-responsive-font-scale", fontScaleStr);
+      var leftEl = document.getElementById("left-philosopher");
+      var rightEl = document.getElementById("right-philosopher");
+      if (leftEl) {
+        leftEl.style.setProperty("--note-responsive-scale", scaleStr);
+        leftEl.style.setProperty("--note-responsive-font-scale", fontScaleStr);
+      }
+      if (rightEl) {
+        rightEl.style.setProperty("--note-responsive-scale", scaleStr);
+        rightEl.style.setProperty("--note-responsive-font-scale", fontScaleStr);
+      }
+      var mobileNotes = document.getElementById("mobile-shared-notes");
+      if (mobileNotes) {
+        mobileNotes.style.setProperty("--note-responsive-scale", scaleStr);
+        mobileNotes.style.setProperty("--note-responsive-font-scale", fontScaleStr);
+      }
     }
     if (changed) notifyResponsiveListeners();
   }
@@ -559,10 +623,9 @@ if we use 0 the code doesn't use this constant; it fell back to fontSize × line
     return paperConfigReady;
   }
 
-  global.NoteFormatConfig = {
+  global.EDANoteFormatConfig = {
     NOTE_FORMAT: NOTE_FORMAT,
     CONTENT_HEIGHT_SCALING: CONTENT_HEIGHT_SCALING,
-    ESTIMATE_LINE_HEIGHT_PX: ESTIMATE_LINE_HEIGHT_PX,
     PAPER_CONFIG: PAPER_CONFIG,
     getPaperPadding: getPaperPadding,
     getPaperSize: getPaperSize,
@@ -591,6 +654,7 @@ if we use 0 the code doesn't use this constant; it fell back to fontSize × line
     getShortNoteLeadingSpacesCount: getShortNoteLeadingSpacesCount,
     applyNoteFormatToPanels: applyNoteFormatToPanels,
     getPaperBoundingBox: getPaperBoundingBox,
+    getContentBoxGeometry: getContentBoxGeometry,
   };
 
   if (typeof window !== "undefined") {

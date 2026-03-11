@@ -84,7 +84,7 @@
 
   var AGENT_CHAT_LABEL = "*** DETECTIVE ***";
 
-  global.ChatConfig = {
+  global.EDAChatConfig = {
     CHAT_STYLE: CHAT_STYLE,
     AGENT_CHAT_LABEL: AGENT_CHAT_LABEL,
     applyChatStyle: applyChatStyle,

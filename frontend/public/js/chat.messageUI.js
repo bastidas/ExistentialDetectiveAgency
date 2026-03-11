@@ -160,7 +160,7 @@
     if (role === "user") {
       label.textContent = "QUERENT";
     } else {
-      label.textContent = (global.ChatConfig && global.ChatConfig.AGENT_CHAT_LABEL) || "DETECTIVE";
+      label.textContent = (global.EDAChatConfig && global.EDAChatConfig.AGENT_CHAT_LABEL) || "DETECTIVE";
     }
     var content = document.createElement("div");
     content.className = "content typewriter";

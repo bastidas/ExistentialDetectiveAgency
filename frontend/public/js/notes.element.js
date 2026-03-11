@@ -359,7 +359,7 @@
     return { wrapper: wrapper, paperEl: paperEl, contentEl: contentEl };
   }
 
-  global.NoteElement = {
+  global.EDANoteElement = {
     createNoteElement: createNoteElement,
     registerNoteInteractions: registerNoteInteractions,
     bringNoteToFront: bringNoteToFront,

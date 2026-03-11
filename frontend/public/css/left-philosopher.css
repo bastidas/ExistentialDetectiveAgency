@@ -1,4 +1,6 @@
-/* Left philosopher: handwritten style (Annie Use Your Telescope, ruled lines, rotation) */
+/* Left philosopher: handwritten style (Annie Use Your Telescope, ruled lines, rotation) 
+ don’t put philosopher color/font values in CSS, its fallback colors/fonts are in philosopherDisplay.config.js
+*/
 @import url("https://fonts.googleapis.com/css2?family=Annie+Use+Your+Telescope&display=swap");
 
 .left-philosopher .philosopher-notes-content {
@@ -12,26 +14,46 @@
   line-height: 1;
   margin-top: 0.5rem;
   margin-left: 0;
-  width: min(240px, 90vw);
+  /* width: min(240px, 90vw); */
   max-width: 100%;
   padding: 20px 10px 20px 65px;
-  background-color: #fff;
+  /* background-color: #fff;
   background-image:
     linear-gradient(90deg, transparent 59px, #abced4 59px, #abced4 61px, transparent 61px),
-    linear-gradient(#e1e1e1 0.1em, transparent 0.1em);
-  background-size: 100% 1em;
+    linear-gradient(#e1e1e1 0.1em, transparent 0.1em); */
+  /* background-size: 100% 1em; */
   font-size: var(--note-fontSize, 1.15rem);
-  transform: rotate(6deg);
-  box-shadow: 3px 3px 6px #ccc;
+  /* transform: rotate(6deg); */
+  /* box-shadow: 3px 3px 6px #ccc; */
   font-family: var(--note-fontFamily, "Annie Use Your Telescope", cursive);
   font-weight: normal;
   color: var(--note-color, #202024);
 }
 
-.left-philosopher .handwritten em {
+/* Segment-type styling: values from philosopherDisplay.config via --note-* vars only (no fallback colors/fonts here) */
+.left-philosopher .philosopher-user-response .handwritten {
+  font-family: var(--note-fontFamily-userResponse, inherit);
+  color: var(--note-color-userResponse, inherit);
+}
+.left-philosopher .philosopher-other-response .handwritten {
+  font-family: var(--note-fontFamily-otherResponse, inherit);
+  color: var(--note-color-otherResponse, inherit);
+  font-size: inherit; /* use OTHER_RESPONSE_STYLE.size from segment wrapper, not base --note-fontSize */
+}
+.left-philosopher .philosopher-other-response {
+  font-family: var(--note-fontFamily-otherResponse, inherit);
+  /* Base from OTHER_RESPONSE_STYLE.size (set on element by handwriter). Fallback 2rem so otherResponse is always large. */
+  font-size: calc(var(--segment-fontSize-base, 2rem) * var(--note-responsive-font-scale, 1)) !important;
+}
+.left-philosopher .philosopher-note .handwritten {
+  font-family: var(--note-fontFamily-notes, inherit);
+  color: var(--note-color-notes, inherit);
+}
+
+/* .left-philosopher .handwritten em {
   background-color: rgba(255, 247, 128, 0.7);
   font-style: normal;
-}
+} */
 
 @media (max-width: 768px) {
   .left-philosopher .handwritten {
