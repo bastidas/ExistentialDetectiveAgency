@@ -17,8 +17,20 @@
   var remainingItems = [];
   var objectConfig = {};
 
+  // Current mode for margin items: "normal" (classic) or "baseline".
+  var currentMode = "normal";
+
   // Base path for random margin objects.
   var OBJECT_BASE_PATH = "assets/imgs/misc_objects/";
+
+  function getImageUrlForKey(key) {
+    if (!key) return "";
+    var cfg = objectConfig && objectConfig[key] ? objectConfig[key] : null;
+    var basePath = cfg && typeof cfg.base_path === "string" && cfg.base_path
+      ? cfg.base_path
+      : OBJECT_BASE_PATH;
+    return basePath + key;
+  }
 
   function isDevDebugMode() {
     try {
@@ -91,11 +103,10 @@
     xhr.onreadystatechange = function () {
       if (xhr.readyState === 4 && xhr.status === 200) {
         try {
-          objectConfig = JSON.parse(xhr.responseText);
-          // Populate remainingItems with keys, using misc_objects base path.
-          remainingItems = Object.keys(objectConfig).map(function (key) {
-            return OBJECT_BASE_PATH + key;
-          });
+          objectConfig = JSON.parse(xhr.responseText) || {};
+          // Populate remainingItems with config keys; actual image URLs are
+          // derived later so different types can live in different folders.
+          remainingItems = Object.keys(objectConfig);
           if (typeof callback === "function") callback();
         } catch (err) {
           console.warn("[RandomMarginItems] Could not parse object-config.json:", err.message);
@@ -113,12 +124,30 @@
     return remainingItems.length > 0;
   }
 
-  function consumeRandomItem() {
+  function getAllowedTypesForCurrentMode() {
+    if (currentMode === "baseline") return ["baseline"];
+    // Classic behavior: drop everything except baseline-only objects.
+    return ["misc", "special"];
+  }
+
+  function consumeRandomItemForCurrentMode() {
     if (!remainingItems.length) return null;
-    var index = Math.floor(Math.random() * remainingItems.length);
-    var item = remainingItems[index];
-    remainingItems.splice(index, 1);
-    return item;
+    var allowedTypes = getAllowedTypesForCurrentMode();
+    var attempts = 0;
+    var maxAttempts = remainingItems.length;
+    while (attempts < maxAttempts) {
+      var index = Math.floor(Math.random() * remainingItems.length);
+      var key = remainingItems[index];
+      var cfg = objectConfig && objectConfig[key] ? objectConfig[key] : {};
+      var type = cfg && typeof cfg.type === "string" ? cfg.type : "misc";
+      var isAllowed = !allowedTypes || allowedTypes.indexOf(type) !== -1;
+      if (isAllowed) {
+        remainingItems.splice(index, 1);
+        return key;
+      }
+      attempts++;
+    }
+    return null;
   }
 
   function pickSide(hint) {
@@ -196,9 +225,12 @@
 
       var label = document.createElement("span");
       label.className = "margin-item__debug-label";
-      label.textContent = (imageUrl && imageUrl.indexOf(OBJECT_BASE_PATH) === 0)
-        ? imageUrl.slice(OBJECT_BASE_PATH.length)
-        : imageUrl;
+      if (imageUrl) {
+        var lastSlash = imageUrl.lastIndexOf("/");
+        label.textContent = lastSlash >= 0 ? imageUrl.slice(lastSlash + 1) : imageUrl;
+      } else {
+        label.textContent = "";
+      }
       debugBox.appendChild(label);
 
       wrapper.appendChild(debugBox);
@@ -226,7 +258,7 @@
     var opts = options || {};
 
     if (!hasRemainingItems()) return;
-    if (Math.random() >= RANDOM_OBJECT_CHANCE) return;
+  if (currentMode !== "baseline" && Math.random() >= RANDOM_OBJECT_CHANCE) return;
 
     var notePages = global.EDANotePages;
     if (!notePages || !EDANoteLayout) return;
@@ -237,10 +269,11 @@
     var zoneBounds = EDANotePages.getZoneBoundsInLayer && EDANotePages.getZoneBoundsInLayer(side);
     if (!layer || !zoneBounds) return;
 
-    var imageUrl = consumeRandomItem();
-    if (!imageUrl) return;
+    var itemKey = consumeRandomItemForCurrentMode();
+    if (!itemKey) return;
 
-    var config = getConfigForImage(imageUrl);
+    var imageUrl = getImageUrlForKey(itemKey);
+    var config = objectConfig[itemKey] || getConfigForImage(imageUrl);
     var rotationDeg = rotationForConfig(config);
     var size = getItemSizeFromConfig(config);
 
@@ -298,10 +331,21 @@
     }
   }
 
+  function setMode(mode) {
+    if (mode === "baseline") currentMode = "baseline";
+    else currentMode = "normal";
+  }
+
+  function getMode() {
+    return currentMode;
+  }
+
   global.EDARandomMarginItems = {
     RANDOM_OBJECT_CHANCE: RANDOM_OBJECT_CHANCE,
     maybeDropRandomItemForUserInput: maybeDropRandomItemForUserInput,
     loadObjectConfig: loadObjectConfig,
     getObjectConfig: function () { return objectConfig; },
+    setMode: setMode,
+    getMode: getMode,
   };
 })(typeof window !== "undefined" ? window : this);

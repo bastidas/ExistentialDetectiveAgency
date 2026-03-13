@@ -35,27 +35,83 @@
 
     ref.classList.add("chat-editor-wrapper--hidden");
 
-    var div = document.createElement("div");
-    div.className = "message querent-intro";
-    var label = document.createElement("span");
-    label.className = "label label--querent";
-    label.textContent = "";
-    div.appendChild(label);
-    messages.insertBefore(div, ref);
-    messages.scrollTop = messages.scrollHeight;
+    function showQuerentIntroRow() {
+      var div = document.createElement("div");
+      div.className = "message querent-intro";
+      var label = document.createElement("span");
+      label.className = "label label--querent";
+      label.textContent = "";
+      div.appendChild(label);
+      messages.insertBefore(div, ref);
+      messages.scrollTop = messages.scrollHeight;
 
-    function showEditor() {
-      ref.classList.remove("chat-editor-wrapper--hidden");
-      var editor = getEditorNode();
-      if (editor && editor.focus) editor.focus();
+      function showEditor() {
+        ref.classList.remove("chat-editor-wrapper--hidden");
+        var editor = getEditorNode();
+        if (editor && editor.focus) editor.focus();
+      }
+
+      if (EDAUtils && EDAUtils.typeLabelIntoElement) {
+        EDAUtils.typeLabelIntoElement(label, "QUERENT", { delayMs: 60, onDone: showEditor });
+      } else {
+        label.textContent = "QUERENT";
+        showEditor();
+      }
     }
 
-    if (EDAUtils && EDAUtils.typeLabelIntoElement) {
-      EDAUtils.typeLabelIntoElement(label, "QUERENT", { delayMs: 60, onDone: showEditor });
-    } else {
-      label.textContent = "QUERENT";
-      showEditor();
+    function addAssistantIntro(text, agentLabel, onDone) {
+      if (!text) {
+        if (typeof onDone === "function") onDone();
+        return;
+      }
+      if (!global.EDAMessageUI || !global.EDAMessageUI.addMessage) {
+        if (typeof onDone === "function") onDone();
+        return;
+      }
+      global.EDAMessageUI.addMessage("assistant", text, ref, {
+        agentLabel: agentLabel,
+        onAssistantDone: onDone,
+      });
     }
+
+    function runInitialIntrosThenQuerent() {
+      if (typeof fetch === "undefined") {
+        showQuerentIntroRow();
+        return;
+      }
+      fetch("/api/initial-intros", { credentials: "same-origin" })
+        .then(function (res) { return res && res.ok ? res.json() : null; })
+        .then(function (data) {
+          var attacheIntro = data && typeof data.attacheIntro === "string" ? data.attacheIntro.trim() : "";
+          var detectiveIntro = data && typeof data.detectiveIntro === "string" ? data.detectiveIntro.trim() : "";
+
+          // If no intros are available, fall back to just QUERENT.
+          if (!attacheIntro && !detectiveIntro) {
+            showQuerentIntroRow();
+            return;
+          }
+
+          var attacheLabel = (global.EDAChatConfig && global.EDAChatConfig.AGENT_CHAT_LABEL) || "*** ATTACHÉ ***";
+          var detectiveLabel = "*** DETECTIVE ***";
+
+          // For initial arrival, only show one agent speaking first.
+          // Prefer the Attaché; if that intro is unavailable, fall back to Detective.
+          if (attacheIntro) {
+            addAssistantIntro(attacheIntro, attacheLabel, function () {
+              showQuerentIntroRow();
+            });
+          } else {
+            addAssistantIntro(detectiveIntro, detectiveLabel, function () {
+              showQuerentIntroRow();
+            });
+          }
+        })
+        .catch(function () {
+          showQuerentIntroRow();
+        });
+    }
+
+    runInitialIntrosThenQuerent();
   }
 
   /** Remove all standalone QUERENT intro rows (so only the new one is typed, or the user message is the only QUERENT). */
@@ -160,7 +216,11 @@
     if (role === "user") {
       label.textContent = "QUERENT";
     } else {
-      label.textContent = (global.EDAChatConfig && global.EDAChatConfig.AGENT_CHAT_LABEL) || "DETECTIVE";
+      var agentLabel =
+        (options && options.agentLabel) ||
+        (global.EDAChatConfig && global.EDAChatConfig.AGENT_CHAT_LABEL) ||
+        "DETECTIVE";
+      label.textContent = agentLabel;
     }
     var content = document.createElement("div");
     content.className = "content typewriter";

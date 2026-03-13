@@ -22,7 +22,13 @@ function logDebug(...args) {
 // In-memory state and daily-usage helpers (HTTP layer integration)
 // ---------------------------------------------------------------------------
 
+// Per-session counters
+// - userExchangeCounts: total user turns across all modes (Attaché + Detective).
+// - attacheExchangeCounts: user turns handled by the Attaché (Baseline mode).
+// - detectiveExchangeCounts: user turns handled by the Detective (normal/closure).
 const userExchangeCounts = new Map();
+const attacheExchangeCounts = new Map();
+const detectiveExchangeCounts = new Map();
 
 function getToday() {
   return new Date().toISOString().slice(0, 10);
@@ -121,7 +127,16 @@ function normalizeConversationState(state) {
 
   const shouldBeginClosure = next.turn_count >= config.CLOSURE_TURN_THRESHOLD;
   next.should_begin_closure = shouldBeginClosure;
-  next.mode = shouldBeginClosure ? "closure" : "normal";
+
+  // Preserve any explicit mode that has been set (e.g. "baseline"), and only
+  // move into closure for non-baseline modes.
+  if (!next.mode) {
+    next.mode = "normal";
+  }
+
+  if (next.mode !== "baseline" && shouldBeginClosure) {
+    next.mode = "closure";
+  }
 
   return next;
 }
@@ -275,6 +290,17 @@ function buildSystemMessageForAgent(agentKey, conversationState) {
 }
 
 
+// Helper to derive a human-readable Baseline phase from the boolean flags
+function getBaselinePhase(baselineState) {
+  const b = baselineState && typeof baselineState === "object" ? baselineState : {};
+  if (b.end) return "end";
+  if (b.high_intensity) return "high_intensity";
+  if (b.honest_questions) return "honest_questions";
+  if (b.repition_intro) return "repition_intro";
+  return "unknown";
+}
+
+
 
 // Conversation Log That Follows the Envelope
 //  Flat Chronological Log” (Most Natural, Most Flexible)
@@ -414,6 +440,18 @@ async function callAgent({
         umbra_philosopher_other_response: "",
       };
     }
+    if (agentKey === "attache") {
+      return {
+        attache_response:
+          "[OFFLINE] Attaché is unavailable. This is a stub response.",
+        baseline_conversation_state: {
+          repition_intro: true,
+          honest_questions: false,
+          high_intensity: false,
+          end: false,
+        },
+      };
+    }
     return {};
   }
 
@@ -528,6 +566,16 @@ async function callUmbra(openai, state, history, userInput) {
   });
 }
 
+async function callAttache(openai, state, history, userInput) {
+  return callAgent({
+    openai,
+    agentKey: "attache",
+    conversationState: state,
+    history,
+    userInput,
+  });
+}
+
 // Bonus final exchange: detective persona + final (closing) instructions only
 async function callFinalDetective(openai, state, history, userInput) {
   return callAgent({
@@ -537,6 +585,140 @@ async function callFinalDetective(openai, state, history, userInput) {
     history,
     userInput,
   });
+}
+
+
+// Baseline Attaché turn: used while the session is in Baseline mode.
+async function runBaselineTurn(openai, prevState, prevHistory, userInput) {
+  logInfo("runBaselineTurn start", {
+    hasState: !!prevState,
+    historyLength: prevHistory ? prevHistory.length : 0,
+  });
+
+  let history = await maybeSummarize(openai, prevHistory);
+
+  // Start from previous state but ensure we mark this as baseline mode until
+  // the Attaché decides the Baseline is complete.
+  let state = prevState && typeof prevState === "object" ? { ...prevState } : {};
+  if (!state.mode) {
+    state.mode = "baseline";
+  }
+
+  const prevBaselineState =
+    state && state.baseline_conversation_state &&
+    typeof state.baseline_conversation_state === "object"
+      ? { ...state.baseline_conversation_state }
+      : null;
+
+  state = normalizeConversationState(state);
+
+  if (!state.baseline_conversation_state ||
+      typeof state.baseline_conversation_state !== "object") {
+    state.baseline_conversation_state = {
+      repition_intro: true,
+      honest_questions: false,
+      high_intensity: false,
+      end: false,
+    };
+  }
+
+  const baselineBefore = state.baseline_conversation_state;
+  const phaseBefore = getBaselinePhase(baselineBefore);
+
+  // Maintain a simple counter of how many consecutive turns have occurred
+  // in the current Baseline phase. This value is exposed to the Attaché
+  // as conversation_state.phaseTurnCounts so it can decide when to advance.
+  if (state.baseline_phase_key !== phaseBefore) {
+    state.baseline_phase_key = phaseBefore;
+    state.phaseTurnCounts = 1;
+  } else {
+    const prevCount =
+      typeof state.phaseTurnCounts === "number" && Number.isFinite(state.phaseTurnCounts)
+        ? state.phaseTurnCounts
+        : 0;
+    state.phaseTurnCounts = prevCount + 1;
+  }
+
+  logInfo(
+    "[Baseline] CURRENT PHASE:",
+    phaseBefore,
+    "phaseTurnCounts:",
+    state.phaseTurnCounts
+  );
+
+  const attacheResult = await callAttache(openai, state, history, userInput);
+
+  // Adopt the Attaché's view of the baseline_conversation_state when provided.
+  if (attacheResult && attacheResult.baseline_conversation_state &&
+      typeof attacheResult.baseline_conversation_state === "object") {
+    const nextBaseline = attacheResult.baseline_conversation_state;
+    const coalesced = {
+      repition_intro: !!nextBaseline.repition_intro,
+      honest_questions: !!nextBaseline.honest_questions,
+      high_intensity: !!nextBaseline.high_intensity,
+      end: !!nextBaseline.end,
+    };
+
+    // Ensure that when end is true, all others are false.
+    if (coalesced.end) {
+      coalesced.repition_intro = false;
+      coalesced.honest_questions = false;
+      coalesced.high_intensity = false;
+    }
+
+    state.baseline_conversation_state = coalesced;
+
+    const phaseAfter = getBaselinePhase(coalesced);
+    logInfo("[Baseline] NEXT PHASE:", phaseAfter);
+
+    // If the phase changed this turn, reset the phaseTurnCounts counter so
+    // the next request starts counting fresh in the new phase.
+    if (phaseAfter !== phaseBefore) {
+      state.baseline_phase_key = phaseAfter;
+      state.phaseTurnCounts = 0;
+    }
+
+    const hadEndedBefore = !!(prevBaselineState && prevBaselineState.end);
+    const hasEndedNow = !!coalesced.end;
+
+    // When Baseline just completed, capture a minimal dossier snapshot and
+    // move the conversation into normal detective mode.
+    if (!hadEndedBefore && hasEndedNow) {
+      if (!state.dossier || typeof state.dossier !== "object") {
+        state.dossier = {};
+      }
+      state.dossier.baseline = {
+        baseline_conversation_state: { ...coalesced },
+        completed_at: new Date().toISOString(),
+      };
+      state.mode = "normal";
+    }
+  }
+
+  const attacheResponse =
+    attacheResult && attacheResult.attache_response
+      ? String(attacheResult.attache_response).trim()
+      : "";
+
+  const transcriptParts = [];
+  if (userInput) {
+    transcriptParts.push(`[USER]: ${userInput}`);
+  }
+  if (attacheResponse) {
+    transcriptParts.push(`[ATTACHE]: ${attacheResponse}`);
+  }
+
+  const merged = transcriptParts.join("\n\n");
+  history = appendTurnToHistory(history, merged);
+
+  logDebug("runBaselineTurn end", {
+    turn_count: state.turn_count,
+    baseline_phase: getBaselinePhase(state.baseline_conversation_state),
+  });
+
+  const envelope = buildTurnEnvelope(state, userInput);
+  const agents = { attache: attacheResult };
+  return { history, state, merged, envelope, agents };
 }
 
 
@@ -652,6 +834,8 @@ function buildDebugBody(userExchanges, dailyUsage) {
     maxUserExchanges: config.MAX_USER_EXCHANGES,
     dailyUsage,
     maxDailyUsage: config.MAX_DAILY_USAGE,
+    detectiveSessionExchanges: config.DETECTIVE_SESSION_EXCHANGES,
+    attacheSessionExchanges: config.ATTACHE_SESSION_EXCHANGES,
   };
 }
 
@@ -671,6 +855,8 @@ async function handleChatRequest(sessionId, trimmed, options) {
   const client = openaiClient || {}; // OFFLINE mode never uses the client
 
   const prevUserCount = userExchangeCounts.get(sessionId) ?? 0;
+  const prevAttacheCount = attacheExchangeCounts.get(sessionId) ?? 0;
+  const prevDetectiveCount = detectiveExchangeCounts.get(sessionId) ?? 0;
   let dailyCount =
     dailyUsageStore && typeof dailyUsageStore.readDailyUsage === "function"
       ? dailyUsageStore.readDailyUsage()
@@ -706,8 +892,10 @@ async function handleChatRequest(sessionId, trimmed, options) {
   const session = getOrCreateSessionState(sessionId);
   const { history: prevHistory, state: prevState } = session;
 
-  // Bonus final exchange: one more turn with final_detective (persona + closing instructions) only
-  if (prevUserCount === config.MAX_USER_EXCHANGES) {
+  // Bonus final exchange: one more detective turn with final_detective only.
+  // This is keyed off the detective-session exchange budget, not total turns,
+  // so Baseline exchanges do not consume the detective quota.
+  if (prevDetectiveCount === config.DETECTIVE_SESSION_EXCHANGES) {
     let history = await maybeSummarize(client, prevHistory);
     let state = normalizeConversationState(prevState);
     const finalResult = await callFinalDetective(client, state, history, trimmed);
@@ -722,7 +910,9 @@ async function handleChatRequest(sessionId, trimmed, options) {
     session.state = state;
 
     const nextUserCount = prevUserCount + 1;
+    const nextDetectiveCount = prevDetectiveCount + 1;
     userExchangeCounts.set(sessionId, nextUserCount);
+    detectiveExchangeCounts.set(sessionId, nextDetectiveCount);
     const newDailyCount = dailyCount + 1;
     if (
       dailyUsageStore &&
@@ -767,9 +957,96 @@ async function handleChatRequest(sessionId, trimmed, options) {
         },
       },
       envelope,
+      agentLabel: "*** DETECTIVE ***",
+      baselineActive: false,
     };
     body.debug = buildDebugBody(nextUserCount, newDailyCount);
     body.limitReached = true;
+
+    return { status: 200, body };
+  }
+
+  // While in Baseline mode (or before any state exists), route turns through
+  // the Attaché instead of the full detective/philosopher ensemble, up to the
+  // ATTACHE_SESSION_EXCHANGES budget.
+  const isBaselineMode = !prevState || prevState.mode === "baseline";
+  const canContinueBaseline =
+    isBaselineMode && prevAttacheCount < config.ATTACHE_SESSION_EXCHANGES;
+  if (canContinueBaseline) {
+    const {
+      history,
+      state,
+      merged,
+      envelope,
+      agents,
+    } = await runBaselineTurn(client, prevState, prevHistory, trimmed);
+
+    session.history = history;
+    session.state = state;
+
+    if (!merged || !String(merged).trim()) {
+      return { status: 204, body: null };
+    }
+
+    const nextUserCount = prevUserCount + 1;
+    const nextAttacheCount = prevAttacheCount + 1;
+    userExchangeCounts.set(sessionId, nextUserCount);
+    attacheExchangeCounts.set(sessionId, nextAttacheCount);
+    const newDailyCount = dailyCount + 1;
+    if (
+      dailyUsageStore &&
+      typeof dailyUsageStore.writeDailyUsage === "function"
+    ) {
+      dailyUsageStore.writeDailyUsage(newDailyCount);
+    }
+
+    const attacheAgent = agents && agents.attache ? agents.attache : null;
+    let reply = "";
+    if (attacheAgent && attacheAgent.attache_response != null) {
+      reply = String(attacheAgent.attache_response).trim();
+    }
+
+    if (!reply && merged) {
+      const marker = "[ATTACHE]:";
+      const idx = merged.lastIndexOf(marker);
+      if (idx >= 0) {
+        reply = merged.slice(idx + marker.length).trim();
+      }
+    }
+
+    const body = {
+      reply: reply || "(No reply.)",
+      leftPhilosopherUserResponse: "",
+      leftPhilosopherOtherResponse: "",
+      leftPhilosopherNotes: [],
+      leftPhilosopherCallouts: [],
+      rightPhilosopherUserResponse: "",
+      rightPhilosopherOtherResponse: "",
+      rightPhilosopherNotes: [],
+      rightPhilosopherCallouts: [],
+      philosophers: {
+        lumen: {
+          userResponse: "",
+          otherResponse: "",
+          notes: [],
+          callouts: [],
+        },
+        umbra: {
+          userResponse: "",
+          otherResponse: "",
+          notes: [],
+          callouts: [],
+        },
+      },
+      envelope,
+      agentLabel: "*** ATTACHÉ ***",
+      baselineActive:
+        !!(state && state.mode === "baseline" &&
+          state.baseline_conversation_state &&
+          !state.baseline_conversation_state.end),
+    };
+
+    body.debug = buildDebugBody(nextUserCount, newDailyCount);
 
     return { status: 200, body };
   }
@@ -790,7 +1067,9 @@ async function handleChatRequest(sessionId, trimmed, options) {
   }
 
   const nextUserCount = prevUserCount + 1;
+  const nextDetectiveCount = prevDetectiveCount + 1;
   userExchangeCounts.set(sessionId, nextUserCount);
+  detectiveExchangeCounts.set(sessionId, nextDetectiveCount);
   const newDailyCount = dailyCount + 1;
   if (
     dailyUsageStore &&
@@ -910,6 +1189,8 @@ async function handleChatRequest(sessionId, trimmed, options) {
       },
     },
     envelope,
+    agentLabel: "*** DETECTIVE ***",
+    baselineActive: false,
   };
 
   body.debug = buildDebugBody(nextUserCount, newDailyCount);

@@ -40,6 +40,7 @@ const PROMPTS_DIR = resolvePromptsDir();
 const DETECTIVE_PERSONA_FILE = path.join(PROMPTS_DIR, "detective_persona.md");
 const LUMEN_PERSONA_FILE = path.join(PROMPTS_DIR, "lumen_persona.md");
 const UMBRA_PERSONA_FILE = path.join(PROMPTS_DIR, "umbra_persona.md");
+const ATTACHE_PERSONA_FILE = path.join(PROMPTS_DIR, "attache_persona.md");
 
 // Instruction markdown (agent-specific instructions)
 const DETECTIVE_INSTRUCTIONS_FILE = path.join(
@@ -53,6 +54,10 @@ const LUMEN_INSTRUCTIONS_FILE = path.join(
 const UMBRA_INSTRUCTIONS_FILE = path.join(
   PROMPTS_DIR,
   "umbra_instructions.md"
+);
+const ATTACHE_INSTRUCTIONS_FILE = path.join(
+  PROMPTS_DIR,
+  "attache_baseline_instructions.md"
 );
 
 // Closers / closing behavior
@@ -79,6 +84,10 @@ const LUMEN_TURN_SCHEMA_FILE = path.join(
 const UMBRA_TURN_SCHEMA_FILE = path.join(
   PROMPTS_DIR,
   "umbra_philosopher_turn.schema.json"
+);
+const ATTACHE_TURN_SCHEMA_FILE = path.join(
+  PROMPTS_DIR,
+  "attache_turn.schema.json"
 );
 
 // ---------------------------------------------------------------------------
@@ -112,8 +121,25 @@ function loadJsonFileOrNull(filePath) {
 const MODEL = process.env.OPENAI_MODEL || "gpt-4o";
 const SERVICE_TIER = process.env.OPENAI_SERVICE_TIER || null;
 const MAX_HISTORY_LENGTH = 6000; // characters; adjust as needed
-const MAX_USER_EXCHANGES = parseInt(process.env.MAX_USER_EXCHANGES, 10) || 5;
-const CLOSURE_TURN_THRESHOLD = Math.max(2, MAX_USER_EXCHANGES - 2);
+
+// Per-session turn budgets
+// - DETECTIVE_SESSION_EXCHANGES: how many detective-phase user exchanges before
+//   we trigger a final closing turn.
+// - ATTACHE_SESSION_EXCHANGES: how many Baseline (Attaché) exchanges are
+//   allowed before we automatically hand off to the detective.
+// - MAX_USER_EXCHANGES: a coarse upper bound on total user exchanges (across
+//   all modes) in a single session. By default this is the sum of the two
+//   per-mode budgets.
+const DETECTIVE_SESSION_EXCHANGES =
+  parseInt(process.env.DETECTIVE_SESSION_EXCHANGES, 10) || 5;
+const ATTACHE_SESSION_EXCHANGES =
+  parseInt(process.env.ATTACHE_SESSION_EXCHANGES, 10) || 36;
+const MAX_USER_EXCHANGES =
+  parseInt(process.env.MAX_USER_EXCHANGES, 10) ||
+  DETECTIVE_SESSION_EXCHANGES + ATTACHE_SESSION_EXCHANGES;
+
+// Closure threshold is based only on detective exchanges.
+const CLOSURE_TURN_THRESHOLD = Math.max(2, DETECTIVE_SESSION_EXCHANGES - 2);
 const MAX_DAILY_USAGE = parseInt(process.env.MAX_DAILY_USAGE, 10) || 100;
 const DEV = /^(1|true|yes)$/i.test(process.env.DEV || "");
 const OFFLINE = /^(1|true|yes)$/i.test(process.env.OFFLINE || "");
@@ -132,10 +158,12 @@ const requestOptions =
 const detectivePersona = loadTextFileOrEmpty(DETECTIVE_PERSONA_FILE);
 const lumenPersona = loadTextFileOrEmpty(LUMEN_PERSONA_FILE);
 const umbraPersona = loadTextFileOrEmpty(UMBRA_PERSONA_FILE);
+const attachePersona = loadTextFileOrEmpty(ATTACHE_PERSONA_FILE);
 
 const detectiveInstructions = loadTextFileOrEmpty(DETECTIVE_INSTRUCTIONS_FILE);
 const lumenInstructions = loadTextFileOrEmpty(LUMEN_INSTRUCTIONS_FILE);
 const umbraInstructions = loadTextFileOrEmpty(UMBRA_INSTRUCTIONS_FILE);
+const attacheInstructions = loadTextFileOrEmpty(ATTACHE_INSTRUCTIONS_FILE);
 
 const closingInstructions = loadTextFileOrEmpty(CLOSING_INSTRUCTIONS_FILE);
 
@@ -183,6 +211,15 @@ const agentPrompts = {
       .join("\n\n"),
     others: "",
   },
+
+  attache: {
+    self: [attachePersona, attacheInstructions].filter(Boolean).join("\n\n"),
+    others: [
+      "The Detective is the primary existential investigator who will work with the user after the Baseline.",
+      "The Lumen Philosopher is warm, metaphorical, and hopeful.",
+      "The Umbra Philosopher is sharp, cynical, and wounded.",
+    ].join(" \n"),
+  },
 };
 
 const agentSchemas = {
@@ -190,6 +227,7 @@ const agentSchemas = {
   lumen: loadJsonFileOrNull(LUMEN_TURN_SCHEMA_FILE),
   umbra: loadJsonFileOrNull(UMBRA_TURN_SCHEMA_FILE),
   final_detective: loadJsonFileOrNull(DETECTIVE_TURN_SCHEMA_FILE),
+   attache: loadJsonFileOrNull(ATTACHE_TURN_SCHEMA_FILE),
 };
 
 // ---------------------------------------------------------------------------
@@ -201,15 +239,19 @@ module.exports = {
   DETECTIVE_PERSONA_FILE,
   LUMEN_PERSONA_FILE,
   UMBRA_PERSONA_FILE,
+  ATTACHE_PERSONA_FILE,
   DETECTIVE_INSTRUCTIONS_FILE,
   LUMEN_INSTRUCTIONS_FILE,
   UMBRA_INSTRUCTIONS_FILE,
+  ATTACHE_INSTRUCTIONS_FILE,
   CLOSERS_FILE,
   CLOSING_INSTRUCTIONS_FILE,
   PHIL_ANNOTATIONS_FILE,
   MODEL,
   SERVICE_TIER,
   MAX_HISTORY_LENGTH,
+  DETECTIVE_SESSION_EXCHANGES,
+  ATTACHE_SESSION_EXCHANGES,
   MAX_USER_EXCHANGES,
   CLOSURE_TURN_THRESHOLD,
   MAX_DAILY_USAGE,

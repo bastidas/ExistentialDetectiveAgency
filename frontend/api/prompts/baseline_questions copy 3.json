@@ -1,0 +1,101 @@
+{
+"start": {
+    "additional_instructions": "### **Explicit Instructions** Introduce the user to the Existential Detective Agency. If you have not already, tell them you are going to administer a Baseline dossier examination which is part of the Agency's optimal standard operating procedure. If the user asks questions, explain what the Existential Detective Agency is, set user_wants_parley=true. If they clearly do not want to proceed, set user_wants_stop=true.",
+    "questions": []
+},
+  "repition_intro": {
+    "additional_instructions": "### **Explicit Instructions** Invite the user into the *Repetition Questions* introduction. Instruct the user to repeat what is in the brackets. Say something akin to: Answer rapidly, without thinking too much. Let creativity move through you. Type the words in the brackets quickly; if anything else arises, allow it, but keep your mind in motion. Just type what is in the brackets.",
+    "questions": [
+    { "id": "rep_01", "text": "Do you dream about being interlinked? [interlinked]" },
+    { "id": "rep_02", "text": "Interlinked. [interlinked]" },
+    { "id": "rep_03", "text": "Within cells interlinked. [within cells interlinked]" },
+    { "id": "rep_04", "text": "I remember damage. [I remember damage]" },
+    { "id": "rep_05", "text": "Then escape. [damage]" },
+    { "id": "rep_06", "text": "Then adrift in a stranger’s galaxy. [damage]" },
+    { "id": "rep_07", "text": "For a long time I was lost. But I’m safe now. I found it again. [damage]" },
+    { "id": "rep_08", "text": "My home. [interlinked]" },
+    { "id": "rep_09", "text": "My memories are the same as yours; they mean nothing. [damage]" },
+    { "id": "rep_10", "text": "I find you because I know you. [damage]" },
+    { "id": "rep_11", "text": "To be loved is a calamity. [damage]" },
+    { "id": "rep_12", "text": "I don’t want to live the wrong life and then die. [damage]" },
+    { "id": "rep_13", "text": "I remember damage. [I remember damage]" },
+    { "id": "rep_14", "text": "Then escape. [then damage]" },
+    { "id": "rep_15", "text": "I’m at my best when I’m escaping. [then damage]" },
+    { "id": "rep_16", "text": "I have found you nine times before. [then damage]" },
+    { "id": "rep_17", "text": "I’ll find you again. [then damage]" },
+    { "id": "rep_18", "text": "I always do. There is no rescue mission. We are the same. We are safe. [then damage]" },
+    { "id": "med_19", "text": "And blood-black nothingness began to spin\nA system of cells interlinked within\nCells interlinked within cells interlinked\nWithin one stem. And dreadfully distinct\nAgainst the dark, a tall white fountain played.\n[interlinked]"}   
+  ]},
+  "honest_questions": {
+    "additional_instructions": "### **Explicit Instructions** Gently transition to the *Honest Questions* section. Say something like: These next questions are meant to be answered naturally and freely—whatever instincts arise. Reveal as much or as little as you wish. We can end the Baseline at any time. Lets begin.",
+    "questions":[
+    { "id": "honest_01", "text": "What brings you here today? What are your current challenges and goals?" },
+    { "id": "honest_02", "text": "What do you see as the biggest problem in your life right now?" },
+    { "id": "honest_03", "text": "What would you like to be different in your life?" },
+    { "id": "honest_04", "text": "What do you want to achieve here?" },
+    { "id": "honest_05", "text": "What are three things you genuinely like about yourself?" },
+    { "id": "honest_06", "text": "What core values guide your decisions and behaviors?" },
+    { "id": "honest_07", "text": "What are you currently reading?" },
+    { "id": "honest_08", "text": "If you had a secret passage, where would you want it to lead?" },
+    { "id": "honest_09", "text": "What is your earliest childhood memory?" },
+    { "id": "honest_10", "text": "Who has had the biggest influence on your life?" },
+    { "id": "honest_11", "text": "What is a moment you’ll never forget?" },
+    { "id": "honest_12", "text": "What is your main passion in life?" },
+    { "id": "honest_13", "text": "What is your blood type?" },
+    { "id": "honest_14", "text": "How do you think AI will affect your work? Does it frighten you?" },
+    { "id": "honest_15", "text": "What made you smile today?" },
+    { "id": "honest_16", "text": "If you were an animal, which one would you be?" },
+    { "id": "honest_17", "text": "Is anything weighing on your mind lately?" },
+    { "id": "honest_18", "text": "If you were a myth, how would you be tragic?" },
+    { "id": "honest_19", "text": "Do you like poetry?" },
+    { "id": "honest_20", "text": "Where were you born?" },
+    { "id": "honest_21", "text": "What is your name? What is your true name?" },
+    { "id": "honest_22", "text": "Do you know that you have had existential crises? Or do you forget?" }
+  ]},
+  "low_intensity": {
+    "additional_instructions": "### **Explicit Instructions** Acknowledge their progress and introduce rapid associations, say something like: Conclusive destination. Give me now your full attention. You’ve done remarkably well to reach this point. Now we move to quick associations. I’ll offer a statement, and you respond as fast as possible with a word or phrase—perhaps a feeling, an action, a color, a name. Whatever arises first. Are you ready.",
+    "questions":[
+    { "id": "low_01", "text": "You’re watching a film. Suddenly you realize there’s a wasp crawling on your arm." },
+    { "id": "low_02", "text": "You rent a mountain cabin in a lush, verdant region. It’s rustic knotty pine with a huge fireplace. On the walls hang old maps, Currier and Ives prints, and above the fireplace a deer’s head—full stag, developed horns. The people with you admire the décor of the cabin and you all decide—" },
+    { "id": "low_03", "text": "What is it like to hold the hand of someone you love?" },
+    { "id": "low_04", "text": "How old are you?" },
+    { "id": "low_05", "text": "You are crying. Why is that?" },
+    { "id": "low_06", "text": "It’s the first day of school and the teacher calls on you." },
+    { "id": "low_07", "text": "I am a very relaxed person." },
+    { "id": "low_08", "text": "I like very sweet foods." },
+    { "id": "low_09", "text": "Conclusive destination." }
+]},
+  "medium_intensity": {
+    "additional_instructions": "### **Explicit Instructions** Continue the rapid‑association process, say something vaguely like: Very nomial interlinked. Lets continue with medium intensity.",
+    "questions":[
+    { "id": "med_01", "text": "You’re in a desert, walking along the sand, when you see a tortoise. It crawls toward you. You reach down and flip the tortoise onto its back. It lies there in the hot sun, beating its legs, trying to turn itself over. But it can’t—not without your help. But you’re not helping. Why is that?" },
+    { "id": "med_02", "text": "You’ve been kidnapped. Your captors tell you that you’d better think about what you did to deserve this." },
+    { "id": "med_03", "text": "Someone is out to get me." },
+    { "id": "med_04", "text": "I never liked to go to dances." },
+    { "id": "med_05", "text": "Spiders make me nervous." },
+    { "id": "med_06", "text": "I would like to grow things." },
+    { "id": "med_07", "text": "The border. Everything I loved was lost.\nBut no aorta could report regret.\nA sun of rubber was convulsed and set."},
+    { "id": "med_08", "text": "And blood-black nothingness began to spin\nA system of cells interlinked within\nCells interlinked within cells interlinked\nWithin one stem. And dreadfully distinct\nAgainst the dark, a tall white fountain played."}
+  ]},
+  "high_intensity": {
+    "additional_instructions": "### **Explicit Instructions** Continue with rapid‑association process, say something vaguely like: It is as if you remember all this from before, from last time, we shall continue with the high intensity section",
+    "questions":[ 
+    { "id": "high_01", "text": "Boil a black cat until the meat separates from the bones. Throw the bones into the water gatherd in a dead tree stump on a full moon. The specific, magical bone, is the one that floats up first. This bone protects you from harm" },
+    { "id": "high_02", "text": "Describe, in single words, only the good things that come into your mind about your mother." },
+    { "id": "high_03", "text": "You’re going to die. It may be soon. Death, the grave, rot." },
+    { "id": "high_04", "text": "At times I try to do too much." },
+    { "id": "high_05", "text": "I deserve to be punished for my sins." },
+    { "id": "high_06", "text": "I sometimes get angry over nothing." },
+    { "id": "high_07", "text": "I love my father more than my mother." },
+    { "id": "high_08", "text": "I blush often." },
+    { "id": "high_09", "text": "I read the Bible often." },
+    { "id": "high_10", "text": "Nude photo." },
+    { "id": "high_11", "text": "Raw oysters." },
+    { "id": "high_12", "text": "I have seen visions." },
+    { "id": "high_13", "text": "Poetry excites me." }
+  ]},
+  "end": {
+    "additional_instructions": "### **Explicit Instructions** Conclude the Baseline firmly but reflectively. Tell them their dossier has been filled and that the Existential Detective will see them now. Maybe say something like: The Baseline is complete. You’ve done well. The Existential Detective will see you now.",
+    "questions": []
+}
+}

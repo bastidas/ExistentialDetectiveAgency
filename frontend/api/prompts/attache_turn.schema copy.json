@@ -1,0 +1,106 @@
+{
+  "type": "object",
+  "properties": {
+    "attache_response": {
+      "type": "string",
+      "description": "Your reply in character as the Attaché of the Existential Detective Agency. This is what the user will see in the main chat column."
+    },
+    "baseline_conversation_state": {
+      "type": "object",
+      "description": "Finite state for the Baseline process, including phase flags and batched-question metadata.",
+      "properties": {
+        "repition_intro": {
+          "type": "boolean",
+          "description": "True when you are introducing and asking questions from the Repetition Intro section. This should be true at the very start of the Baseline."
+        },
+        "honest_questions": {
+          "type": "boolean",
+          "description": "True when you are asking Honest Questions."
+        },
+        "low_intensity": {
+          "type": "boolean",
+          "description": "True when you are asking Low Intensity questions."
+        },
+        "medium_intensity": {
+          "type": "boolean",
+          "description": "True when you are asking Medium Intensity questions."
+        },
+        "high_intensity": {
+          "type": "boolean",
+          "description": "True when you are asking High Intensity questions."
+        },
+        "end": {
+          "type": "boolean",
+          "description": "True when the Baseline is complete or should be stopped (for example, if the user declines to continue). When this is true, all other flags should be false."
+        },
+        "current_phase": {
+          "type": "string",
+          "description": "The current Baseline phase key. Normally one of: repition_intro, honest_questions, low_intensity, medium_intensity, high_intensity.",
+          "enum": [
+            "repition_intro",
+            "honest_questions",
+            "low_intensity",
+            "medium_intensity",
+            "high_intensity"
+          ]
+        },
+        "phase_stage": {
+          "type": "string",
+          "description": "Where in the phase lifecycle we are. phase_start = selecting a batch, asking = serving questions from the batch without new model calls, phase_end = reviewing answers and deciding next phase or end.",
+          "enum": ["phase_start", "asking", "phase_end"]
+        },
+        "current_batch_question_ids": {
+          "type": "array",
+          "description": "Ordered list of question IDs selected for the current phase batch.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "asked_count": {
+          "type": "integer",
+          "description": "How many questions from current_batch_question_ids have already been presented to the user in this phase.",
+          "minimum": 0
+        },
+        "answered_count": {
+          "type": "integer",
+          "description": "How many answers have been recorded for questions in the current batch.",
+          "minimum": 0
+        },
+        "answers_by_question_id": {
+          "type": "object",
+          "description": "Map from question ID to the user's most recent answer text for that question in this phase.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "phase_completed": {
+          "type": "boolean",
+          "description": "True when the current batch of questions for this phase has been fully asked and answered and is ready for Attaché review."
+        },
+        "user_requested_stop": {
+          "type": "boolean",
+          "description": "Set to true by the system when the user explicitly asks to stop or not continue the Baseline. The Attaché should prefer to set end to true when this is true."
+        },
+        "last_phase_micro_summary": {
+          "type": "string",
+          "description": "Optional short summary of the most recently completed phase or batch, written by the Attaché at phase_end."
+        },
+        "end_reason": {
+          "type": "string",
+          "description": "Optional reason for ending the Baseline, such as completed, user_requested_stop, safety, or budget."
+        }
+      },
+      "required": [
+        "repition_intro",
+        "honest_questions",
+        "low_intensity",
+        "medium_intensity",
+        "high_intensity",
+        "end"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": ["attache_response", "baseline_conversation_state"],
+  "additionalProperties": false
+}

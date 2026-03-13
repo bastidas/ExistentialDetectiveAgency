@@ -79,15 +79,23 @@
     };
   }
 
-  /** Normalize API response to structured payload { left: { userResponse, otherResponse, notes }, right: { ... } }.
-   *  Line breaks and segment styling (font/color) are applied when appending; see notes.philosopherRules and philosopherDisplay.config.js.
+  /** Normalize API response to payload { left: { response, notes }, right: { response, notes } }.
+   *  Combines user-facing and other-philosopher-facing responses into a single stream per side,
+   *  marking the other-philosopher response so it reads as a distinct marginal remark.
    */
   function toPhilosopherPayload(data) {
     function buildSidePayload(userKey, otherKey, notesKey) {
-      var userResponse = (data[userKey] != null ? String(data[userKey]) : "").trim();
-      var otherResponse = (data[otherKey] != null ? String(data[otherKey]) : "").trim();
+      var userText = (data[userKey] || "").trim();
+      var otherText = (data[otherKey] || "").trim();
+      var pieces = [];
+      if (userText) pieces.push(userText);
+      if (otherText) {
+        // Visually distinguish philosopher-to-philosopher remarks without changing layout.
+        pieces.push("[To the other philosopher] " + otherText);
+      }
+      var combined = pieces.join("\n\n");
       var notes = Array.isArray(data[notesKey]) ? data[notesKey] : [];
-      return { userResponse: userResponse, otherResponse: otherResponse, notes: notes };
+      return { response: combined, notes: notes };
     }
     return {
       left: buildSidePayload(
@@ -105,7 +113,7 @@
 
   /**
    * Apply philosopher response: optionally push to history and append to panels.
-   * @param payload - { left: { userResponse, otherResponse, notes }, right: { userResponse, otherResponse, notes } }
+   * @param payload - { left: { response, notes }, right: { response, notes } }
    * @param options - pushHistory (push both), or pushHistoryLeft/pushHistoryRight (per-side); appendLeft, appendRight
    */
   function applyPhilosopherResponse(payload, options) {
@@ -120,16 +128,16 @@
     if (pushRight) rightPhilosopherHistory.push(payload.right);
 
     var promises = [];
-    if (appendLeft && (payload.left.userResponse || payload.left.otherResponse || payload.left.notes.length)) {
+    if (appendLeft && (payload.left.response || payload.left.notes.length)) {
       promises.push(
-        EDARules.appendPhilosopherContent("left", payload.left).catch(function (err) {
+        EDARules.appendPhilosopherContent("left", payload.left.response, payload.left.notes).catch(function (err) {
           console.warn("[chatSend] philosopher left panel:", err);
         })
       );
     }
-    if (appendRight && (payload.right.userResponse || payload.right.otherResponse || payload.right.notes.length)) {
+    if (appendRight && (payload.right.response || payload.right.notes.length)) {
       promises.push(
-        EDARules.appendPhilosopherContent("right", payload.right).catch(function (err) {
+        EDARules.appendPhilosopherContent("right", payload.right.response, payload.right.notes).catch(function (err) {
           console.warn("[chatSend] philosopher right panel:", err);
         })
       );
@@ -320,6 +328,7 @@
       var baselineActive = !!data.baselineActive;
       global.EDARandomMarginItems.setMode(baselineActive ? "baseline" : "normal");
     }
+
     if (data.debug) {
       console.log(
         "[DEBUG] user exchanges:",
@@ -330,16 +339,6 @@
         data.debug.dailyUsage + "/" + data.debug.maxDailyUsage
       );
     }
-    var agentLabel = typeof data.agentLabel === "string" ? data.agentLabel : null;
-    // Persist the last seen agent label so future placeholder labels (typed before
-    // the next response arrives) can match the current mode (Attaché vs Detective).
-    if (agentLabel) {
-      global.EDAChatState = global.EDAChatState || {};
-      global.EDAChatState.agentLabel = agentLabel;
-    }
-    if (placeholderOpts && placeholderOpts.placeholderLabel && agentLabel) {
-      placeholderOpts.placeholderLabel.textContent = agentLabel;
-    }
     var philNormalized = normalizePhilosopherResponse(data);
     console.log("[DEBUG] Main chat response received; philosopher fields present:", hasPhilosopherContent(philNormalized));
 
@@ -348,56 +347,12 @@
     var leftHasContent = hasPhilosopherContentForSide(philNormalized, "left");
     var rightHasContent = hasPhilosopherContentForSide(philNormalized, "right");
     var marginItemSideHint = (leftHasContent && !rightHasContent) ? "left" : (rightHasContent && !leftHasContent) ? "right" : null;
-    var justCompletedBaseline =
-      !data.baselineActive &&
-      agentLabel === "*** ATTACHÉ ***" &&
-      data.envelope &&
-      data.envelope.mode === "normal";
-
-    function runDetectiveIntroThenReady() {
-      global.EDAChatState = global.EDAChatState || {};
-      if (global.EDAChatState.detectiveIntroShownAfterBaseline) {
-        if (EDAMessageUI.runReadyForNextInput) {
-          EDAMessageUI.runReadyForNextInput();
-        }
-        return;
-      }
-      global.EDAChatState.detectiveIntroShownAfterBaseline = true;
-
-      if (typeof fetch === "undefined") {
-        if (EDAMessageUI.runReadyForNextInput) EDAMessageUI.runReadyForNextInput();
-        return;
-      }
-
-      fetch("/api/initial-intros", { credentials: "same-origin" })
-        .then(function (res) { return res && res.ok ? res.json() : null; })
-        .then(function (data2) {
-          var detectiveIntro = data2 && typeof data2.detectiveIntro === "string" ? data2.detectiveIntro.trim() : "";
-          if (!detectiveIntro) {
-            if (EDAMessageUI.runReadyForNextInput) EDAMessageUI.runReadyForNextInput();
-            return;
-          }
-          var detectiveLabel = "*** DETECTIVE ***";
-          EDAMessageUI.addMessage("assistant", detectiveIntro, editorRef, {
-            agentLabel: detectiveLabel,
-            onAssistantDone: function () {
-              if (EDAMessageUI.runReadyForNextInput) EDAMessageUI.runReadyForNextInput();
-            },
-          });
-        })
-        .catch(function () {
-          if (EDAMessageUI.runReadyForNextInput) EDAMessageUI.runReadyForNextInput();
-        });
-    }
-
     var onAssistantDone = function () {
       if (global.EDAClosingStamps && typeof global.EDAClosingStamps.maybeShowStamps === "function") {
         if (stampOpts.limitReached) global.EDAClosingStamps.maybeShowStamps({ limitReached: true });
         else if (stampOpts.debug) global.EDAClosingStamps.maybeShowStamps({ debug: true });
       }
-      if (justCompletedBaseline) {
-        runDetectiveIntroThenReady();
-      } else if (EDAMessageUI.runReadyForNextInput) {
+      if (EDAMessageUI.runReadyForNextInput) {
         EDAMessageUI.runReadyForNextInput();
       }
     };
@@ -414,10 +369,7 @@
         onAssistantDone();
       }
     } else {
-      EDAMessageUI.addMessage("assistant", data.reply || "(No reply)", editorRef, {
-        onAssistantDone: onAssistantDone,
-        agentLabel: agentLabel,
-      });
+      EDAMessageUI.addMessage("assistant", data.reply || "(No reply)", editorRef, { onAssistantDone: onAssistantDone });
     }
     handlePhilosopherContent(data);
 
@@ -547,6 +499,12 @@
     function runFetch() {
       console.log("[DEBUG] Sending main chat request", messageToSend ? "(message length: " + messageToSend.length + ")" : "");
       var payload = { message: messageToSend };
+      if (typeof global.NoteFormatConfig !== "undefined" && global.NoteFormatConfig.getContentWidthCharsForHint) {
+        var contentWidthChars = global.NoteFormatConfig.getContentWidthCharsForHint();
+        if (typeof contentWidthChars === "number" && contentWidthChars > 0) {
+          payload.contentWidthChars = contentWidthChars;
+        }
+      }
       // Prefer streaming endpoint in local dev; fall back to JSON /api/chat
       // if streaming is unavailable (404 or missing ReadableStream).
 
@@ -589,7 +547,7 @@
               return;
             }
             var opts = placeholder && placeholder.contentEl
-              ? { placeholderContent: placeholder.contentEl, placeholderLabel: placeholder.labelEl }
+              ? { placeholderContent: placeholder.contentEl }
               : undefined;
             handleChatResponse(data, editorRef, opts);
           });
@@ -684,7 +642,7 @@
                 return;
               }
               var opts = placeholder && placeholder.contentEl
-                ? { placeholderContent: placeholder.contentEl, placeholderLabel: placeholder.labelEl, skipAssistantContent: true }
+                ? { placeholderContent: placeholder.contentEl, skipAssistantContent: true }
                 : { skipAssistantContent: true };
               handleChatResponse(body, editorRef, opts);
             });

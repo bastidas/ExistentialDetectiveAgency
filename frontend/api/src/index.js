@@ -55,6 +55,37 @@ app.http("debug", {
 	},
 });
 
+app.http("initialIntros", {
+	route: "initial-intros",
+	methods: ["GET"],
+	authLevel: "anonymous",
+	handler: async (request) => {
+		const sessionId = shared.getOrCreateSessionId(request);
+		let attacheIntro = "";
+		let detectiveIntro = "";
+		try {
+			if (typeof shared.chooseInitialIntros === "function") {
+				const intros = shared.chooseInitialIntros();
+				if (intros && typeof intros === "object") {
+					if (typeof intros.attacheIntro === "string") {
+						attacheIntro = intros.attacheIntro;
+					}
+					if (typeof intros.detectiveIntro === "string") {
+						detectiveIntro = intros.detectiveIntro;
+					}
+				}
+			}
+		} catch (_) {}
+		return {
+			status: 200,
+			jsonBody: { attacheIntro, detectiveIntro },
+			headers: {
+				"Set-Cookie": shared.sessionCookieHeader(sessionId),
+			},
+		};
+	},
+});
+
 app.http("chat", {
 	route: "chat",
 	methods: ["POST"],

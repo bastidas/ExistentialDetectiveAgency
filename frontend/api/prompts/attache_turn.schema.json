@@ -1,0 +1,40 @@
+{
+  "type": "object",
+  "properties": {
+    "attache_response": {
+      "type": "string",
+      "description": "Your reply in character as the Attaché of the Existential Detective Agency. This is what the user will see in the main chat column."
+    },
+    "baseline_conversation_state": {
+      "type": "object",
+      "description": "Finite state flags for the Baseline process. Exactly one of these booleans should be true at any given time.",
+      "properties": {
+        "repition_intro": {
+          "type": "boolean",
+          "description": "True when you are introducing and asking questions from the Repetition Intro section. This should be true at the very start of the Baseline."
+        },
+        "honest_questions": {
+          "type": "boolean",
+          "description": "True when you are asking Honest Questions."
+        },
+        "high_intensity": {
+          "type": "boolean",
+          "description": "True when you are asking High Intensity questions."
+        },
+        "end": {
+          "type": "boolean",
+          "description": "True when the Baseline is complete or should be stopped (for example, if the user declines to continue). When this is true, all other flags should be false."
+        }
+      },
+      "required": [
+        "repition_intro",
+        "honest_questions",
+        "high_intensity",
+        "end"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": ["attache_response", "baseline_conversation_state"],
+  "additionalProperties": false
+}

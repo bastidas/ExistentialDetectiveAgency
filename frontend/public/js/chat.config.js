@@ -82,7 +82,7 @@
     root.style.setProperty("--chat-line-transition", CHAT_STYLE.lineTransition);
   }
 
-  var AGENT_CHAT_LABEL = "*** DETECTIVE ***";
+  var AGENT_CHAT_LABEL = "*** ATTACHÉ ***";
 
   global.EDAChatConfig = {
     CHAT_STYLE: CHAT_STYLE,

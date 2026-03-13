@@ -28,7 +28,7 @@
     anchorVerticalJitterPx: 40,
     stackVerticalJitterPct: 5,
     horizBandPct: 50,
-    horizVariationPct: 90,
+    horizVariationPct: 40,
   };
 
   var state = {

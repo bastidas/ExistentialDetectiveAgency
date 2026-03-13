@@ -78,6 +78,22 @@ app.get("/api/debug", (req, res) => {
   });
 });
 
+app.get("/api/initial-intros", (req, res) => {
+  try {
+    if (!shared.chooseInitialIntros) {
+      return res.json({ attacheIntro: "", detectiveIntro: "" });
+    }
+    const intros = shared.chooseInitialIntros();
+    res.json({
+      attacheIntro: typeof intros.attacheIntro === "string" ? intros.attacheIntro : "",
+      detectiveIntro: typeof intros.detectiveIntro === "string" ? intros.detectiveIntro : "",
+    });
+  } catch (err) {
+    console.error("/api/initial-intros error:", err && err.message);
+    res.status(500).json({ attacheIntro: "", detectiveIntro: "" });
+  }
+});
+
 app.post("/api/chat", async (req, res) => {
   const sessionId = getOrCreateSessionId(req, res);
   const message = req.body?.message;
