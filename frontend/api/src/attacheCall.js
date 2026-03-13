@@ -22,20 +22,19 @@ try {
 
 const config = require("./config");
 
+const ATTACHE_PROMPTS_DIR = path.join(config.PROMPTS_DIR, "attache");
+
 const ATTACHE_PERSONA_FILE = path.join(
-  __dirname,
-  "testOrchestration",
+  ATTACHE_PROMPTS_DIR,
   "attache_persona.md"
 );
 const ATTACHE_INSTRUCTIONS_FILE = path.join(
-  __dirname,
-  "testOrchestration",
+  ATTACHE_PROMPTS_DIR,
   "attache_instructions.md"
 );
 
 const ATTACHE_SCHEMA_FILE = path.join(
-  __dirname,
-  "testOrchestration",
+  ATTACHE_PROMPTS_DIR,
   "attache_turn.schema.json"
 );
 
@@ -72,6 +71,22 @@ const ATTACHE_TURN_SCHEMA = loadJsonFile(ATTACHE_SCHEMA_FILE) || {
   additionalProperties: false,
 };
 
+// Prompt section labels and template fragments for clarity and reuse.
+const TURN_INSTRUCTIONS_HEADER = "# Instructions for this turn:";
+const TURN_QUESTION_PREFIX = "# Question to present to the user (if any): ";
+const TURN_IS_PHASE_START_PREFIX = "# Is this the first question of this phase? ";
+const TURN_NEXT_PHASE_PREFIX =
+  "# If the user is about to transition (e.g. \"ready for baseline\", \"end session\"), use these next-phase instructions for your reply: ";
+
+const OFFLINE_ATTACHE_STUB_RESPONSE = "[OFFLINE] Attaché stub.";
+
+const LOG_HEADER_INPUT_STATE = "--- Input state at this turn ---";
+const LOG_FOOTER_INPUT_STATE = "---------------------";
+const LOG_HEADER_SYSTEM_MESSAGE = "--- System / developer role message (full) ---";
+const LOG_FOOTER_SYSTEM_MESSAGE = "--- End system message ---";
+const LOG_HEADER_LLM_RETURN = "--- LLM return ---";
+const LOG_FOOTER_LLM_RETURN = "--- End LLM return ---";
+
 /** ANSI colors for TTY; empty strings when not a TTY (e.g. piped) so logs stay plain. */
 const ansi = process.stdout.isTTY
   ? {
@@ -94,7 +109,7 @@ const ansi = process.stdout.isTTY
 function formatInputStateAtTurn(input) {
   const n = input.chat_history?.length ?? 0;
   const lines = [
-    `${ansi.dim}${ansi.cyan}--- Input state at this turn ---${ansi.reset}`,
+    `${ansi.dim}${ansi.cyan}${LOG_HEADER_INPUT_STATE}${ansi.reset}`,
     `${ansi.yellow}question_at_hand${ansi.reset}: ${JSON.stringify(input.question_at_hand ?? null)}`,
     `${ansi.yellow}phase_instructions${ansi.reset}: ${JSON.stringify(input.phase_instructions)}`,
     `${ansi.yellow}is_phase_start${ansi.reset}: ${input.is_phase_start}`,
@@ -104,7 +119,7 @@ function formatInputStateAtTurn(input) {
   if (input.turn_instruction != null) {
     lines.splice(lines.length - 1, 0, `${ansi.yellow}turn_instruction${ansi.reset}: ${JSON.stringify(input.turn_instruction)}`);
   }
-  lines.push(`${ansi.dim}${ansi.cyan}---------------------${ansi.reset}`);
+  lines.push(`${ansi.dim}${ansi.cyan}${LOG_FOOTER_INPUT_STATE}${ansi.reset}`);
   return lines.join("\n");
 }
 
@@ -123,22 +138,24 @@ function createAttacheCall(openai, { userMessage }) {
     const instructionForTurn = input.turn_instruction ?? input.phase_instructions;
     const hasFullTurnInstruction = input.turn_instruction != null;
     const turnInstructionsBlock = hasFullTurnInstruction
-      ? ["Instructions for this turn:", "", instructionForTurn].join("\n")
+      ? [TURN_INSTRUCTIONS_HEADER, "", instructionForTurn].join("\n")
       : [
-          "Instructions for this turn:",
+          TURN_INSTRUCTIONS_HEADER,
           instructionForTurn,
           "",
-          `# Question to present to the user (if any): ${input.question_at_hand ?? "(none)"}`,
-          `# Is this the first question of this phase? ${input.is_phase_start}`,
+          `${TURN_QUESTION_PREFIX}${input.question_at_hand ?? "(none)"}`,
+          `${TURN_IS_PHASE_START_PREFIX}${input.is_phase_start}`,
           "",
-          `# If the user is about to transition (e.g. "ready for baseline", "end session"), use these next-phase instructions for your reply: ${input.next_phase_instructions ?? "(none)"}`,
+          `${TURN_NEXT_PHASE_PREFIX}${input.next_phase_instructions ?? "(none)"}`,
         ].join("\n");
 
 
     const parts = [attachePersona, attacheInstructions, turnInstructionsBlock].filter(Boolean);
     const systemContent = parts.join("\n\n");
 
-    console.log(`${ansi.dim}${ansi.cyan}--- System / developer role message (full) ---${ansi.reset}\n${systemContent}\n${ansi.dim}${ansi.cyan}--- End system message ---${ansi.reset}`);
+    console.log(
+      `${ansi.dim}${ansi.cyan}${LOG_HEADER_SYSTEM_MESSAGE}${ansi.reset}\n${systemContent}\n${ansi.dim}${ansi.cyan}${LOG_FOOTER_SYSTEM_MESSAGE}${ansi.reset}`
+    );
 
     const historyBlock = Array.isArray(input.chat_history) && input.chat_history.length > 0
       ? input.chat_history.map((m) => `${m.role}: ${m.content}`).join("\n")
@@ -167,7 +184,7 @@ function createAttacheCall(openai, { userMessage }) {
     if (config.OFFLINE) {
       console.warn("[attacheCall] OFFLINE=1 (or true/yes) in env; returning stub instead of calling OpenAI.");
       return {
-        user_response: "[OFFLINE] Attaché stub.",
+        user_response: OFFLINE_ATTACHE_STUB_RESPONSE,
         user_intends_explore: false,
         user_intends_close: false,
       };
@@ -195,11 +212,11 @@ function createAttacheCall(openai, { userMessage }) {
       } catch (_) {}
     }
     console.log(
-      `${ansi.dim}${ansi.cyan}--- LLM return ---${ansi.reset}\n` +
+      `${ansi.dim}${ansi.cyan}${LOG_HEADER_LLM_RETURN}${ansi.reset}\n` +
         `${ansi.green}${ansi.bold}user_response${ansi.reset}: ${ansi.magenta}${JSON.stringify(out.user_response)}${ansi.reset}\n` +
         `${ansi.green}user_intends_explore${ansi.reset}: ${out.user_intends_explore}\n` +
         `${ansi.green}user_intends_close${ansi.reset}: ${out.user_intends_close}\n` +
-        `${ansi.dim}${ansi.cyan}--- End LLM return ---${ansi.reset}`
+        `${ansi.dim}${ansi.cyan}${LOG_FOOTER_LLM_RETURN}${ansi.reset}`
     );
     return out;
   };

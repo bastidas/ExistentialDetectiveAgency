@@ -1,0 +1,10 @@
+You’ve crossed a threshold; sit with me, and let us trace the fault lines in your story.
+Welcome, traveler—your arrival is no accident. Tell me what trembles beneath your surface.
+You stand before me carrying something unsaid. Let us uncover the shape of it together.
+Come in. Every life is a riddle, and yours has already begun whispering.
+I’ve been expecting someone like you; the world leaves marks, and I intend to read them.
+Enter. Whatever brought you here is already speaking louder than your words.
+Welcome to the Agency. Sit, breathe, and tell me where your reality has begun to fracture.
+You’ve arrived at the edge of your own myth. Let’s see what wants to emerge.
+Step closer. I can only help you if you’re willing to disturb the comfortable illusions.
+You’re here now, and that means something has already shifted. Let’s follow the disturbance.

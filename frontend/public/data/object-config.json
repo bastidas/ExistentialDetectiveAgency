@@ -1,60 +1,116 @@
 {
   "mglass.webp": {
-        "scale": 1.6,
-        "rotation_range": 50,
-        "bounding_x_frac": 0.6,
-        "bounding_y_frac": 0.8,
-        "type": "special"
+    "scale": 1.6,
+    "rotation_range": 50,
+    "bounding_x_frac": 0.6,
+    "bounding_y_frac": 0.8,
+    "type": "special"
   },
-      "statuette.webp": {
-        "scale": 0.8,
-        "rotation_range": 50,
-        "bounding_x_frac": 0.55,
-        "bounding_y_frac": 0.87,
-        "type": "misc"
-      },
-      "key_above.webp": {
-        "scale": 0.43,
-        "rotation_range": 100,
-        "bounding_x_frac": 0.6,
-        "bounding_y_frac": 0.8,
-        "type": "misc"
-      },
-      "ace.webp": {
-        "width": 240,
-        "height": 280,
-        "scale": 1.0,
-        "rotation_range": 20,
-        "bounding_x_frac": 0.8,
-        "bounding_y_frac": 0.8,
-        "type": "misc"
-      },
-      "camera.webp": {
-        "scale": 1.6,
-        "rotation_range": 39,
-        "bounding_x_frac": 0.85,
-        "bounding_y_frac": 0.6,
-        "type": "misc"
-      },
-      "chess_piece.webp": {
-        "scale": 0.5,
-        "rotation_range": 125,
-        "bounding_x_frac": 0.54,
-        "bounding_y_frac": 0.8,
-        "type": "misc"
-      },
-      "dice.webp": {
-        "scale": 0.6,
-        "rotation_range": 230,
-        "bounding_x_frac": 0.7,
-        "bounding_y_frac": 0.7,
-        "type": "misc"
-      },
-      "tarot.webp": {
-        "scale": 1.46,
-        "rotation_range": 20,
-        "bounding_x_frac": 0.8,
-        "bounding_y_frac": 0.8,
-        "type": "misc"
-      }
-    }
+  "statuette.webp": {
+    "scale": 0.8,
+    "rotation_range": 50,
+    "bounding_x_frac": 0.55,
+    "bounding_y_frac": 0.87,
+    "type": "misc"
+  },
+  "key_above.webp": {
+    "scale": 0.43,
+    "rotation_range": 100,
+    "bounding_x_frac": 0.6,
+    "bounding_y_frac": 0.8,
+    "type": "misc"
+  },
+  "ace.webp": {
+    "width": 240,
+    "height": 280,
+    "scale": 1.0,
+    "rotation_range": 20,
+    "bounding_x_frac": 0.8,
+    "bounding_y_frac": 0.8,
+    "type": "misc"
+  },
+  "camera.webp": {
+    "scale": 1.6,
+    "rotation_range": 39,
+    "bounding_x_frac": 0.85,
+    "bounding_y_frac": 0.6,
+    "type": "misc"
+  },
+  "chess_piece.webp": {
+    "scale": 0.5,
+    "rotation_range": 125,
+    "bounding_x_frac": 0.54,
+    "bounding_y_frac": 0.8,
+    "type": "misc"
+  },
+  "dice.webp": {
+    "scale": 0.6,
+    "rotation_range": 230,
+    "bounding_x_frac": 0.7,
+    "bounding_y_frac": 0.7,
+    "type": "misc"
+  },
+  "tarot.webp": {
+    "scale": 1.46,
+    "rotation_range": 20,
+    "bounding_x_frac": 0.8,
+    "bounding_y_frac": 0.8,
+    "type": "misc"
+  },
+  "voigt_kampf1.webp": {
+    "scale": 1.5,
+    "rotation_range": 28,
+    "bounding_x_frac": 0.8,
+    "bounding_y_frac": 1.0,
+    "type": "baseline",
+    "base_path": "assets/imgs/baseline/"
+  },
+  "voigt_kampf2.webp": {
+    "scale": 1.5,
+    "rotation_range": 28,
+    "bounding_x_frac": 0.8,
+    "bounding_y_frac": 1.0,
+    "type": "baseline",
+    "base_path": "assets/imgs/baseline/"
+  },
+  "voigt_kampf3.webp": {
+    "scale": 1.5,
+    "rotation_range": 28,
+    "bounding_x_frac": 0.8,
+    "bounding_y_frac": 1.0,
+    "type": "baseline",
+    "base_path": "assets/imgs/baseline/"
+  },
+  "voigt_kampf4.webp": {
+    "scale": 1.5,
+    "rotation_range": 28,
+    "bounding_x_frac": 0.8,
+    "bounding_y_frac": 1.0,
+    "type": "baseline",
+    "base_path": "assets/imgs/baseline/"
+  },
+  "voigt_kampf5.webp": {
+    "scale": 1.5,
+    "rotation_range": 28,
+    "bounding_x_frac": 0.8,
+    "bounding_y_frac": 1.0,
+    "type": "baseline",
+    "base_path": "assets/imgs/baseline/"
+  },
+  "voigt_kampf6.webp": {
+    "scale": 1.5,
+    "rotation_range": 28,
+    "bounding_x_frac": 0.8,
+    "bounding_y_frac": 1.0,
+    "type": "baseline",
+    "base_path": "assets/imgs/baseline/"
+  },
+  "voigt_kampf7.webp": {
+    "scale": 1.5,
+    "rotation_range": 28,
+    "bounding_x_frac": 0.9,
+    "bounding_y_frac": 1.0,
+    "type": "baseline",
+    "base_path": "assets/imgs/baseline/"
+  }
+}

@@ -28,9 +28,13 @@ try {
 }
 
 const { createAttacheCall } = require("./attacheCall");
+const config = require("./config");
 
 /** When true, processTurn calls OpenAI via createAttacheCall (requires OPENAI_API_KEY). */
 const LIVE_LLM_CALLS = true;
+const N_MIN_QUESTIONS = 2;
+const N_MAX_QUESTIONS = 3;
+const RANDOM_Q_ORDER = true;
 
 const apiKey = process.env.OPENAI_API_KEY;
 const openaiClient = LIVE_LLM_CALLS && apiKey ? new (require("openai"))({ apiKey }) : null;
@@ -44,7 +48,15 @@ if (LIVE_LLM_CALLS && !openaiClient) {
 const VALID_PHASES = ["start", "explore", "administerBaseline1", "administerBaseline2", "administerBaseline3", "close"];
 const BASELINE_PHASES = ["administerBaseline1", "administerBaseline2", "administerBaseline3"];
 
-const ATTACHE_QUESTIONS_FILE = path.join(__dirname, "testOrchestration", "attache_questions.json");
+const ATTACHE_PROMPTS_DIR = path.join(config.PROMPTS_DIR, "attache");
+const ATTACHE_QUESTIONS_FILE = path.join(ATTACHE_PROMPTS_DIR, "attache_questions.json");
+const ATTACHE_INTRO_FILE = path.join(ATTACHE_PROMPTS_DIR, "attache_opening_lines.md");
+const ATTACHE_FINAL_FILE = path.join(ATTACHE_PROMPTS_DIR, "attache_final_lines.md");
+
+// Minimum attaché turns before user_intends_close is allowed to fully end the session.
+// Turn 0 and 1 are "getting acquainted"; close intents there should not end the session.
+const MIN_TURNS_BEFORE_FINAL_CLOSE = 2;
+
 let attacheQuestionsByPhase = {};
 try {
   if (fs.existsSync(ATTACHE_QUESTIONS_FILE)) {
@@ -52,10 +64,45 @@ try {
   }
 } catch (_) {}
 
-const N_MIN_QUESTIONS = 2;
-const N_MAX_QUESTIONS = 3;
+function loadIntroLines() {
+  try {
+    if (fs.existsSync(ATTACHE_INTRO_FILE)) {
+      const raw = fs.readFileSync(ATTACHE_INTRO_FILE, "utf8");
+      const lines = raw
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      return lines.length ? lines : [];
+    }
+  } catch (_) {}
+  return [];
+}
 
-const RANDOM_Q_ORDER = false;
+function getRandomIntroLine() {
+  const lines = loadIntroLines();
+  if (!lines.length) return null;
+  return lines[Math.floor(Math.random() * lines.length)];
+}
+
+function loadFinalLines() {
+  try {
+    if (fs.existsSync(ATTACHE_FINAL_FILE)) {
+      const raw = fs.readFileSync(ATTACHE_FINAL_FILE, "utf8");
+      const lines = raw
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      return lines.length ? lines : [];
+    }
+  } catch (_) {}
+  return [];
+}
+
+function getRandomFinalLine() {
+  const lines = loadFinalLines();
+  if (!lines.length) return null;
+  return lines[Math.floor(Math.random() * lines.length)];
+}
 
 /**
  * Sample n questions from bank (n random in [N_MIN_QUESTIONS, N_MAX_QUESTIONS], capped by bank length).
@@ -80,6 +127,8 @@ function createInitialState(options = {}) {
   return {
     phase: options.phase ?? "start",
     chat_history: options.chat_history ?? [],
+    // Turn index: number of attaché turns completed so far (0-based).
+    turn_index: options.turn_index ?? 0,
     question_index: options.question_index ?? 0,
     phase1_bank: phase1Bank,
     phase2_bank: phase2Bank,
@@ -94,6 +143,7 @@ function createInitialState(options = {}) {
     phase1_index: options.phase1_index ?? 0,
     phase2_index: options.phase2_index ?? 0,
     phase3_index: options.phase3_index ?? 0,
+    consecutive_close_intents: options.consecutive_close_intents ?? 0,
   };
 }
 
@@ -123,7 +173,30 @@ function getPhaseLabel(phaseName) {
 }
 
 const PRESENT_QUESTION_UNLESS =
-  " unless they are strongly indicating they would like to stop the entire baseline or strongly indicating they have questions about what is going on.";
+  " unless they are indicating they would like to stop baseline, indicating they have questions about what is going on, or asking to see the detective.";
+
+// // Core instruction text fragments kept as named constants for reuse and clarity.
+
+const START_PHASE_INSTRUCTION_PREFIX =
+  "Greet briefly. Make up something about what the Existential Detective Agency could possibly maybe be, or what it could do for the user. Explain that you will call them querent, you who asks questions, like all of us. Tell them you don't know as much about the The Existential Detective agency as you would like, your just the attaché after all. The Detective will be with them soon. All you do is administer the baseline and file the dossier. In closing, ask whether they want to proceed right into to the baseline (and they *really* should), explore, or wait to see if the detective is ready. ";
+const START_PHASE_INSTRUCTION_SUFFIX =
+  "Otherwise respond according to their choice and set the intent flags.";
+
+const START_BASELINE_INTSRUCTION_PREFIX = "The user is just getting aquanited to the agency so if they have questions, address those first. If the user is hesitating or seems to want to explore, respond to that and set the intent flags so they can explore. If they seem ready to proceed with the baseline, give them a brief intro to what the baseline is and then present the first question. If they want to see the detective instead, set the intent flag for that. Here is the first baseline instruction: ";
+
+
+const EXPLORE_INSTRUCTION_BASE =
+  "They are exploring (they paused the baseline). Answer their questions.";
+const EXPLORE_INSTRUCTION_FOOTER =
+  " Do not actually resume the baseline or present the full next baseline question until they clearly indicate they want to continue. Set intent flags so the system does not advance the question index until they choose.";
+
+const CLOSING_INSTRUCTION_FROM_PHASE3 =
+  "They have completed Phase 3 of the baseline. Tell the user that the baseline is over and that their responses are nominal enough to continue; for example: \"The baseline is over. It is nominal enough to continue, it appears.\" Make it clear there are no further baseline questions to answer.";
+
+const CLOSE_GENERIC_PREFIX =
+  "Respond appropriately that you understand they want to end the baseline, they are frustrated, or want to see the detective. If applicable ask for confirmation to end this intake process, tell them the Detective is ready now.";
+const CLOSE_GENERIC_SUFFIX =
+  "If they want to explore (e.g. \"I have a question\"), set user_intends_explore; when they say continue they will return to that phase and question.";
 
 /**
  * Returns the full instruction string for this turn. Always returns a string (never null).
@@ -142,67 +215,48 @@ function buildTurnInstruction(phase, question_at_hand, is_phase_start, phase_ins
 
   if (phase === "start") {
     const firstQ = q ?? "(first question of Phase 1)";
+    const phase1Intro = getPhaseIntroSentence("administerBaseline1");
     return (
-      "Greet briefly and ask whether the user wants to proceed to the baseline, explore, or close. " +
-      `If they say they want the baseline (or similar), reply in one go with the Phase 1 intro and this first question: \`${firstQ}\`. ` +
-      "Otherwise respond according to their choice and set the intent flags."
+      START_PHASE_INSTRUCTION_PREFIX +
+      `If they say they want the baseline (or similar), reply in one go first with this Phase 1 intro sentence: ${phase1Intro} Then print two newlines, and then say exactly this first question: \`${firstQ}\`. ` +
+      START_PHASE_INSTRUCTION_SUFFIX
     );
   }
 
   if (phase === "explore") {
     const resumePhase = state.baseline_phase_when_exploring;
     const resumeLabel = getPhaseLabel(resumePhase);
-    const resumeQ = q ? ` with this question: \`${q}\`` : "";
+    const resumeQ = q ? ` The potential next baseline question is: \`${q}\`.` : "";
     const resumeLine = resumePhase
-      ? ` When they say they're ready to continue, they will resume at ${resumeLabel}${resumeQ}—reply accordingly (e.g. "Here we are again—[question]" or, if starting Phase 1, state the Phase 1 intro then the question).`
-      : " When they say they're ready to continue, you will start Phase 1 with the first question—state the Phase 1 intro and that question.";
+      ? ` When they seem ready to continue, acknowledge this and let them know you can resume at ${resumeLabel}.${resumeQ}`
+      : ` When they seem ready to continue with the baseline, acknowledge this and let them know you can begin Phase 1.${resumeQ}`;
     const closeLine =
       nextPhaseName === "close"
         ? " When they indicate they want to end, set user_intends_close; when they confirm, deliver the closing line."
         : "";
-    return (
-      "They are exploring (they paused the baseline). Answer their questions." +
-      resumeLine +
-      closeLine +
-      " Set intent flags so the system does not advance the question index until they choose."
-    );
+    return EXPLORE_INSTRUCTION_BASE + resumeLine + closeLine + EXPLORE_INSTRUCTION_FOOTER;
   }
 
   if (phase === "close") {
     const returnPhase = state.phase_before_close;
     const returnLabel = getPhaseLabel(returnPhase);
-    const returnQ = state.question_at_hand_before_close
-      ? ` with the same question: \`${state.question_at_hand_before_close}\``
-      : "";
+    const fromPhase3 = returnPhase === "administerBaseline3";
+    if (fromPhase3) {
+      return CLOSING_INSTRUCTION_FROM_PHASE3;
+    }
     return (
-      "Ask for confirmation to end the session. If they confirm, deliver the closing line. " +
-      `If they do not confirm or want to go back, set the intent so they return to ${returnLabel}${returnQ}. ` +
-      "If they want to explore (e.g. \"I have a question\"), set user_intends_explore; when they say continue they will return to that phase and question."
+      CLOSE_GENERIC_PREFIX +
+      `If they do not confirm or want to go back, set the intent so they return to ${returnLabel} and continue with the next baseline question in that phase. ` +
+      CLOSE_GENERIC_SUFFIX
     );
   }
 
   if (phase === "administerBaseline1" || phase === "administerBaseline2" || phase === "administerBaseline3") {
     if (!q) return phase_instructions;
     const intro = getPhaseIntroSentence(phase);
-    let base =
-      is_phase_start
-        ? `State in one sentence: ${intro} Then say exactly this question to the user: \`${q}\`${PRESENT_QUESTION_UNLESS}`
-        : `State this exact question to the user \`${q}\`${PRESENT_QUESTION_UNLESS}`;
-    if (nextPhaseName && next_phase_instructions) {
-      const nextLabel = getPhaseLabel(nextPhaseName);
-      if (nextPhaseName === "close") {
-        base += " If they indicate they want to move on or end the session, deliver the closing line for your reply.";
-      } else {
-        const nextFirstQ =
-          nextPhaseName === "administerBaseline1"
-            ? state.phase1_questions?.[0]
-            : nextPhaseName === "administerBaseline2"
-              ? state.phase2_questions?.[0]
-              : state.phase3_questions?.[0];
-        const nextIntro = getPhaseIntroSentence(nextPhaseName);
-        base += ` If they indicate they want to move on or end the session, use the following for your reply: ${nextLabel} intro (${nextIntro}) and first question: \`${nextFirstQ ?? "…"}\`.`;
-      }
-    }
+    let base = is_phase_start
+      ? `${START_BASELINE_INTSRUCTION_PREFIX} State in one sentence: ${intro} Then print two new lines and say exactly this question to the user: \`${q}\`${PRESENT_QUESTION_UNLESS}`
+      : `State this exact question to the user \`${q}\`${PRESENT_QUESTION_UNLESS}`;
     return base;
   }
 
@@ -284,6 +338,7 @@ function getNextPhaseInstructions(state) {
 async function processTurn(userMessage, state, callAttache) {
   const history = [...(state.chat_history || [])];
   const phase = state.phase;
+  const turnIndex = state.turn_index ?? 0;
   const nextPhaseName = getNextPhaseInstructions(state);
   const question_at_hand =
     phase === "start" || phase === "explore"
@@ -318,13 +373,51 @@ async function processTurn(userMessage, state, callAttache) {
   history.push({ role: "user", content: userMessage });
   history.push({ role: "assistant", content: output.user_response });
 
-  const nextState = { ...state, chat_history: history };
+  const nextState = { ...state, chat_history: history, turn_index: turnIndex + 1 };
+
+  // Track consecutive close intents; after two in a row, end the session.
+  const prevCloseCount = state.consecutive_close_intents ?? 0;
+  const closeCount = output.user_intends_close ? prevCloseCount + 1 : 0;
+  nextState.consecutive_close_intents = closeCount;
+
+  // Only allow a final end once we've had at least MIN_TURNS_BEFORE_FINAL_CLOSE
+  // turns and we're already in the explicit "close" phase, so that a
+  // user_intends_close coming from the start phase always routes through at
+  // least one confirmation turn in the close phase before ending.
+  const canEndSessionThisTurn = turnIndex >= MIN_TURNS_BEFORE_FINAL_CLOSE && phase === "close";
+
+  if (canEndSessionThisTurn && closeCount >= 2) {
+    nextState.phase = "close";
+    return { state: nextState, user_response: output.user_response, sessionEnded: true };
+  }
 
   if (output.user_intends_close) {
     if (phase !== "close") {
-      nextState.phase_before_close = phase === "explore" ? (state.baseline_phase_when_exploring ?? "start") : phase;
-      nextState.question_index_before_close = state.question_index ?? state.phase1_index ?? state.phase2_index ?? state.phase3_index ?? 0;
-      nextState.question_at_hand_before_close = question_at_hand ?? null;
+      if (BASELINE_PHASES.includes(phase)) {
+        const idx = state.question_index ?? state.phase1_index ?? state.phase2_index ?? state.phase3_index ?? 0;
+        const len =
+          phase === "administerBaseline1"
+            ? (state.phase1_questions?.length ?? 0)
+            : phase === "administerBaseline2"
+              ? (state.phase2_questions?.length ?? 0)
+              : (state.phase3_questions?.length ?? 0);
+
+        // Move resume position to the next baseline question in this phase when possible.
+        const resumeIdx = len > 0 && idx + 1 < len ? idx + 1 : idx;
+        nextState.phase_before_close = phase;
+        nextState.question_index_before_close = resumeIdx;
+        const qs =
+          phase === "administerBaseline1"
+            ? state.phase1_questions
+            : phase === "administerBaseline2"
+              ? state.phase2_questions
+              : state.phase3_questions;
+        nextState.question_at_hand_before_close = qs?.[resumeIdx] ?? null;
+      } else {
+        nextState.phase_before_close = phase === "explore" ? (state.baseline_phase_when_exploring ?? "start") : phase;
+        nextState.question_index_before_close = state.question_index ?? state.phase1_index ?? state.phase2_index ?? state.phase3_index ?? 0;
+        nextState.question_at_hand_before_close = question_at_hand ?? null;
+      }
     }
     nextState.phase = "close";
     const sessionEnded = phase === "close";
@@ -334,11 +427,16 @@ async function processTurn(userMessage, state, callAttache) {
   if (output.user_intends_explore) {
     if (phase === "start") nextState.baseline_phase_when_exploring = null;
     if (phase === "close") {
-      nextState.baseline_phase_when_exploring = nextState.phase_before_close ?? null;
-      nextState.question_index = nextState.question_index_before_close ?? 0;
-      if (nextState.baseline_phase_when_exploring === "administerBaseline1") nextState.phase1_index = nextState.question_index;
-      if (nextState.baseline_phase_when_exploring === "administerBaseline2") nextState.phase2_index = nextState.question_index;
-      if (nextState.baseline_phase_when_exploring === "administerBaseline3") nextState.phase3_index = nextState.question_index;
+      // If they reached close from Phase 3, baseline is finished; exploring should not resume baseline questions.
+      if (nextState.phase_before_close === "administerBaseline3") {
+        nextState.baseline_phase_when_exploring = null;
+      } else {
+        nextState.baseline_phase_when_exploring = nextState.phase_before_close ?? null;
+        nextState.question_index = nextState.question_index_before_close ?? 0;
+        if (nextState.baseline_phase_when_exploring === "administerBaseline1") nextState.phase1_index = nextState.question_index;
+        if (nextState.baseline_phase_when_exploring === "administerBaseline2") nextState.phase2_index = nextState.question_index;
+        if (nextState.baseline_phase_when_exploring === "administerBaseline3") nextState.phase3_index = nextState.question_index;
+      }
     }
     nextState.phase = "explore";
     return { state: nextState, user_response: output.user_response };
@@ -346,11 +444,14 @@ async function processTurn(userMessage, state, callAttache) {
 
   if (phase === "close") {
     if (!output.user_intends_close && !output.user_intends_explore) {
-      nextState.phase = nextState.phase_before_close ?? "start";
-      nextState.question_index = nextState.question_index_before_close ?? 0;
-      if (nextState.phase === "administerBaseline1") nextState.phase1_index = nextState.question_index;
-      if (nextState.phase === "administerBaseline2") nextState.phase2_index = nextState.question_index;
-      if (nextState.phase === "administerBaseline3") nextState.phase3_index = nextState.question_index;
+      // If they reached close from Phase 3, do not return to baseline questions; stay in close.
+      if (nextState.phase_before_close && nextState.phase_before_close !== "administerBaseline3") {
+        nextState.phase = nextState.phase_before_close;
+        nextState.question_index = nextState.question_index_before_close ?? 0;
+        if (nextState.phase === "administerBaseline1") nextState.phase1_index = nextState.question_index;
+        if (nextState.phase === "administerBaseline2") nextState.phase2_index = nextState.question_index;
+        if (nextState.phase === "administerBaseline3") nextState.phase3_index = nextState.question_index;
+      }
     }
     return { state: nextState, user_response: output.user_response };
   }
@@ -425,4 +526,7 @@ module.exports = {
   processTurn,
   LIVE_LLM_CALLS,
   VALID_PHASES,
+  getRandomIntroLine,
+  getRandomFinalLine,
+  CLOSING_INSTRUCTION_FROM_PHASE3,
 };
