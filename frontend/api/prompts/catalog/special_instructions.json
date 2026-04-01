@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "entries": {
+    "DETECTIVE_RETURN_BRIEF": {
+      "title": "Detective brief return",
+      "body": "State note: The user appears to have returned briefly. Greeting guidance: treat this as a direct continuation; keep the opening minimal and avoid reorientation.",
+      "tags": ["detective", "return", "brief"]
+    },
+    "DETECTIVE_RETURN_DAY_OR_SO": {
+      "title": "Detective day-or-so return",
+      "body": "State note: The user appears to be returning after some time. Greeting guidance: acknowledge their return in one short line, then quickly re-anchor in their current concern.",
+      "tags": ["detective", "return", "day_or_so"]
+    },
+    "DETECTIVE_RETURN_LONG_GONE": {
+      "title": "Detective long return",
+      "body": "State note: The user appears to be returning after a long absence. Greeting guidance: offer a warm re-entry greeting and briefly re-establish context before moving into inquiry.",
+      "tags": ["detective", "return", "long_gone"]
+    },
+    "DETECTIVE_RETURN_UNKNOWN": {
+      "title": "Detective unknown recency",
+      "body": "State note: Session recency is uncertain. Greeting guidance: use a neutral, low-assumption opening and let the user define where to begin.",
+      "tags": ["detective", "return", "unknown"]
+    },
+    "DETECTIVE_CLOSURE_MODE_SOFT": {
+      "title": "Detective closure mode",
+      "body": "System note: This turn is in closure mode. Gently encourage the user to wrap up with a reflective closing question or concise summary, without sounding abrupt.",
+      "tags": ["detective", "closure"]
+    },
+    "ATTACHE_RETURN_DAY_OR_SO": {
+      "title": "Attache day-or-so re-entry",
+      "body": "Special return instruction: The user is returning after a moderate gap. Offer a brief, grounded re-orientation before continuing baseline flow.",
+      "tags": ["attache", "return", "day_or_so"]
+    },
+    "ATTACHE_RETURN_LONG_GONE": {
+      "title": "Attache long re-entry",
+      "body": "Special return instruction: The user is returning after a long gap. Offer a warm re-entry line and then re-establish where they are in baseline flow.",
+      "tags": ["attache", "return", "long_gone"]
+    },
+    "ATTACHE_PHASE_START_FROM_NULL": {
+      "title": "Attache start from null phase",
+      "body": "Phase note: The user is arriving and orienting. Keep direction clear and concise, then proceed with baseline logic for this phase.",
+      "tags": ["attache", "phase", "start_from_null"]
+    },
+    "ATTACHE_PHASE_BASELINE_FROM_MID_BASELINE": {
+      "title": "Attache baseline from mid baseline phase",
+      "body": "Phase note: The user is resuming baseline after interruption. Keep transition concise and continue the baseline flow without extra drift.",
+      "tags": ["attache", "phase", "baseline_from_mid_baseline"]
+    }
+  }
+}
+

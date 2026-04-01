@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="css/theme.css">
   <link rel="stylesheet" href="css/landing.css">
   <link rel="stylesheet" href="css/poem.css">
+  <link rel="stylesheet" href="css/site-chrome.css">
   <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/left-philosopher.css">
   <link rel="stylesheet" href="css/right-philosopher.css">
@@ -68,6 +69,9 @@
             </div>
           </section>
         </main>
+        <footer class="site-footer" role="contentinfo">
+          <a href="#" class="footer-link" data-poem-about>about</a>
+        </footer>
       </div>
     </section>
 
@@ -147,26 +151,6 @@
           <a href="#" class="footer-link poem-dev-only" data-poem-effects-button>effect explorer</a>
         </footer>
       </div>
-      <div class="modal-overlay" data-poem-about-modal hidden>
-        <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="poem-about-title">
-          <button class="modal-close" type="button" data-poem-about-close>&times;</button>
-          <h2 id="poem-about-title">About</h2>
-          <div class="modal-body">
-            <figure class="about-art">
-              <img src="assets/imgs/other/black_cat_left_gaze.webp" alt="Black cat gazing left in a dim detective office" loading="lazy">
-              <figcaption>resident familiar, on permanent stakeout.</figcaption>
-            </figure>
-            <p class="about-copy">
-              The Existential Detective Agency watches the thresholds where intuition, poetry, and cosmic paperwork intersect. The cat keeps score, the letters whisper, and every visitor becomes a co-conspirator.
-            </p>
-          </div>
-          <div class="modal-credits">
-            <p class="credit-link">
-              <span><a href="https://svs.gsfc.nasa.gov/4655" target="_blank" rel="noreferrer noopener">Filed in the archives under "stray miracles".</a></span>
-            </p>
-          </div>
-        </div>
-      </div>
       <div class="modal-overlay" data-poem-effect-modal hidden>
         <div class="modal-content effect-picker-modal" role="dialog" aria-modal="true" aria-labelledby="poem-effects-title">
           <button class="modal-close" type="button" data-poem-effect-close>&times;</button>
@@ -183,6 +167,60 @@
         </div>
       </div>
     </section>
+
+    <section id="route-privacy" class="route route--hidden eda-legal-route" data-route="privacy" aria-label="Privacy notice">
+      <div class="menu-bar cyan-menu-bar visible">
+        <a
+          class="eda-logo-small small-glitch-title glitch-effect"
+          href="/#"
+          data-route-link
+          data-eda-logo
+          data-text="Existential Detective Agency"
+          aria-label="Go to menu"
+        >
+          <span>Existential Detective Agency</span>
+        </a>
+      </div>
+      <div class="eda-legal-route-wrap">
+        <div class="modal-content eda-legal-panel-page">
+          <h2 id="privacy-notice-title">Privacy notice</h2>
+          <figure class="about-art">
+            <img src="assets/imgs/other/black_cat_left_gaze.webp" alt="Black cat beside a closed dossier" loading="lazy">
+            <figcaption>the archive insists on a witness.</figcaption>
+          </figure>
+          <div class="modal-body">
+            <div id="privacy-notice-md-root" aria-live="polite"></div>
+          </div>
+          <div class="modal-credits">
+            <a href="/#" class="footer-link" data-route-link>Back to the Agency</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="modal-overlay" data-poem-about-modal hidden>
+      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="poem-about-title">
+        <button class="modal-close" type="button" data-poem-about-close>&times;</button>
+        <h2 id="poem-about-title">About</h2>
+        <div class="modal-body eda-prose eda-prose--center">
+          <figure class="about-art">
+            <img src="assets/imgs/other/black_cat_left_gaze.webp" alt="Black cat gazing left in a dim detective office" loading="lazy">
+            <figcaption>resident familiar, on permanent stakeout.</figcaption>
+          </figure>
+          <p class="about-copy">
+            The Existential Detective Agency watches the thresholds where intuition, poetry, and cosmic paperwork intersect. The cat keeps score, the letters whisper, and every visitor becomes a co-conspirator.
+          </p>
+          <p class="about-copy">
+            To continue your investigation, we store a technical identifier (often in a cookie) that links your browser to your saved dialogue. It is not a verdict on who you are—only a way to find the file. If you block or delete cookies, you may appear as a stranger: same office, different dossier. For the full picture—what we keep, why, and for how long—see our <a href="/privacy" data-route-link>privacy notice</a>.
+          </p>
+        </div>
+        <div class="modal-credits">
+          <p class="credit-link">
+            <span><a href="https://svs.gsfc.nasa.gov/4655" target="_blank" rel="noreferrer noopener">Filed in the archives under "stray miracles".</a></span>
+          </p>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="modal-overlay" data-missing-route-modal hidden>
@@ -228,11 +266,13 @@
   <script src="js/chat.messageUI.js"></script>
   <script src="js/chat.closingStamps.js"></script>
   <script src="js/chat.input.js"></script>
+  <script src="js/ui.logger.js"></script>
   <script src="js/chat.send.js"></script>
   <script src="js/viewport.notes.js"></script>
   <script src="app.js"></script>
   <script src="js/chat.route.js"></script>
   <script src="js/poem.js"></script>
+  <script src="js/site.privacyNotice.js"></script>
   <script src="js/router.js"></script>
 </body>
 </html>

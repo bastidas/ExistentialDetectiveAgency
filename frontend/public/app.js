@@ -50,26 +50,26 @@
       })
       .then(function (d) {
         if (!d) return;
-        console.log("[DEBUG] Model:", d.model);
-        console.log("[DEBUG] Service tier:", d.serviceTier);
+        var uiLog = window.EDALogger;
+        if (!uiLog) return;
+        uiLog.debug("UI", "Model", d.model);
+        uiLog.debug("UI", "Service tier", d.serviceTier);
         var preview = d.promptPreview;
         var previewText =
           Array.isArray(preview) && preview.length
             ? preview.join("\n")
             : "(none – file not found or empty)";
-        console.log("[DEBUG] Prompt file first 5 lines:", previewText);
+        uiLog.debug("UI", "Prompt file first 5 lines", previewText);
         if (d.promptFilePath != null)
-          console.log("[DEBUG] Prompt file path:", d.promptFilePath);
+          uiLog.debug("UI", "Prompt file path", d.promptFilePath);
         if (d.promptPreviewFound === false)
-          console.log("[DEBUG] Prompt file was not found or empty.");
-        console.log(
-          "[DEBUG] Your exchange count (this session):",
+          uiLog.debug("UI", "Prompt file was not found or empty.");
+        uiLog.debug(
+          "UI",
+          "Session exchange count",
           (d.userExchangeCount ?? 0) + "/" + (d.maxUserExchanges ?? 5)
         );
-        console.log(
-          "[DEBUG] Daily usage:",
-          d.dailyCount + " / " + (d.maxDailyUsage ?? 100)
-        );
+        uiLog.debug("UI", "Daily usage", d.dailyCount + " / " + (d.maxDailyUsage ?? 100));
       })
       .catch(function () {});
   }
@@ -80,6 +80,9 @@
       .then(function (d) {
         if (d && document.body) {
           document.body.dataset.devMode = d.devMode ? "true" : "false";
+          document.body.dataset.debugLogs = d.debugLogs ? "true" : "false";
+          document.body.dataset.debugLlm = d.debugLlm ? "true" : "false";
+          document.body.dataset.debugState = d.debugState ? "true" : "false";
         }
       })
       .catch(function () {});
@@ -97,7 +100,7 @@
 
     var form = document.getElementById("form");
     if (!form) {
-      console.warn("[chat] form element not found; skipping chat bootstrap.");
+      if (window.EDALogger) window.EDALogger.warn("UI", "chat form element not found; skipping chat bootstrap.");
       return;
     }
 
@@ -121,16 +124,15 @@
     var message = EDAChatInput && EDAChatInput.getValue ? EDAChatInput.getValue().trim() : "";
     if (!message) return;
 
-    console.log(
-      "[phil-annotations] Submit: checking message, rules count =",
-      EDARules.getRulesCount()
-    );
+    if (window.EDALogger) {
+      window.EDALogger.debug("UI", "phil-annotations submit rules count", EDARules.getRulesCount());
+    }
     var rewriteInfo = EDARules.applyRewriteFirst(message);
 
     function sendAndRunNotes(msg, html) {
       EDAChatSend.doSendMessage(msg, html);
       EDARules.runNoteActions(msg).catch(function (err) {
-        console.warn("[phil-annotations] runNoteActions:", err);
+        if (window.EDALogger) window.EDALogger.warn("UI", "phil-annotations runNoteActions", err);
       });
     }
 

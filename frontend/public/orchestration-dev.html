@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Orchestration Dev Inspector</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="/css/style.css" />
+    <style>
+      body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        margin: 0;
+        padding: 0;
+        background: #ffffff;
+      }
+      .orchestration-dev-root {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+      }
+      .orchestration-dev-header {
+        padding: 0.75rem 1rem;
+        border-bottom: 1px solid #ccc;
+        background: #fafafa;
+      }
+      .orchestration-dev-main {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+        overflow: visible;
+      }
+      .orchestration-dev-left,
+      .orchestration-dev-right {
+        flex: 0 0 auto;
+        padding: 0.75rem 1rem;
+      }
+      .orchestration-dev-left {
+        border-bottom: 1px solid #ddd;
+        overflow: visible;
+      }
+      .orchestration-dev-right {
+        overflow: visible;
+      }
+      .orchestration-dev-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.9rem;
+        table-layout: fixed;
+      }
+      .orchestration-dev-table th,
+      .orchestration-dev-table td {
+        border: 1px solid #ddd;
+        padding: 0.15rem 0.3rem;
+        vertical-align: top;
+        text-align: left;
+        font-size: 0.75rem;
+        white-space: normal;
+        overflow-wrap: break-word;
+        word-wrap: break-word;
+        cursor: text;
+      }
+      .orchestration-dev-table th:nth-child(1),
+      .orchestration-dev-table td:nth-child(1) {
+        width: 12%;
+        max-width: 12%;
+      }
+      .orchestration-dev-table th:nth-child(2),
+      .orchestration-dev-table td:nth-child(2),
+      .orchestration-dev-table th:nth-child(3),
+      .orchestration-dev-table td:nth-child(3),
+      .orchestration-dev-table th:nth-child(4),
+      .orchestration-dev-table td:nth-child(4),
+      .orchestration-dev-table th:nth-child(5),
+      .orchestration-dev-table td:nth-child(5) {
+        width: 12%;
+        max-width: 12%;
+      }
+      .orchestration-dev-table th:nth-child(6),
+      .orchestration-dev-table td:nth-child(6) {
+        width: 40%;
+        max-width: 40%;
+      }
+      .orchestration-dev-table tbody tr.active {
+        background: #333333;
+        color: #ffffff;
+      }
+      .orchestration-dev-prompts textarea {
+        width: 100%;
+        min-height: 4rem;
+        font-family: monospace;
+        font-size: 0.85rem;
+      }
+      .orchestration-dev-prompts .field-group {
+        margin-bottom: 0.75rem;
+      }
+      .orchestration-dev-prompts label {
+        display: block;
+        font-weight: 600;
+        margin-bottom: 0.25rem;
+      }
+      .orchestration-dev-toolbar {
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 0.5rem;
+      }
+      .orchestration-dev-toolbar button {
+        padding: 0.25rem 0.75rem;
+        font-size: 0.85rem;
+        cursor: pointer;
+      }
+      .orchestration-dev-warning {
+        color: #8a4500;
+        background: #fff4e5;
+        border: 1px solid #ffcf99;
+        padding: 0.5rem 0.75rem;
+        margin-top: 0.5rem;
+        font-size: 0.85rem;
+      }
+      .tabs {
+        display: flex;
+        border-bottom: 1px solid #ccc;
+        margin-bottom: 0.5rem;
+      }
+      .tabs button {
+        border: none;
+        background: transparent;
+        padding: 0.4rem 0.8rem;
+        cursor: pointer;
+        font-size: 0.85rem;
+      }
+      .tabs button.active {
+        border-bottom: 2px solid #333;
+        font-weight: 600;
+      }
+      .tab-panel {
+        display: none;
+      }
+      .tab-panel.active {
+        display: block;
+      }
+      .mermaid-container {
+        overflow: visible;
+      }
+      #orchestration-dev-table-container {
+        max-height: none;
+        overflow: visible;
+      }
+    </style>
+    <script src="https://unpkg.com/mermaid@10/dist/mermaid.min.js"></script>
+    <script>
+      // Use a looser security level here so we can reliably attach
+      // click handlers to the rendered SVG for dev-only tooling.
+      mermaid.initialize({ startOnLoad: false, securityLevel: "loose" });
+    </script>
+  </head>
+  <body>
+    <div class="orchestration-dev-root">
+      <header class="orchestration-dev-header">
+        <h1 style="margin: 0; font-size: 1.1rem;">Baseline Orchestrator Dev Inspector</h1>
+        <div id="orchestration-dev-status" class="orchestration-dev-warning" style="display:none;"></div>
+      </header>
+      <main class="orchestration-dev-main">
+        <section class="orchestration-dev-left">
+          <h2 style="font-size: 0.95rem; margin-top: 0;">State Diagram</h2>
+          <div id="orchestration-dev-mermaid" class="mermaid-container"></div>
+        </section>
+        <section class="orchestration-dev-right">
+          <div class="tabs">
+            <button type="button" data-tab="states" class="active">States</button>
+            <button type="button" data-tab="prompts">Prompts</button>
+          </div>
+          <div id="tab-states" class="tab-panel active">
+            <h2 style="font-size: 0.95rem; margin-top: 0;">Scenario Table</h2>
+            <div id="orchestration-dev-table-container"></div>
+          </div>
+          <div id="tab-prompts" class="tab-panel">
+            <div class="orchestration-dev-toolbar">
+              <button type="button" id="orchestration-dev-refresh-prompts">Reload</button>
+              <button type="button" id="orchestration-dev-save-prompts">Save</button>
+            </div>
+            <div class="orchestration-dev-prompts" id="orchestration-dev-prompts"></div>
+            <div class="orchestration-dev-warning">
+              Changes here write directly to attache_questions.json and attache_phase_transition_instructions.json in the API prompts directory. Use only in DEV and commit changes via git.
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script src="/js/orchestration.devUI.js"></script>
+  </body>
+</html>

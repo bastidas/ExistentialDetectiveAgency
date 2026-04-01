@@ -12,8 +12,12 @@
     "user_intends_close": {
       "type": "boolean",
       "description": "User wants to end the baseline/session; orchestrator will move to close (possibly after confirmation)."
+    },
+    "asked_baseline_question": {
+      "type": "boolean",
+      "description": "True only if the attaché actually printed the current baseline question text this turn, exactly as instructed."
     }
   },
-  "required": ["user_response", "user_intends_explore", "user_intends_close"],
+  "required": ["user_response", "user_intends_explore", "user_intends_close", "asked_baseline_question"],
   "additionalProperties": false
 }

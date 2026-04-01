@@ -4,12 +4,17 @@
   "description": "Azure Functions API for Existential Detective chat",
   "main": "src/index.js",
   "type": "commonjs",
+  "scripts": {
+    "test": "node --test src/session/returnClassification.test.js src/storage/threadEvents.rehydrate.test.js src/detective/detectiveMachine.test.js src/orchestration/buildLlmConversationState.test.js src/orchestration/mainStateMachine.test.js src/prompts/instructionSelection.test.js src/prompts/returnPromptFacts.test.js src/prompts/promptComposer.test.js"
+  },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
+    "@azure/data-tables": "^13.3.2",
     "@azure/functions": "^4.0.0",
     "dotenv": "^16.4.5",
-    "openai": "^4.73.0"
+    "openai": "^4.73.0",
+    "xstate": "^5.29.0"
   }
 }

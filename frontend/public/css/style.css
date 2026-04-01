@@ -18,7 +18,8 @@ body {
   margin: 0;
   min-height: 100vh;
   padding: var(--page-padding);
-  background: var(--body-bg);
+  background: url("../assets/imgs/other/black_leather.png") repeat, var(--body-bg);
+  background-size: auto, cover;
   color: #e3e0d7;
 }
 
@@ -192,6 +193,13 @@ h1 {
   width: 100%;
 }
 
+.message .label--attache,
+.message .label--lumen,
+.message .label--umbra {
+  text-align: right;
+  width: 100%;
+}
+
 .message .label--querent {
   text-align: left;
 }
@@ -335,6 +343,10 @@ body[data-dev-mode="true"] .message.assistant .content {
 }
 
 @media (min-width: 769px) and (max-width: 1440px) {
+  body {
+    padding-left: 0;
+  }
+
   .app-layout {
     /* Chat 10% less horizontal: 50% / 50% so philosophers get more space */
     grid-template-columns: minmax(0, 0.5fr) minmax(0, 0.5fr);

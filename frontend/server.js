@@ -30,6 +30,13 @@ app.use(express.static(path.join(__dirname, "public")));
 
 function getOrCreateSessionId(req, res) {
   let sessionId = req.cookies?.sessionId;
+  if (shared.DEBUG_LOGS) {
+    console.log(
+      "[server] sessionId cookie present:",
+      !!sessionId,
+      sessionId || "(none)"
+    );
+  }
   if (!sessionId) {
     sessionId = require("crypto").randomUUID();
     res.cookie("sessionId", sessionId, {
@@ -57,31 +64,67 @@ app.get("*", (req, res, next) => {
 });
 
 app.get("/api/config", (req, res) => {
-  res.json({ devMode: !!shared.DEV });
+  res.json({
+    devMode: !!shared.DEV,
+    debugLogs: !!shared.DEBUG_LOGS,
+    debugLlm: !!shared.DEBUG_LLM,
+    debugState: !!shared.DEBUG_STATE,
+  });
 });
 
-app.get("/api/debug", (req, res) => {
+app.get("/api/debug", async (req, res) => {
   if (!shared.DEBUG_LOGS) return res.status(404).end();
   const sessionId = getOrCreateSessionId(req, res);
+  let dailyCount = dailyUsageStore.readDailyUsage();
+  if (shared.ENABLE_DURABLE_STORAGE && shared.reloadSessionFromDurable) {
+    try {
+      const h = await shared.reloadSessionFromDurable(sessionId);
+      if (h && h.dailyCount != null) dailyCount = h.dailyCount;
+    } catch (_) {}
+  }
   const userExchangeCount = shared.userExchangeCounts.get(sessionId) ?? 0;
-  const dailyCount = dailyUsageStore.readDailyUsage();
   res.json({
     devMode: shared.DEV,
     offline: shared.OFFLINE,
-    debugLogs: true,
+    debugLogs: !!shared.DEBUG_LOGS,
+    debugLlm: !!shared.DEBUG_LLM,
+    debugState: !!shared.DEBUG_STATE,
     model: shared.MODEL,
     serviceTier: shared.SERVICE_TIER || "(default)",
     userExchangeCount,
     maxUserExchanges: shared.MAX_USER_EXCHANGES,
     dailyCount,
     maxDailyUsage: shared.MAX_DAILY_USAGE,
+    durableStorage: !!shared.ENABLE_DURABLE_STORAGE,
+    dossierTable: shared.DOSSIER_TABLE_NAME || null,
+    returnPolicy: !!shared.ENABLE_RETURN_POLICY,
+    returnPolicyLogOnly: !!shared.RETURN_POLICY_LOG_ONLY,
+    timeAwayDisableMinGuards: !!shared.TIME_AWAY_DISABLE_MIN_GUARDS,
+    timeAwayBriefMs: shared.TIME_AWAY_BRIEF_MS,
+    timeAwayLongMs: shared.TIME_AWAY_LONG_MS,
+    timeAwayStaleMs: shared.TIME_AWAY_STALE_MS,
   });
+});
+
+app.get("/api/chat-state", async (req, res) => {
+  const sessionId = getOrCreateSessionId(req, res);
+  try {
+    const snapshot = await shared.getChatStateForSession(sessionId);
+    res.json(snapshot);
+  } catch (err) {
+    res.status(500).json({
+      messages: [],
+      envelope: null,
+      userProgress: {},
+      error: err && err.message,
+    });
+  }
 });
 
 app.post("/api/chat", async (req, res) => {
   const sessionId = getOrCreateSessionId(req, res);
   const message = req.body?.message;
-  if (typeof message !== "string" || !message.trim()) {
+  if (typeof message !== "string") {
     return res.status(400).json({ error: "Missing or invalid message." });
   }
   const trimmed = message.trim();
@@ -105,7 +148,7 @@ app.post("/api/chat", async (req, res) => {
 app.post("/api/chat-stream", async (req, res) => {
   const sessionId = getOrCreateSessionId(req, res);
   const message = req.body?.message;
-  if (typeof message !== "string" || !message.trim()) {
+  if (typeof message !== "string") {
     res.status(400);
     res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
     res.write(

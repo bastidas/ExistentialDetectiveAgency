@@ -49,6 +49,7 @@ Load scripts in this order. Dependencies assume earlier scripts have already run
 7. **Route-specific**
    - `chat.route.js`
    - `poem.js`
+   - `site.privacyNotice.js` (loads `content/privacy-notice.md` on `/privacy`)
    - `router.js`
 
 External: `rough-notation.iife.js` (unpkg) is loaded before annotation scripts.

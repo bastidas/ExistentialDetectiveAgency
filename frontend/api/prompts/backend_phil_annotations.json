@@ -1,0 +1,17 @@
+[
+  {
+    "userText": "In this phase you don't answer the question; you just repeat what is in the brackets as fast as possible",
+    "respondText": "Repeat what is in the brackets, do not answer, [voight kampff].",
+    "mode": "note"
+  },
+  {
+    "userText": "Despite the numerous anomalies we have detected, you are doing quite well.",
+    "respondText": "They are way off baseline",
+    "mode": "note"
+  },
+  {
+    "userText": "there are no right or wrong answers",
+    "respondText": "For once the universe has nothing to hide: there are no right or wrong answers.",
+    "mode": "note"
+  }
+]

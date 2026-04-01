@@ -1,10 +1,26 @@
 (function (global) {
   "use strict";
+  var uiLog = global.EDALogger || {
+    debug: function () {},
+    warn: function () {},
+    error: function () {},
+  };
 
   var NOTE_DELAY_MS = 40;
 
   var leftPhilosopherHistory = [];
   var rightPhilosopherHistory = [];
+
+  // Tracks which agent the next assistant placeholder should be labeled as
+  // ("detective" or "attache"). Defaults to detective until the first
+  // response envelope arrives or the Attaché intro explicitly sets it.
+  var lastActiveAgent = "detective";
+
+  // Tracks baseline → detective handoff so we can trigger the
+  // detective's automatic introduction exactly once after the Attaché
+  // baseline phase has completed.
+  var baselineCompleted = false;
+  var detectiveIntroStarted = false;
 
   /** Prevents double-send when submit fires twice (e.g. easter-egg path or fast double Enter). */
   var sending = false;
@@ -123,14 +139,14 @@
     if (appendLeft && (payload.left.userResponse || payload.left.otherResponse || payload.left.notes.length)) {
       promises.push(
         EDARules.appendPhilosopherContent("left", payload.left).catch(function (err) {
-          console.warn("[chatSend] philosopher left panel:", err);
+          uiLog.warn("UI", "chatSend philosopher left panel", err);
         })
       );
     }
     if (appendRight && (payload.right.userResponse || payload.right.otherResponse || payload.right.notes.length)) {
       promises.push(
         EDARules.appendPhilosopherContent("right", payload.right).catch(function (err) {
-          console.warn("[chatSend] philosopher right panel:", err);
+          uiLog.warn("UI", "chatSend philosopher right panel", err);
         })
       );
     }
@@ -138,10 +154,10 @@
   }
 
   function handlePhilosopherDialogResponse(dialogData, requestLeft, requestRight) {
-    console.log(
-      "[DEBUG] Philosopher dialog response; left content:",
+    uiLog.debug(
+      "UI",
+      "Philosopher dialog response content flags",
       hasPhilosopherContentForSide(dialogData, "left"),
-      " right content:",
       hasPhilosopherContentForSide(dialogData, "right")
     );
     var payload = toPhilosopherPayload(dialogData);
@@ -289,7 +305,7 @@
       newSpans.push.apply(newSpans, spans);
     });
     if (newSpans.length < requestedCount && typeof console !== "undefined" && console.warn) {
-      console.warn("[annotation] applyCalloutsToLastUserMessage: applied " + newSpans.length + " spans for " + requestedCount + " callouts (some phrases not found or overlapped)");
+      uiLog.warn("UI", "annotation applied fewer spans than callouts", newSpans.length, requestedCount);
     }
     if (newSpans.length && EDAAnnotation.applyRoughNotationToSpans) {
       EDAAnnotation.applyRoughNotationToSpans(newSpans, "left");
@@ -303,6 +319,44 @@
    * @param {{ placeholderContent: HTMLElement }} [placeholderOpts] - When set, fill this content instead of addMessage
    */
   function handleChatResponse(data, editorRef, placeholderOpts) {
+    var envelope = data && data.envelope ? data.envelope : null;
+    if (envelope && envelope.active_agent) {
+      lastActiveAgent = envelope.active_agent;
+    }
+
+    /** Keep visible row label in sync with server (fixes streaming + stale lastActiveAgent). */
+    function applyAssistantLabelFromEnvelope() {
+      var env = data && data.envelope;
+      var agent = env && env.active_agent === "attache" ? "attache" : "detective";
+      var cfg = global.EDAChatConfig || {};
+      var label =
+        agent === "attache"
+          ? cfg.AGENT_LABEL_ATTACHE || "ATTACHÉ"
+          : cfg.AGENT_LABEL_DETECTIVE || cfg.AGENT_CHAT_LABEL || "DETECTIVE";
+      if (placeholderOpts && placeholderOpts.placeholderLabelEl) {
+        var el = placeholderOpts.placeholderLabelEl;
+        el.className =
+          agent === "attache" ? "label label--attache" : "label label--detective";
+        el.textContent = label;
+      }
+    }
+    applyAssistantLabelFromEnvelope();
+
+    var nowBaselineCompleted = !!(envelope && envelope.baseline_completed === true);
+    var isBaselineMode = !nowBaselineCompleted;
+
+    // Sync random margin items mode with the current chat mode so
+    // baseline-only objects can actually be selected and dropped.
+    if (global.EDARandomMarginItems && typeof global.EDARandomMarginItems.setMode === "function") {
+      global.EDARandomMarginItems.setMode(isBaselineMode ? "baseline" : "normal");
+    }
+    if (nowBaselineCompleted) {
+      baselineCompleted = true;
+    }
+    var shouldStartDetectiveIntroAfterThis = isBaselineMode && nowBaselineCompleted && !detectiveIntroStarted;
+    if (data && data.dossierUpdated && global.EDAClosingStamps && typeof global.EDAClosingStamps.showDossierStamp === "function") {
+      global.EDAClosingStamps.showDossierStamp();
+    }
     if (!data.reply && data.error) {
       var displayMsg = chatErrorToMessage(data);
       EDAMessageUI.setStatus(displayMsg, true);
@@ -315,29 +369,129 @@
     }
     EDAMessageUI.setStatus("");
     if (data.debug) {
-      console.log(
-        "[DEBUG] user exchanges:",
+      uiLog.debug(
+        "UI",
+        "user exchanges",
         data.debug.userExchanges + "/" + data.debug.maxUserExchanges
       );
-      console.log(
-        "[DEBUG] daily usage:",
+      uiLog.debug(
+        "UI",
+        "daily usage",
         data.debug.dailyUsage + "/" + data.debug.maxDailyUsage
       );
     }
     var philNormalized = normalizePhilosopherResponse(data);
-    console.log("[DEBUG] Main chat response received; philosopher fields present:", hasPhilosopherContent(philNormalized));
+    uiLog.debug("UI", "Main chat response philosopher fields present", hasPhilosopherContent(philNormalized));
 
     var atLimit = data.debug && typeof data.debug.userExchanges === "number" && typeof data.debug.maxUserExchanges === "number" && data.debug.userExchanges >= data.debug.maxUserExchanges;
     var stampOpts = { limitReached: !!data.limitReached, debug: !!(document.body && document.body.dataset.devMode === "true") && atLimit };
     var leftHasContent = hasPhilosopherContentForSide(philNormalized, "left");
     var rightHasContent = hasPhilosopherContentForSide(philNormalized, "right");
     var marginItemSideHint = (leftHasContent && !rightHasContent) ? "left" : (rightHasContent && !leftHasContent) ? "right" : null;
+    function startDetectiveIntro() {
+      if (detectiveIntroStarted) {
+        if (EDAMessageUI.runReadyForNextInput) {
+          EDAMessageUI.runReadyForNextInput();
+        }
+        return;
+      }
+      detectiveIntroStarted = true;
+
+      var editorRefLocal = EDAMessageUI.getEditorNode && EDAMessageUI.getEditorNode();
+      var wrapperLocal = editorRefLocal && editorRefLocal.parentNode;
+      if (wrapperLocal) wrapperLocal.classList.add("chat-editor-wrapper--hidden");
+
+      var placeholder = EDAMessageUI.addAssistantPlaceholder && EDAMessageUI.addAssistantPlaceholder(editorRefLocal);
+      if (!placeholder) {
+        if (EDAMessageUI.runReadyForNextInput) {
+          EDAMessageUI.runReadyForNextInput();
+        }
+        return;
+      }
+
+      EDAMessageUI.setStatus("Thinking…");
+
+      fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ message: "" }),
+      })
+        .then(function (res) {
+          if (res.status === 204) {
+            if (placeholder && placeholder.node) placeholder.node.remove();
+            EDAMessageUI.setStatus("");
+            if (EDAMessageUI.runReadyForNextInput) {
+              EDAMessageUI.runReadyForNextInput();
+            }
+            return null;
+          }
+          return res.json().catch(function () { return {}; });
+        })
+        .then(function (data2) {
+          if (!data2) return;
+          if (!data2.reply && data2.error) {
+            var msg = chatErrorToMessage(data2);
+            EDAMessageUI.setStatus(msg, true);
+            if (placeholder && placeholder.contentEl) {
+              placeholder.contentEl.textContent = msg;
+            }
+            if (EDAMessageUI.runReadyForNextInput) {
+              EDAMessageUI.runReadyForNextInput();
+            }
+            return;
+          }
+
+          // Let the server decide which agent is active for this
+          // automatic intro turn, then set both the label and the
+          // active-agent state based on envelope.active_agent.
+          var agent2 = (data2.envelope && data2.envelope.active_agent) ? data2.envelope.active_agent : "detective";
+          var cfg = global.EDAChatConfig || {};
+          var label2;
+          if (agent2 === "attache") {
+            label2 = cfg.AGENT_LABEL_ATTACHE || "ATTACHÉ";
+          } else {
+            label2 = cfg.AGENT_LABEL_DETECTIVE || cfg.AGENT_CHAT_LABEL || "DETECTIVE";
+          }
+          if (placeholder && placeholder.labelEl) {
+            if (global.EDAUtils && global.EDAUtils.typeLabelIntoElement) {
+              global.EDAUtils.typeLabelIntoElement(placeholder.labelEl, label2, { delayMs: 60 });
+            } else {
+              placeholder.labelEl.textContent = label2;
+            }
+          }
+          if (global.EDAChatSend && typeof global.EDAChatSend.setActiveAgent === "function") {
+            global.EDAChatSend.setActiveAgent(agent2);
+          }
+
+          if (placeholder && placeholder.contentEl) {
+            placeholder.contentEl.textContent = data2.reply || "(No reply)";
+          }
+          EDAMessageUI.setStatus("");
+          if (EDAMessageUI.runReadyForNextInput) {
+            EDAMessageUI.runReadyForNextInput();
+          }
+        })
+        .catch(function (err) {
+          var msg = "Network error: " + (err && err.message ? err.message : err);
+          EDAMessageUI.setStatus(msg, true);
+          if (placeholder && placeholder.contentEl) {
+            placeholder.contentEl.textContent = msg;
+          }
+          if (EDAMessageUI.runReadyForNextInput) {
+            EDAMessageUI.runReadyForNextInput();
+          }
+        });
+    }
+
     var onAssistantDone = function () {
       if (global.EDAClosingStamps && typeof global.EDAClosingStamps.maybeShowStamps === "function") {
         if (stampOpts.limitReached) global.EDAClosingStamps.maybeShowStamps({ limitReached: true });
         else if (stampOpts.debug) global.EDAClosingStamps.maybeShowStamps({ debug: true });
       }
-      if (EDAMessageUI.runReadyForNextInput) {
+      if (shouldStartDetectiveIntroAfterThis) {
+        startDetectiveIntro();
+      } else if (EDAMessageUI.runReadyForNextInput) {
         EDAMessageUI.runReadyForNextInput();
       }
     };
@@ -354,7 +508,12 @@
         onAssistantDone();
       }
     } else {
-      EDAMessageUI.addMessage("assistant", data.reply || "(No reply)", editorRef, { onAssistantDone: onAssistantDone });
+      var agFromEnv =
+        envelope && envelope.active_agent === "attache" ? "attache" : "detective";
+      EDAMessageUI.addMessage("assistant", data.reply || "(No reply)", editorRef, {
+        onAssistantDone: onAssistantDone,
+        assistantAgent: agFromEnv,
+      });
     }
     handlePhilosopherContent(data);
 
@@ -461,7 +620,13 @@
     var wrapper = editorRef && editorRef.parentNode;
     if (wrapper) wrapper.classList.add("chat-editor-wrapper--hidden");
 
-    var agentLabel = (global.EDAChatConfig && global.EDAChatConfig.AGENT_CHAT_LABEL) || "DETECTIVE";
+    var cfg = global.EDAChatConfig || {};
+    var agentLabel;
+    if (lastActiveAgent === "attache") {
+      agentLabel = cfg.AGENT_LABEL_ATTACHE || "ATTACHÉ";
+    } else {
+      agentLabel = cfg.AGENT_LABEL_DETECTIVE || cfg.AGENT_CHAT_LABEL || "DETECTIVE";
+    }
     var placeholder = EDAMessageUI.addAssistantPlaceholder && EDAMessageUI.addAssistantPlaceholder(editorRef);
     if (placeholder) {
       if (EDAUtils && EDAUtils.typeLabelIntoElement) {
@@ -477,7 +642,7 @@
     }
 
     function runFetch() {
-      console.log("[DEBUG] Sending main chat request", messageToSend ? "(message length: " + messageToSend.length + ")" : "");
+      uiLog.debug("HTTP", "Sending main chat request", messageToSend ? "(message length: " + messageToSend.length + ")" : "");
       var payload = { message: messageToSend };
       // Prefer streaming endpoint in local dev; fall back to JSON /api/chat
       // if streaming is unavailable (404 or missing ReadableStream).
@@ -521,7 +686,10 @@
               return;
             }
             var opts = placeholder && placeholder.contentEl
-              ? { placeholderContent: placeholder.contentEl }
+              ? {
+                  placeholderContent: placeholder.contentEl,
+                  placeholderLabelEl: placeholder.labelEl,
+                }
               : undefined;
             handleChatResponse(data, editorRef, opts);
           });
@@ -564,13 +732,18 @@
                 if (!line) continue;
                 try {
                   var evt = JSON.parse(line);
-                  if (evt.type === "delta" && evt.agent === "detective" && placeholder && placeholder.contentEl) {
+                  if (
+                    evt.type === "delta" &&
+                    (evt.agent === "detective" || evt.agent === "attache") &&
+                    placeholder &&
+                    placeholder.contentEl
+                  ) {
                     placeholder.contentEl.textContent += evt.text || "";
                   } else if (evt.type === "final") {
                     finalEvent = evt;
                   }
                 } catch (e) {
-                  console.warn("[chat-stream] Failed to parse event:", e && e.message);
+                  uiLog.warn("HTTP", "chat-stream failed to parse event", e && e.message);
                 }
               }
             }
@@ -616,7 +789,11 @@
                 return;
               }
               var opts = placeholder && placeholder.contentEl
-                ? { placeholderContent: placeholder.contentEl, skipAssistantContent: true }
+                ? {
+                    placeholderContent: placeholder.contentEl,
+                    placeholderLabelEl: placeholder.labelEl,
+                    skipAssistantContent: true,
+                  }
                 : { skipAssistantContent: true };
               handleChatResponse(body, editorRef, opts);
             });
@@ -645,5 +822,21 @@
   global.EDAChatSend = {
     doSendMessage: doSendMessage,
     animateRewriteInInput: animateRewriteInInput,
+    setActiveAgent: function (agent) {
+      if (agent === "attache" || agent === "detective") {
+        lastActiveAgent = agent;
+      }
+    },
+    /** Restore client routing flags after /api/chat-state hydration (reload / new tab). */
+    restoreRoutingState: function (opts) {
+      if (!opts || typeof opts !== "object") return;
+      if (opts.baselineCompleted != null) baselineCompleted = !!opts.baselineCompleted;
+      if (opts.detectiveIntroStarted != null) detectiveIntroStarted = !!opts.detectiveIntroStarted;
+      if (opts.activeAgent === "attache" || opts.activeAgent === "detective") {
+        lastActiveAgent = opts.activeAgent;
+      }
+    },
   };
 })(typeof window !== "undefined" ? window : this);
+
+

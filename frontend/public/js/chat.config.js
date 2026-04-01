@@ -82,11 +82,14 @@
     root.style.setProperty("--chat-line-transition", CHAT_STYLE.lineTransition);
   }
 
-  var AGENT_CHAT_LABEL = "*** DETECTIVE ***";
+  var AGENT_LABEL_DETECTIVE = "*** DETECTIVE ***";
+  var AGENT_LABEL_ATTACHE = "*** ATTACHÉ ***";
 
   global.EDAChatConfig = {
     CHAT_STYLE: CHAT_STYLE,
-    AGENT_CHAT_LABEL: AGENT_CHAT_LABEL,
+    AGENT_CHAT_LABEL: AGENT_LABEL_DETECTIVE,
+    AGENT_LABEL_DETECTIVE: AGENT_LABEL_DETECTIVE,
+    AGENT_LABEL_ATTACHE: AGENT_LABEL_ATTACHE,
     applyChatStyle: applyChatStyle,
   };
 })(typeof window !== "undefined" ? window : this);

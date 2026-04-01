@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>Folder Menu Dev</title>
+	<link rel="stylesheet" href="css/folder-menu-dev.css" />
+</head>
+<body>
+	<div class="page-wrapper">
+		<main class="content">
+			<h1 class="page-title">Folder Menu Prototype</h1>
+			<p class="page-instructions">
+				Click the folder tabs at the bottom of the screen to slide the folders up.
+			</p>
+		</main>
+		<aside class="entropy-controls" aria-label="Entropy controls">
+			<button class="entropy-btn" type="button" data-entropy-variant="a">
+				Entropy A
+			</button>
+			<button class="entropy-btn" type="button" data-entropy-variant="b">
+				Entropy B
+			</button>
+			<button class="entropy-btn" type="button" data-entropy-variant="c">
+				Entropy C
+			</button>
+			<button class="entropy-btn entropy-btn-reset" type="button" data-entropy-reset="true">
+				Reset
+			</button>
+		</aside>
+
+		<section class="folder-area" aria-label="Folders">
+			<div class="folder" id="folder1">
+				<img
+					src="assets/imgs/other/folder_L.png"
+					alt="Folder L"
+					class="folder-image"
+				/>
+				<button class="folder-tab-label" data-folder-target="folder1" type="button">
+					Folder L
+				</button>
+			</div>
+
+			<div class="folder" id="folder2">
+				<img
+					src="assets/imgs/other/folder_M.png"
+					alt="Folder M"
+					class="folder-image"
+				/>
+				<button class="folder-tab-label" data-folder-target="folder2" type="button">
+					Folder M
+				</button>
+			</div>
+
+			<div class="folder" id="folder3">
+				<img
+					src="assets/imgs/other/folder_R.png"
+					alt="Folder R"
+					class="folder-image"
+				/>
+				<button class="folder-tab-label" data-folder-target="folder3" type="button">
+					Folder R
+				</button>
+			</div>
+		</section>
+	</div>
+
+	<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+	<script src="js/viewport.breakpointsConfig.js"></script>
+	<script src="js/folder-menu-dev.js"></script>
+</body>
+</html>
+

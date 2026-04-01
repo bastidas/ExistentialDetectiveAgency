@@ -770,37 +770,7 @@ body[data-dev-mode="true"] .poem-dev-only {
 }
 .sentence.puff-in-ver { animation: puff-in-ver 0.7s cubic-bezier(0.470, 0.000, 0.745, 0.715) both; }
 
-/* Footer */
-.site-footer {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  z-index: 999;
-  padding: 0.5rem 1rem;
-  text-align: center;
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  color: rgba(255, 255, 255, 0.4);
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(4px);
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.footer-link {
-  color: rgba(255, 255, 255, 0.4);
-  text-decoration: none;
-  transition: color 0.2s ease;
-}
-
-.footer-link:hover {
-  color: rgba(255, 255, 255, 0.7);
-}
-
-.footer-separator {
-  margin: 0 0.5rem;
-  opacity: 0.4;
-}
+/* Footer: see site-chrome.css */
 
 /* About Modal */
 .modal-overlay {
@@ -811,7 +781,7 @@ body[data-dev-mode="true"] .poem-dev-only {
   bottom: 0;
   background: var(--modal-overlay-bg);
   backdrop-filter: blur(8px);
-  z-index: 100;
+  z-index: 1200;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -965,32 +935,6 @@ body[data-dev-mode="true"] .poem-dev-only {
   .modal-content {
     padding: 1.5rem;
     max-height: 90vh;
-  }
-  
-  .site-footer {
-    font-size: 0.6rem;
-    padding: 0.4rem 0.5rem;
-  }
-
-  .footer-separator {
-    margin: 0 0.3rem;
-  }
-}
-
-@media (max-width: 480px) {
-  .site-footer {
-    font-size: 0.55rem;
-    padding: 0.4rem 0.25rem;
-    line-height: 1.4;
-  }
-
-  .footer-link {
-    display: inline-block;
-    margin: 0.1rem 0;
-  }
-
-  .footer-separator {
-    margin: 0 0.2rem;
   }
 }
 

@@ -5,18 +5,21 @@
     intro: "/",
     chat: "/q",
     poem: "/p",
+    privacy: "/privacy",
   };
 
   var ROUTE_TITLES = {
     intro: "Existential Detective Agency",
     chat: "Chat | Existential Detective Agency",
     poem: "Poem | Existential Detective Agency",
+    privacy: "Privacy notice | Existential Detective Agency",
   };
 
   var routeNodes = {
     intro: null,
     chat: null,
     poem: null,
+    privacy: null,
   };
 
   var routerInitialized = false;
@@ -42,6 +45,7 @@
     routeNodes.intro = document.getElementById("route-intro");
     routeNodes.chat = document.getElementById("route-chat");
     routeNodes.poem = document.getElementById("route-poem");
+    routeNodes.privacy = document.getElementById("route-privacy");
     cacheMissingRouteModal();
   }
 
@@ -116,6 +120,7 @@
     if (lower === "/index.html") return ROUTE_PATHS.intro;
     if (lower === ROUTE_PATHS.chat) return ROUTE_PATHS.chat;
     if (lower === ROUTE_PATHS.poem) return ROUTE_PATHS.poem;
+    if (lower === ROUTE_PATHS.privacy) return ROUTE_PATHS.privacy;
     if (lower && lower !== "/") {
       missingRouteNoticePending = true;
     }
@@ -128,6 +133,8 @@
         return "chat";
       case "/p":
         return "poem";
+      case "/privacy":
+        return "privacy";
       case "/":
       default:
         return "intro";
@@ -136,6 +143,10 @@
 
   function activateRoute(routeKey) {
     hideMissingRouteModal();
+    var globalAboutModal = document.querySelector("[data-poem-about-modal]");
+    if (globalAboutModal) {
+      globalAboutModal.setAttribute("hidden", "hidden");
+    }
     if (!routeNodes[routeKey]) {
       console.warn("[router] Route node missing for", routeKey);
       return;
@@ -155,6 +166,9 @@
     updateDocumentTitle(routeKey);
     handleLifecycle(previousRoute, routeKey);
     activeRoute = routeKey;
+    if (routeKey === "privacy") {
+      window.scrollTo(0, 0);
+    }
     maybeRevealMissingRouteModal();
   }
 
@@ -180,6 +194,10 @@
         safeInvoke(window.initPoem);
       }
       safeInvoke(window.showPoem);
+    }
+
+    if (nextRoute === "privacy") {
+      safeInvoke(window.initPrivacyNoticeRoute);
     }
   }
 

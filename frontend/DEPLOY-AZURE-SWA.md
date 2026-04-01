@@ -5,7 +5,7 @@ This app is set up to deploy as an **Azure Static Web App** with a Node.js API (
 ## What’s included
 
 - **Static app**: `public/` (HTML, CSS, JS) is served as the front end.
-- **API**: `api/` runs as Azure Functions and serves `/api/debug` and `/api/chat`.
+- **API**: `api/` runs as Azure Functions and serves `/api/debug`, `/api/chat`, and `/api/chat-state`.
 - **Config**: `public/staticwebapp.config.json` sets the API runtime to Node 20.
 
 ## 1. Create the Static Web App in Azure
@@ -41,6 +41,15 @@ In Azure Portal:
 | `DEV` | Optional. Enable dev-only UI and advanced tools. | `1` or `true` |
 | `OFFLINE` | Optional. Disable LLM; return dummy responses (no API key needed). | `1` or `true` |
 | `DEBUG_LOGS` | Optional. Enable /api/debug and verbose logs (e.g. full message to LLM). | `1` or `true` |
+| `AZURE_STORAGE_CONNECTION_STRING` | **Durable storage.** Full storage connection string from the Azure portal (Access keys). | `DefaultEndpointsProtocol=...` |
+| `DOSSIER_TABLE_NAME` | **Durable storage.** Azure Table name for session, dossier, and usage rows (one table, multiple partition keys). | e.g. `UserDossiers` |
+| `ENABLE_DURABLE_STORAGE` | Optional. Set to `0` / `false` to disable table persistence even when the two settings above are set. | `0` |
+| `MAX_THREAD_EVENTS` | Optional. Max thread events per session row (default `400`). | |
+| `MAX_THREAD_JSON_CHARS` | Optional. Serialized JSON size guard for thread events (default `800000`). | |
+
+Durable storage is **enabled automatically** when both `AZURE_STORAGE_CONNECTION_STRING` and `DOSSIER_TABLE_NAME` are set (unless `ENABLE_DURABLE_STORAGE=0`).
+
+**Greenfield schema:** Partition keys are `EDA_session`, `EDA_dossier`, `EDA_usageSession`, `EDA_usageDaily`. If you previously used `session` / `profile` partitions, **delete and recreate the table** (or use a new table name) when deploying this version—see `docs/durable-user-state.md`.
 
 Save the configuration.
 
@@ -51,7 +60,8 @@ Save the configuration.
 
 ## 4. Notes
 
-- **Session and daily usage**: The API keeps session state and daily usage **in memory**. After a cold start or with multiple instances, counts can reset. For production, you can later add Azure Table Storage (or similar) for persistent daily usage and session data.
+- **Durable session / dossier (Azure Table Storage)**: When `AZURE_STORAGE_CONNECTION_STRING` and `DOSSIER_TABLE_NAME` are set, session runtime (detective state, baseline runtime, **thread events** for restore, conversation summaries JSON), per-session usage, and daily usage are stored under partitions `EDA_session`, `EDA_usageSession`, `EDA_usageDaily`. The **`EDA_dossier` row is written only after a dossier analysis run** (baseline handoff or periodic detective-phase update), not on every chat message.
+- **Without table storage**: The API still keeps session state and daily usage **in memory** (and the Express dev server writes daily usage to a local file). Cold starts or multiple instances can reset counts.
 - **Prompt files**: All prompt/closer markdown lives in **`frontend/api/prompts/`** (`prompt.md`, `closers.md`, `easter_egg_prompt.md`). Both the Express server and the Azure API read from this folder. Edit them there.
 - **Local dev**: Keep using `npm run dev` in `frontend` for the Express server. The Azure Functions in `api/` mirror the same behavior for production.
 

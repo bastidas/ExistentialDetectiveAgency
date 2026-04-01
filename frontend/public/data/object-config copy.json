@@ -1,0 +1,62 @@
+{
+  "mglass.webp": {
+    "width": 420,
+    "height": 600,
+    "scale": 1.5,
+    "rotation_range": 18,
+    "bounding_x_frac": 0.8,
+    "bounding_y_frac": 0.8,
+    "type": "misc"
+  },
+  "statuette.webp": {
+    "scale": 0.8,
+    "rotation_range": 50,
+    "bounding_x_frac": 0.8,
+    "bounding_y_frac": 0.8,
+    "type": "misc"
+  },
+  "key_above.webp": {
+    "scale": 0.39,
+    "rotation_range": 100,
+    "bounding_x_frac": 0.8,
+    "bounding_y_frac": 0.8,
+    "type": "misc"
+  },
+  "ace.webp": {
+    "width": 240,
+    "height": 280,
+    "scale": 1.0,
+    "rotation_range": 20,
+    "bounding_x_frac": 0.8,
+    "bounding_y_frac": 0.8,
+    "type": "misc"
+  },
+  "camera.webp": {
+    "scale": 1.5,
+    "rotation_range": 39,
+    "bounding_x_frac": 0.8,
+    "bounding_y_frac": 0.8,
+    "type": "misc"
+  },
+  "chess_piece.webp": {
+    "scale": 0.55,
+    "rotation_range": 125,
+    "bounding_x_frac": 0.8,
+    "bounding_y_frac": 0.8,
+    "type": "misc"
+  },
+  "dice.webp": {
+    "scale": 0.5,
+    "rotation_range": 230,
+    "bounding_x_frac": 0.8,
+    "bounding_y_frac": 0.8,
+    "type": "misc"
+  },
+  "tarot.webp": {
+    "scale": 1.4,
+    "rotation_range": 20,
+    "bounding_x_frac": 0.8,
+    "bounding_y_frac": 0.8,
+    "type": "misc"
+  }
+}

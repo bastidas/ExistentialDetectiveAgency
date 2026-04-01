@@ -1,0 +1,181 @@
+/* Site-wide footer, about/legal prose, and privacy notice route layout */
+
+/* Landing: keep content above fixed footer */
+#route-intro .content {
+  padding-bottom: 3rem;
+  box-sizing: border-box;
+}
+
+/* ----- Footer (landing, poem, shared) ----- */
+.site-footer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 999;
+  padding: 0.5rem 1rem;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.4);
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.footer-link {
+  color: rgba(255, 255, 255, 0.4);
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.footer-link:hover {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.footer-separator {
+  margin: 0 0.5rem;
+  opacity: 0.4;
+}
+
+@media (max-width: 768px) {
+  .site-footer {
+    font-size: 0.6rem;
+    padding: 0.4rem 0.5rem;
+  }
+
+  .footer-separator {
+    margin: 0 0.3rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .site-footer {
+    font-size: 0.55rem;
+    padding: 0.4rem 0.25rem;
+    line-height: 1.4;
+  }
+
+  .footer-link {
+    display: inline-block;
+    margin: 0.1rem 0;
+  }
+
+  .footer-separator {
+    margin: 0 0.2rem;
+  }
+}
+
+/* ----- Shared prose (about modal + privacy markdown body) ----- */
+.eda-prose a {
+  color: rgba(200, 220, 255, 0.9);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.eda-prose a:hover {
+  color: #ffffff;
+}
+
+.eda-prose--center {
+  text-align: center;
+}
+
+.eda-prose--center .about-copy {
+  text-align: center;
+}
+
+.eda-prose-loading,
+.eda-prose-error {
+  font-size: 0.9rem;
+  line-height: 1.75;
+  color: rgba(255, 255, 255, 0.65);
+  text-align: center;
+}
+
+.eda-prose-error {
+  color: rgba(255, 180, 160, 0.9);
+}
+
+/* Legal page: left-aligned body (markdown output) */
+.eda-prose:not(.eda-prose--center) p,
+.eda-prose:not(.eda-prose--center) li {
+  text-align: left;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.9rem;
+  line-height: 1.75;
+}
+
+.eda-prose:not(.eda-prose--center) ul {
+  margin: 0.5rem 0 1rem 1.1rem;
+  padding: 0;
+}
+
+.eda-prose:not(.eda-prose--center) li {
+  margin-bottom: 0.35rem;
+}
+
+.eda-prose:not(.eda-prose--center) h3 {
+  margin: 1.75rem 0 0.75rem 0;
+  font-size: 1rem;
+  font-weight: 300;
+  letter-spacing: 0.05em;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.eda-prose:not(.eda-prose--center) h3:first-child {
+  margin-top: 0;
+}
+
+/* First paragraph in privacy doc = “Last updated” — subtle */
+#privacy-notice-md-root.eda-prose > p:first-of-type {
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+
+/* ----- Privacy route shell ----- */
+.eda-legal-route.route {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #050505;
+}
+
+.eda-legal-route-wrap {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 1.5rem 1rem 3rem;
+  box-sizing: border-box;
+}
+
+/* Full-page “card” (reuses modal-content base from poem.css) */
+.eda-legal-panel-page {
+  max-width: 42rem;
+  width: 100%;
+  max-height: none;
+  overflow: visible;
+  text-align: left;
+}
+
+.eda-legal-panel-page > h2 {
+  text-align: center;
+}
+
+.eda-legal-panel-page .modal-credits {
+  text-align: center;
+}
+
+.eda-legal-panel-page .modal-credits .footer-link {
+  color: rgba(255, 255, 255, 0.65);
+  text-decoration: none;
+}
+
+.eda-legal-panel-page .modal-credits .footer-link:hover {
+  color: rgba(255, 255, 255, 0.95);
+}

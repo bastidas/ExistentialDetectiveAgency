@@ -254,40 +254,16 @@
     var decision = EDANotePages.need_new_note(side, text) || { needNew: true };
     var writeStep = Promise.resolve();
     if (decision.needNew) {
-      // Paper selection: allocator is the single source when config is loaded (enqueue is gated by whenPaperConfigLoaded).
-      // When allocator returns no selection, EDANotePages uses preferLargerPaper/avoidPaperUrl with the same policy.
-      // Require pixel fit (not just character capacity) so we don't assign long text to a too-small paper.
       var currentPaperUrl = (EDANotePages.getCurrentPaperUrl && EDANotePages.getCurrentPaperUrl(side)) || null;
       var selection = allocator.reserve(side, text.length, !!decision.preferLargerPaper, { avoidPaperUrl: currentPaperUrl });
       var noteOptions = { avoidPaperUrl: currentPaperUrl };
-      var EDANoteLayout = global.EDANoteLayout;
-      var estimatedH = EDANoteLayout && typeof EDANoteLayout.estimateHeightForText === "function"
-        ? EDANoteLayout.estimateHeightForText(text, side, selection && selection.paperUrl ? selection.paperUrl : undefined)
-        : 0;
       if (selection && selection.paperUrl) {
-        var writingAreaH = EDANoteLayout && typeof EDANoteLayout.getPaperWritingAreaHeight === "function"
-          ? EDANoteLayout.getPaperWritingAreaHeight(selection.paperUrl, side)
-          : Infinity;
-        // Pixel-based fit: require estimated height <= writable height (with margin). Trigger preferLargerPaper earlier (0.85) to avoid barely-fits overflow.
-        var PIXEL_FIT_MARGIN_RATIO = 0.15;
-        var PREFER_LARGER_THRESHOLD = 0.85;
-        var fitsPixels = writingAreaH > 0 && estimatedH <= writingAreaH * (1 - PIXEL_FIT_MARGIN_RATIO);
-        var preferLargerByPixels = writingAreaH > 0 && estimatedH > writingAreaH * PREFER_LARGER_THRESHOLD;
-        if (fitsPixels && !preferLargerByPixels) {
-          noteOptions.paperUrl = selection.paperUrl;
-        } else {
-          noteOptions.preferLargerPaper = true;
-        }
-        if (typeof document !== "undefined" && document.body && document.body.dataset && document.body.dataset.devMode === "true") {
-          console.debug(LOG_PREFIX, "new note paper choice", {
-            paperUrl: selection.paperUrl,
-            estimatedH: estimatedH,
-            writingAreaH: writingAreaH,
-            fitsPixels: fitsPixels,
-            preferLargerByPixels: preferLargerByPixels,
-          });
-        }
+        // Allocator is the single source of truth for paper choice when available.
+        // Use its selection directly so the shared pool semantics (available/spent)
+        // cannot be bypassed by local random selection.
+        noteOptions.paperUrl = selection.paperUrl;
       } else if (decision.preferLargerPaper) {
+        // Fallback for environments where allocator cannot provide a selection.
         noteOptions.preferLargerPaper = true;
       }
       var newNoteResult = EDANotePages.write_new_note(side, noteOptions);

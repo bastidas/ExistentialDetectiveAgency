@@ -181,6 +181,11 @@
     }
   }
 
+  function showDossierStamp() {
+    // Always render a single "stashed" stamp when dossier updates.
+    renderOneStamp("stashed", false);
+  }
+
   function escapeHtml(text) {
     var div = document.createElement("div");
     div.textContent = text;
@@ -190,5 +195,6 @@
   global.EDAClosingStamps = {
     showStamps: showStamps,
     maybeShowStamps: maybeShowStamps,
+    showDossierStamp: showDossierStamp,
   };
 })(typeof window !== "undefined" ? window : this);

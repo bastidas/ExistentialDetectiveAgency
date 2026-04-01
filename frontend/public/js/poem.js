@@ -725,6 +725,13 @@
     }
     clearTimer();
     pauseVideo();
+    var el = poemState.elements;
+    if (el && el.aboutModal) {
+      el.aboutModal.setAttribute("hidden", "hidden");
+    }
+    if (el && el.effectModal) {
+      el.effectModal.setAttribute("hidden", "hidden");
+    }
   }
 
   window.initPoem = function () {

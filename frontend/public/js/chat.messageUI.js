@@ -157,21 +157,40 @@
     div.className = "message " + role;
     var label = document.createElement("span");
     label.className = "label" + (role === "assistant" ? " label--detective" : " label--querent");
+    var cfg = global.EDAChatConfig || {};
     if (role === "user") {
       label.textContent = "QUERENT";
     } else {
-      label.textContent = (global.EDAChatConfig && global.EDAChatConfig.AGENT_CHAT_LABEL) || "DETECTIVE";
+      var ag = options && options.assistantAgent;
+      if (ag === "attache") {
+        label.className = "label label--attache";
+        label.textContent = cfg.AGENT_LABEL_ATTACHE || "ATTACHÉ";
+      } else if (ag === "lumen") {
+        label.className = "label label--lumen";
+        label.textContent = cfg.AGENT_LABEL_LUMEN || "LUMEN";
+      } else if (ag === "umbra") {
+        label.className = "label label--umbra";
+        label.textContent = cfg.AGENT_LABEL_UMBRA || "UMBRA";
+      } else {
+        label.className = "label label--detective";
+        label.textContent =
+          cfg.AGENT_LABEL_DETECTIVE || cfg.AGENT_CHAT_LABEL || "DETECTIVE";
+      }
     }
     var content = document.createElement("div");
     content.className = "content typewriter";
+    var skipAnim = options && options.skipAnimation;
     if (role === "user") {
       content.innerHTML = EDAAnnotation.wrapAnnotationKeywords(text);
       content.setAttribute("data-applied-callouts", "[]");
-      if (EDAUtils && EDAUtils.applyTypewriterToElement) {
+      if (!skipAnim && EDAUtils && EDAUtils.applyTypewriterToElement) {
         EDAUtils.applyTypewriterToElement(content);
       }
     } else {
-      if (EDAUtils && EDAUtils.animateAssistantText) {
+      if (skipAnim) {
+        content.textContent = text || "";
+        if (options && typeof options.onAssistantDone === "function") options.onAssistantDone();
+      } else if (EDAUtils && EDAUtils.animateAssistantText) {
         var animateOpts = options && options.onAssistantDone ? { onDone: options.onAssistantDone } : undefined;
         EDAUtils.animateAssistantText(content, text, animateOpts);
       } else {

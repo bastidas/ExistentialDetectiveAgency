@@ -16,11 +16,40 @@ Backend and API behavior are controlled by optional env vars. See `frontend/.env
 
 These are independent: e.g. `DEV=1` with real LLM shows dev UI; `OFFLINE=1` without `DEV` returns dummies with normal UI.
 
+### Durable user state (Azure Table Storage)
+
+Full layout, partition keys, and `/api/chat-state` fields are documented in **[`docs/durable-user-state.md`](durable-user-state.md)**.
+
+| Env var | Purpose |
+|--------|---------|
+| `MAX_THREAD_EVENTS` | Cap on stored chat thread events per session (default `400`). |
+| `MAX_THREAD_JSON_CHARS` | Max serialized size of thread JSON per row (default `800000`). |
+| `N_DOSSIER_UPDATE_TURNS` | Run dossier analyzer every N detective turns (default `12`; see `summarization.js`). |
+
 ---
 
 ## 1. Prompts (API only)
 
 **Rule:** Prompt files and annotation rules live in `frontend/api/prompts/`.
+
+### Current prompt folder layout
+
+- `frontend/api/prompts/detective/`
+  - `detective_persona.md`
+  - `detective_instructions.md`
+  - `detective_turn.schema.json`
+  - `detective_opening_lines.md`
+- `frontend/api/prompts/lumen/`
+  - `lumen_persona.md`
+  - `lumen_instructions.md`
+  - `lumen_philosopher_turn.schema.json`
+- `frontend/api/prompts/umbra/`
+  - `umbra_persona.md`
+  - `umbra_instructions.md`
+  - `umbra_philosopher_turn.schema.json`
+- `frontend/api/prompts/attache/` (attaché baseline orchestration prompts)
+
+Path wiring for these prompt files is configured in `frontend/api/src/config.js`.
 
 | File | Purpose |
 |------|--------|
@@ -51,6 +80,17 @@ Edit these files to change what the agent and philosophers are told to do. The b
 | `RIGHT_PHILOSOPHER_INTERACTION_RATE` | `frontend/public/js/chatSend.js` | Probability (0–1) that the right philosopher will respond to the left in the follow-up dialog. Default 0.6. |
 
 Adjust these to make philosopher–philosopher exchanges more or less frequent, or to bias one side.
+
+### Inter-dialog labels ("To Umbra" / "To Lumen")
+
+The prefix shown before philosopher-to-philosopher lines (`otherResponse`) is configured in:
+
+- `frontend/public/js/philosopherDisplay.config.js` via `OTHER_RESPONSE_PREFIX`
+
+Current defaults:
+
+- Left philosopher (Lumen): `[To Umbra] `
+- Right philosopher (Umbra): `[To Lumen] `
 
 ---
 
@@ -131,20 +171,45 @@ Adjust these to make philosopher–philosopher exchanges more or less frequent, 
 
 ---
 
-## 6. Typing config (detective replies)
+## 6. Typing config (detective / attaché replies)
 
-**What it controls:** How the detective's chat replies are "typed" on screen: speed (characters per step), delay between steps, whether very long replies animate, and whether to respect users' reduced-motion preferences.
+**What it controls (frontend):** How the detective's and attaché's chat replies are "typed" on screen when the full text is already known on the client: speed (characters per step), delay between steps, whether very long replies animate, and whether to respect users' reduced-motion preferences.
 
-**Where:** `public/js/typingConfig.js`
+**Where:** `public/js/shared.typingConfig.js`
 
 | Key (in `TYPING_CONFIG`) | Meaning |
 |---------------------------|---------|
-| `assistantCharsPerTick` | Number of characters revealed per animation step. Higher = faster typing. |
-| `assistantTickMs` | Delay between animation steps in milliseconds. Lower = faster typing. |
+| `assistantCharsPerTick` | Number of characters revealed per animation step for assistant (detective / attaché) replies that use `EDAUtils.animateAssistantText`. Higher = faster visible typing. |
+| `assistantTickMs` | Base delay between animation steps in milliseconds. Lower = faster typing cadence. |
+| `assistantTickVariationMs` | Random jitter (in ms) added on top of `assistantTickMs` for each step. Higher = more uneven / "human" timing. Set to `0` for perfectly regular steps. |
 | `assistantMaxChars` | Maximum reply length (in characters) to animate. If a reply is longer than this, it is rendered instantly instead of typed out. Set to `0` to always animate the full reply. |
 | `respectReducedMotion` | When `true`, skips the typing animation for users who have `prefers-reduced-motion: reduce` enabled, and shows the full reply instantly. |
 
-**Used by:** `js/utils.js` → `EDAUtils.animateAssistantText`, which is called from `js/messageUI.js` when rendering assistant (detective) messages.
+**Used by:** `public/js/shared.utils.js` → `EDAUtils.animateAssistantText`, which is called from `public/js/chat.messageUI.js`, `public/js/chat.send.js`, and `public/js/chat.route.js` when rendering non-streaming assistant (detective / attaché) messages.
+
+**Important:** Streaming replies from `/api/chat-stream` do **not** use this config for timing. Their speed is controlled by backend-only knobs described next.
+
+### 6b. Streaming speed (backend-only)
+
+**What it controls (backend):** How quickly already-computed replies are dribbled out over `/api/chat-stream` as NDJSON `delta` events. This affects how "live" streaming feels for both the detective and the attaché when the frontend uses the streaming path (see `chat.send.js`).
+
+**Where:** `frontend/api/src/config.js` and `frontend/api/src/chatService.js`
+
+| Key (in backend config) | Meaning |
+|-------------------------|---------|
+| `STREAM_CHUNK_SIZE` | Number of characters included in each streamed `delta` event. Higher = fewer, larger chunks. |
+| `STREAM_DELAY_MS` | Delay (in milliseconds) between `delta` events when emitting a single reply. Lower = faster stream; `0` streams all chunks back-to-back. |
+
+**Defaults:** If unset, the backend falls back to `STREAM_CHUNK_SIZE = 12`, `STREAM_DELAY_MS = 30`.
+
+**Env overrides:** You can override these without code changes using:
+
+```bash
+STREAM_CHUNK_SIZE=48
+STREAM_DELAY_MS=5
+```
+
+**Used by:** `frontend/api/src/chatService.js` → `handleChatStream()`, which reuses `handleChatRequest()` to get the full reply and then slices it into small "delta" chunks before sending a final event.
 
 ---
 
@@ -160,7 +225,7 @@ Adjust these to make philosopher–philosopher exchanges more or less frequent, 
 | Chat markup colors / duration / stroke per philosopher | `js/annotationConfig.js` | `ANNOTATION_PHILOSOPHER_SETTINGS.left` / `.right` |
 | Chat markup mode → RoughNotation type | `js/annotationConfig.js` | `ANNOTATION_MODE_TO_TYPES` |
 | Main chat column colors, margins, editor, cursor, divider | `js/chatConfig.js` | `CHAT_STYLE` (then call `applyChatStyle()`) |
-| Detective typing speed and behavior | `js/typingConfig.js` | `TYPING_CONFIG.assistantCharsPerTick`, `.assistantTickMs`, `.assistantMaxChars`, `.respectReducedMotion` |
+| Detective / attaché typing speed and behavior (non-streaming replies) | `public/js/shared.typingConfig.js` | `TYPING_CONFIG.assistantCharsPerTick`, `.assistantTickMs`, `.assistantTickVariationMs`, `.assistantMaxChars`, `.respectReducedMotion` |
 | How often left/right philosophers respond to each other | `js/chatSend.js` | `LEFT_PHILOSOPHER_INTERACTION_RATE`, `RIGHT_PHILOSOPHER_INTERACTION_RATE` (0–1) |
 | Agent or philosopher instructions | `api/prompts/*.md` | Edit the corresponding `.md` file |
 

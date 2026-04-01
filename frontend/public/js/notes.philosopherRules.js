@@ -135,7 +135,7 @@
    * Each segment has { type: "userResponse"|"otherResponse"|"note", text }.
    * Blank lines after userResponse/otherResponse come from LINE_BREAK_CONFIG in philosopherDisplay.config.js.
    */
-  function buildSegments(payload) {
+  function buildSegments(payload, side) {
     var displayConfig = global.EDAPhilosopherDisplayConfig;
     var newlinesAfterUser = 6;
     var newlinesAfterOther = 3;
@@ -150,7 +150,7 @@
       else if (nOther != null && !isNaN(parseInt(nOther, 10))) newlinesAfterOther = parseInt(nOther, 10);
     }
     if (displayConfig && displayConfig.getOtherResponsePrefix) {
-      otherPrefix = displayConfig.getOtherResponsePrefix();
+      otherPrefix = displayConfig.getOtherResponsePrefix(side);
     }
     /** N blank lines = N newline characters after the content. */
     function blankLines(n) {
@@ -181,7 +181,7 @@
    * @param {Object} [writeOverrides] - Optional options merged into each segment write (e.g. { baseDelayMs: 0, variationMs: 0 } for style preview).
    */
   function appendPhilosopherContent(side, payload, writeOverrides) {
-    var segments = buildSegments(payload);
+    var segments = buildSegments(payload, normalizedSide);
     if (!segments.length) return Promise.resolve();
     var normalizedSide = side === "right" ? "right" : "left";
     var baseOpts = SIDE_OPTS[normalizedSide];

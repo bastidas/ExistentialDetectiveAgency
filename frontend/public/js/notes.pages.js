@@ -479,16 +479,18 @@
     options = options || {};
     var avoidPaperUrl = options.avoidPaperUrl || getCurrentPaperUrl(side);
     var paperUrl = options.paperUrl;
+    // If a paperUrl is explicitly provided (typically by the allocator in NoteQueueManager),
+    // treat it as authoritative so the shared pool semantics (available/spent) remain intact.
     if (paperUrl) {
-      if (paperUrl === avoidPaperUrl) paperUrl = null;
-      else {
-        var available = getPaperImages();
-        if (available.indexOf(paperUrl) === -1) {
-          console.warn(LOG_PREFIX, "write_new_note request for unknown paper", paperUrl, "falling back to random selection");
-          paperUrl = null;
-        }
+      var available = getPaperImages();
+      if (available.indexOf(paperUrl) === -1) {
+        console.warn(LOG_PREFIX, "write_new_note request for unknown paper", paperUrl, "falling back to config-based selection");
+        paperUrl = null;
+      } else {
+        return paperUrl;
       }
     }
+    // Fallback selection: only used when allocator did not provide a paper (e.g. notedebug or early load).
     if (!paperUrl && options.preferLargerPaper) {
       var papers = getPaperImages().filter(function (p) { return p !== avoidPaperUrl; });
       if (!papers.length) papers = getPaperImages();

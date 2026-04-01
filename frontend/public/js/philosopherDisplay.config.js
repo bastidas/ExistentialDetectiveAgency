@@ -45,8 +45,11 @@
     newlinesAfterOtherResponse: 2,
   };
 
-  /** Prefix for philosopher-to-philosopher segment (otherResponse). */
-  var OTHER_RESPONSE_PREFIX = "[the quick brown fox jumped] ";
+  /** Prefix for philosopher-to-philosopher segment (otherResponse), per side. */
+  var OTHER_RESPONSE_PREFIX = {
+    left: "[To Umbra] ",
+    right: "[To Lumen] ",
+  };
 
   /**
    * Per-side fonts by context. 4th option (and beyond) left as comments for future use.
@@ -96,8 +99,9 @@
     };
   }
 
-  function getOtherResponsePrefix() {
-    return OTHER_RESPONSE_PREFIX;
+  function getOtherResponsePrefix(side) {
+    var key = side === "right" ? "right" : "left";
+    return OTHER_RESPONSE_PREFIX[key] || OTHER_RESPONSE_PREFIX.left;
   }
 
   /**
