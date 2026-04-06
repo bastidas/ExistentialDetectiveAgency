@@ -2,6 +2,10 @@
  * Closing stamps: when the user hits their chat limit, show rubber-stamp overlays
  * on the chat area. Content and styling from data/closing_stamps.json.
  *
+ * Detective cap: when the API sends `closureUltimate` on the last scripted detective reply
+ * (DETECTIVE_CLOSURE_ULTIMATE), chat.send treats it like limitReached for the first stamp.
+ * Post-ultimate messages return HTTP 204 until a future optional random easter-egg line is added.
+ *
  * Stamp schedule (post-limit rounds):
  * - Round 1 (bonus final at MAX_USER_EXCHANGES): "stashed"
  * - Round 2 (first 204, MAX_USER_EXCHANGES+1): "tracked"

@@ -9,4 +9,4 @@
 
 3. **lumen_philosopher_callouts**: Optional. Array of pairs for the user's last message: each pair is `[word_or_phrase, mode]` where `mode` is one of `keyword`, `highlight`, or `strike`. These suggest annotating that term in the user's message (underline/keyword, highlight, or strike-through). Only include terms that actually appear in the user's message. find at least one. Use empty array `[]` if none.
 
-The JSON envelope includes a focused `conversation_state` with `dossier_summary`, `narrative_phase`, `secrets_revealed`, and `preceding_conversation_summary`. Let these shape your subtext and emphasis without naming the fields directly.
+Let dossier or narrative context shape your subtext and emphasis without naming internal fields in your prose.

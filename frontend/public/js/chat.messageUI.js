@@ -162,7 +162,19 @@
       label.textContent = "QUERENT";
     } else {
       var ag = options && options.assistantAgent;
-      if (ag === "attache") {
+      var customLabel = options && options.assistantLabel;
+      if (typeof customLabel === "string" && customLabel.trim()) {
+        if (ag === "attache") {
+          label.className = "label label--attache";
+        } else if (ag === "lumen") {
+          label.className = "label label--lumen";
+        } else if (ag === "umbra") {
+          label.className = "label label--umbra";
+        } else {
+          label.className = "label label--detective";
+        }
+        label.textContent = customLabel.trim();
+      } else if (ag === "attache") {
         label.className = "label label--attache";
         label.textContent = cfg.AGENT_LABEL_ATTACHE || "ATTACHÉ";
       } else if (ag === "lumen") {

@@ -15,7 +15,7 @@
     },
     "asked_baseline_question": {
       "type": "boolean",
-      "description": "True only if the attaché actually printed the current baseline question text this turn, exactly as instructed."
+      "description": "True if this turn the attaché asked or posed the current baseline question to the user in any form (preamble, extra copy, then the question, etc.). False only if that question was not asked this turn. Server advances only when true."
     }
   },
   "required": ["user_response", "user_intends_explore", "user_intends_close", "asked_baseline_question"],

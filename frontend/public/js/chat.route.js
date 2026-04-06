@@ -1,3 +1,7 @@
+/**
+ * Chat route bootstrap. `/api/chat-state` payload: `/contracts/chat-http.contract.json`
+ * (repo: `frontend/contracts/chat-http.contract.json`).
+ */
 (function () {
   "use strict";
 
@@ -47,6 +51,7 @@
         baselineCompleted: !!up.baselineCompleted,
         detectiveIntroStarted: !!detIntro,
         activeAgent: agentFromEnv,
+        agentLabel: env.agent_label,
       });
     }
 
@@ -56,6 +61,51 @@
     }
 
     chatState.attacheIntroStarted = true;
+    if (window.EDAMessageUI && window.EDAMessageUI.runReadyForNextInput) {
+      window.EDAMessageUI.runReadyForNextInput();
+    }
+    return true;
+  }
+
+  /**
+   * Any return with a persisted session row: do not POST empty /api/chat to bootstrap
+   * Attaché/detective (avoids duplicate lines + runTurn LLM). `returningPersisted` is set
+   * whenever durable storage has a session entity; `resumeUi` adds brief-window hints.
+   */
+  function silentResumeFromPersistedSnapshot(data) {
+    var up = data && data.userProgress;
+    var resume = data && data.resumeUi;
+    var persisted = up && up.returningPersisted === true;
+    var briefResume = resume && resume.skipEmptyChatBootstrap === true;
+    if (!persisted && !briefResume) return false;
+
+    chatState.attacheIntroStarted = true;
+
+    var env = data.envelope || {};
+    var up = data.userProgress || {};
+    var pendingRefresh = up.pendingBaselineRefresh === true;
+    var agentFromEnv = env.active_agent === "attache" ? "attache" : "detective";
+    if (pendingRefresh) agentFromEnv = "attache";
+
+    var detIntro =
+      !pendingRefresh &&
+      (data.detectiveIntroSent === true ||
+        (up.baselineCompleted && agentFromEnv === "detective"));
+
+    if (window.EDAChatSend && typeof window.EDAChatSend.restoreRoutingState === "function") {
+      window.EDAChatSend.restoreRoutingState({
+        baselineCompleted: !!up.baselineCompleted,
+        detectiveIntroStarted: !!detIntro,
+        activeAgent: agentFromEnv,
+        agentLabel: env.agent_label,
+      });
+    }
+
+    if (window.EDARandomMarginItems && typeof window.EDARandomMarginItems.setMode === "function") {
+      var baselineUiComplete = !!up.baselineCompleted && !pendingRefresh;
+      window.EDARandomMarginItems.setMode(baselineUiComplete ? "normal" : "baseline");
+    }
+
     if (window.EDAMessageUI && window.EDAMessageUI.runReadyForNextInput) {
       window.EDAMessageUI.runReadyForNextInput();
     }
@@ -117,17 +167,24 @@
             return;
           }
 
-          // Decide which agent responded (attaché vs detective) based on the
-          // server-provided envelope, then set both the visible label and the
-          // active agent state used for subsequent turns.
-          var agent = (data.envelope && data.envelope.active_agent) ? data.envelope.active_agent : "attache";
-          var cfg = window.EDAChatConfig || {};
-          var label;
-          if (agent === "detective") {
-            label = cfg.AGENT_LABEL_DETECTIVE || cfg.AGENT_CHAT_LABEL || "DETECTIVE";
-          } else {
-            label = cfg.AGENT_LABEL_ATTACHE || "ATTACHÉ";
+          if (
+            window.EDAChatSend &&
+            typeof window.EDAChatSend.logLlmRefusalFromChatSuccess === "function"
+          ) {
+            window.EDAChatSend.logLlmRefusalFromChatSuccess(data);
           }
+
+          // Server drives visible label via envelope.agent_label (fallback: config by active_agent).
+          var agent = (data.envelope && data.envelope.active_agent) ? data.envelope.active_agent : "attache";
+          var label =
+            window.EDAChatSend && typeof window.EDAChatSend.getAssistantDisplayLabel === "function"
+              ? window.EDAChatSend.getAssistantDisplayLabel(data.envelope || { active_agent: agent })
+              : (function () {
+                  var cfg = window.EDAChatConfig || {};
+                  return agent === "detective"
+                    ? cfg.AGENT_LABEL_DETECTIVE || cfg.AGENT_CHAT_LABEL || "DETECTIVE"
+                    : cfg.AGENT_LABEL_ATTACHE || "ATTACHÉ";
+                })();
           function runAfterLabel() {
             if (!placeholder || !placeholder.contentEl) return;
             var replyText = data.reply || "(No reply.)";
@@ -148,6 +205,8 @@
           }
 
           if (placeholder && placeholder.labelEl) {
+            placeholder.labelEl.className =
+              agent === "attache" ? "label label--attache" : "label label--detective";
             if (window.EDAUtils && window.EDAUtils.typeLabelIntoElement) {
               window.EDAUtils.typeLabelIntoElement(placeholder.labelEl, label, {
                 delayMs: 60,
@@ -162,6 +221,11 @@
           }
           if (window.EDAChatSend && typeof window.EDAChatSend.setActiveAgent === "function") {
             window.EDAChatSend.setActiveAgent(agent);
+          }
+          if (window.EDAChatSend && typeof window.EDAChatSend.restoreRoutingState === "function") {
+            window.EDAChatSend.restoreRoutingState({
+              agentLabel: data.envelope && data.envelope.agent_label,
+            });
           }
           window.EDAMessageUI.setStatus("");
         })
@@ -207,6 +271,9 @@
       })
       .then(function (data) {
         if (restoreMessagesFromApiPayload(data)) {
+          return;
+        }
+        if (silentResumeFromPersistedSnapshot(data)) {
           return;
         }
         startAttacheIntro();

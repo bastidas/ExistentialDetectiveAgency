@@ -20,24 +20,43 @@ const {
   computeCurrentPhaseId,
   getBaselineNumberFromPhase,
   getRandomBaselineQuestionCount,
-} = require("./attacheOrchestrator");
+} = require("./attacheMachine");
+const { getPromptPattern } = require("./attachePrompts");
 const {
-  getSystemPrompt,
-  getPromptPattern,
-  BASELINE1_INSTRUCTIONS,
-  BASELINE2_INSTRUCTIONS,
-  BASELINE3_INSTRUCTIONS,
-} = require("./attachePrompts");
+  buildPromptContextFromState,
+} = require("./attachePromptContext");
 const { composeAgentPrompt } = require("../prompts/promptComposer");
+const { buildAgentTurn } = require("../prompts/turnBuilderRegistry");
+const { buildMockAttacheLlmOutput } = require("./attacheMockLlmOutput");
+const {
+  getAttacheCustomStateInstructionsPlaceholder,
+  formatAttacheMockQueryLine,
+  formatAttacheMockQueryBody,
+} = require("./attacheStateInstructions");
+const { getPromptRegistryEntry } = require("../prompts/promptRegistry");
+const { buildMockAgentReply } = require("../agents/mockAgentTurn");
+const { getRandomIntroLine } = require("./attacheOpeningLines");
 
-// Baseline question banks for the new AttacheState phases.
-// Shape:
-// {
-//   "baseline1": { questions: ["...", "...", ...] },
-//   "baseline2": { questions: [...] },
-//   "baseline3": { questions: [...] }
-// }
-const BASELINE_QUESTIONS = require("../../prompts/attache/attache_baseline_questions.json");
+// Baseline question pools (`administerBaseline1` … `administerBaseline3`); counts per phase are
+// drawn between MIN/MAX when entering each baseline (see `attacheMachine.transition`).
+const ATTACHE_QUESTIONS_BANK = require("../../prompts/attache/attache_questions.json");
+const ADMINISTER_BASELINE_KEYS = {
+  1: "administerBaseline1",
+  2: "administerBaseline2",
+  3: "administerBaseline3",
+};
+
+/**
+ * @param {1|2|3} baselineNumber
+ * @returns {{ questions: string[] }|null}
+ */
+function getBaselineQuestionPoolEntry(baselineNumber) {
+  const k = ADMINISTER_BASELINE_KEYS[baselineNumber];
+  if (!k) return null;
+  const entry = ATTACHE_QUESTIONS_BANK[k];
+  if (!entry || !Array.isArray(entry.questions)) return null;
+  return entry;
+}
 
 /** Same shape as dossier.meta.baselineQuestionStats (for persistence + consistency). */
 function emptyBaselineQuestionStats() {
@@ -121,48 +140,6 @@ function loadLines(filePath) {
   return [];
 }
 
-// Opening lines are stored as markdown-style bullet entries where
-// each "-" starts a new multi-line block. Everything after the "-"
-// (including blank lines and paragraphs) belongs to that entry until
-// the next "-" or end of file.
-function loadIntroEntries() {
-  try {
-    if (!fs.existsSync(ATTACHE_INTRO_FILE)) return [];
-    const raw = fs.readFileSync(ATTACHE_INTRO_FILE, "utf8");
-    const lines = raw.split(/\r?\n/);
-    const entries = [];
-    let current = null;
-
-    for (const line of lines) {
-      const m = line.match(/^\s*-\s*(.*)$/);
-      if (m) {
-        // Start a new entry; push any previous one first.
-        if (current != null && current.trim()) {
-          entries.push(current.trim());
-        }
-        current = m[1] || "";
-      } else if (current != null) {
-        // Continuation of the current entry (preserve newlines).
-        current += "\n" + line;
-      }
-    }
-
-    if (current != null && current.trim()) {
-      entries.push(current.trim());
-    }
-
-    return entries;
-  } catch (_) {
-    return [];
-  }
-}
-
-function getRandomIntroLine() {
-  const entries = loadIntroEntries();
-  if (!entries.length) return null;
-  return entries[Math.floor(Math.random() * entries.length)];
-}
-
 function getRandomFinalLine() {
   const lines = loadLines(ATTACHE_FINAL_FILE);
   if (!lines.length) return null;
@@ -175,8 +152,8 @@ function getRandomFinalLine() {
  * Uses the first two entries in PHIL_ANNOTATIONS_FILE (if present) as
  * the note bodies.
  *
- * @param {import("./attacheOrchestrator").AttacheState|undefined|null} prevState
- * @param {import("./attacheOrchestrator").AttacheState|undefined|null} nextState
+ * @param {import("./attacheMachine").AttacheState|undefined|null} prevState
+ * @param {import("./attacheMachine").AttacheState|undefined|null} nextState
  * @returns {string[]} note texts to append (may be empty)
  */
 function getPhaseNotesForTransition(prevState, nextState) {
@@ -213,66 +190,6 @@ function getPhaseNotesForTransition(prevState, nextState) {
   }
 
   return notes;
-}
-
-/**
- * Build the prompt context object for getSystemPrompt from the
- * current AttacheState plus optional session-level info.
- *
- * This centralizes how we translate baseline_number/question_index
- * into concrete baseline question text and per-baseline intro
- * instructions. The returned keys intentionally match the {tokens}
- * used in attachePrompts templates.
- *
- * @param {import("./attacheOrchestrator").AttacheState|null} state
- * @param {object|null} sessionState
- * @param {number|null} baselineNumberHint
- * @returns {{ baselineN_questionQ?: string, baselineN_instructions?: string }}
- */
-function buildPromptContextFromState(state, sessionState, baselineNumberHint) {
-  if (!state) return {};
-
-  const pattern = getPromptPattern(state);
-
-  // Prefer explicit hint, then state.baseline_number, then pattern.
-  const baselineNumber =
-    (typeof baselineNumberHint === "number" && baselineNumberHint) ? baselineNumberHint :
-    (state.baseline_number != null ? state.baseline_number : pattern.baselineNumber);
-
-  const qIndex =
-    typeof state.question_index === "number" && state.question_index >= 0
-      ? state.question_index
-      : 0;
-
-  if (!baselineNumber && baselineNumber !== 0) return {};
-  const key = "baseline" + String(baselineNumber);
-  const entry = BASELINE_QUESTIONS[key];
-  if (!entry || !Array.isArray(entry.questions)) return {};
-
-  // Optionally shuffle baseline questions: when RANDOM_Q_ORDER is true,
-  // we store a per-baseline index order in the session state and use
-  // that mapping to choose which concrete question is at question_index.
-  let effectiveIndex = qIndex;
-  if (sessionState && sessionState.baseline_question_order && baselineNumber != null) {
-    const order = sessionState.baseline_question_order[baselineNumber];
-    if (Array.isArray(order) && qIndex >= 0 && qIndex < order.length) {
-      effectiveIndex = order[qIndex];
-    }
-  }
-
-  const question = entry.questions[effectiveIndex];
-  if (!question) return {};
-
-  let baselineInstructions;
-  if (baselineNumber === 1) baselineInstructions = BASELINE1_INSTRUCTIONS;
-  else if (baselineNumber === 2) baselineInstructions = BASELINE2_INSTRUCTIONS;
-  else if (baselineNumber === 3) baselineInstructions = BASELINE3_INSTRUCTIONS;
-
-  const ctx = { baselineN_questionQ: question };
-  if (baselineInstructions) {
-    ctx.baselineN_instructions = baselineInstructions;
-  }
-  return ctx;
 }
 
 function makeDefaultBaselineQuestionCounts() {
@@ -327,8 +244,9 @@ function createInitialAttacheSessionState(options) {
   if (!baseline_question_order) {
     baseline_question_order = {};
     [1, 2, 3].forEach((baselineNumber) => {
-      const key = "baseline" + String(baselineNumber);
-      const entry = BASELINE_QUESTIONS[key];
+      const entry = getBaselineQuestionPoolEntry(
+        /** @type {1|2|3} */ (baselineNumber)
+      );
       if (!entry || !Array.isArray(entry.questions)) return;
       const indices = entry.questions.map((_, i) => i);
       if (RANDOM_Q_ORDER) {
@@ -377,6 +295,126 @@ function createInitialAttacheSessionState(options) {
         : null,
     baseline_return_greeting_pending:
       options && options.baseline_return_greeting_pending === true,
+    /** When true, attaché prompt includes `ATTACHE_STALE_DOSSIER_REBASELINE` (chatService re-baseline path). */
+    stale_dossier_rebaseline: options && options.stale_dossier_rebaseline === true,
+    /** Mirrors `classifyTimeAway` for this request (attaché catalog + LLM-safe state). */
+    visit_bin: options && options.visit_bin != null ? String(options.visit_bin) : null,
+    ms_since_last_visit:
+      typeof (options && options.ms_since_last_visit) === "number" &&
+      Number.isFinite(options.ms_since_last_visit)
+        ? Math.max(0, options.ms_since_last_visit)
+        : null,
+    time_away_context_line:
+      options && options.time_away_context_line != null ? String(options.time_away_context_line) : null,
+    attacheOrchestratorSnapshot:
+      options && options.attacheOrchestratorSnapshot != null
+        ? options.attacheOrchestratorSnapshot
+        : undefined,
+  };
+}
+
+/**
+ * Full multi-line `[Mock LLM] …` diagnostic (state + baseline question in `mockQueryBody`).
+ * Used for OFFLINE and when the real/stub `createAttacheCall` returns an empty `user_response`
+ * so `chatService` does not fall back to `buildMockReplyFromRegistry` (empty custom → `**`).
+ */
+function buildAttacheDiagnosticMockReply({
+  state,
+  userMessage,
+  composedPrompt,
+  customSegment,
+  mockQueryBody,
+  machineStateExtra,
+}) {
+  const phaseIdLocal = state.current_phase_id || computeCurrentPhaseId(state);
+  const reg = getPromptRegistryEntry("attache");
+  return buildMockAgentReply({
+    agentKey: "attache",
+    userMessage,
+    machineStateSummary: {
+      phase: state.phase,
+      phaseId: phaseIdLocal,
+      ...(machineStateExtra && typeof machineStateExtra === "object" ? machineStateExtra : {}),
+    },
+    promptPaths: reg
+      ? {
+          persona: reg.personaPath,
+          instructions: reg.instructionsPath,
+          outputSchema: reg.outputSchemaPath,
+          prompts: reg.promptsPath,
+        }
+      : {},
+    llmSafeState: composedPrompt.llmSafeState,
+    custom: customSegment,
+    mockQueryBody,
+  });
+}
+
+/**
+ * Build the attaché composed system prompt for a session snapshot (same path as `runAttacheTurn`, no LLM).
+ *
+ * @param {object} [sessionState] — attaché session (`attacheState`, `chat_history`, …); default initial.
+ * @returns {{ content: string, outputSchema: object|null, structuredOutputsResponseFormat: object|null, llmSafeState: object|null, attacheState: object }}
+ */
+function composeAttacheSystemPromptForSession(sessionState) {
+  const safeSession = sessionState || createInitialAttacheSessionState({});
+  const baseline_question_counts = normalizeBaselineQuestionCounts(
+    safeSession.baseline_question_counts
+  );
+  const state = withPresetBaselineQuestionCount(
+    safeSession.attacheState && typeof safeSession.attacheState === "object"
+      ? safeSession.attacheState
+      : createAttacheState({}),
+    baseline_question_counts
+  );
+  const pattern = getPromptPattern(state);
+  const context = buildPromptContextFromState(state, safeSession, pattern.baselineNumber);
+  context.attache_close_count =
+    typeof safeSession.attache_close_count === "number" ? safeSession.attache_close_count : 0;
+  context.attache_turn_count =
+    typeof safeSession.attache_turn_count === "number" ? safeSession.attache_turn_count : 0;
+  const question_at_hand =
+    state.phase && state.phase.startsWith("baseline")
+      ? context.baselineN_questionQ || null
+      : null;
+
+  const customStateInstructions = getAttacheCustomStateInstructionsPlaceholder(state.phase);
+
+  const turnBuilt = buildAgentTurn({
+    agentKey: "attache",
+    state,
+    context,
+  });
+  const customSegment = turnBuilt.custom;
+
+  const pseudoSession = {
+    ...safeSession,
+    stale_dossier_rebaseline: !!safeSession.stale_dossier_rebaseline,
+    lastReturnClassification:
+      safeSession.lastReturnClassification &&
+      typeof safeSession.lastReturnClassification === "object"
+        ? safeSession.lastReturnClassification
+        : safeSession.baseline_return_greeting_pending === true &&
+            safeSession.baseline_refresh_return_category
+          ? { returnCategory: safeSession.baseline_refresh_return_category }
+          : null,
+  };
+  const composedPrompt = composeAgentPrompt({
+    agentKey: "attache",
+    session: pseudoSession,
+    internalState: { mainState: { attache: { baselineCompleted: false } } },
+    custom: customSegment,
+    attacheTurnInstruction: {
+      attachePromptFamilyKey: turnBuilt.metadata?.promptFamilyKey ?? null,
+    },
+    debugContext: { activeAgent: "attache" },
+  });
+  return {
+    content: composedPrompt.content,
+    outputSchema: composedPrompt.outputSchema,
+    structuredOutputsResponseFormat: composedPrompt.structuredOutputsResponseFormat,
+    llmSafeState: composedPrompt.llmSafeState,
+    attacheState: state,
   };
 }
 
@@ -393,8 +431,6 @@ async function runAttacheTurn({ userMessage, sessionState, openaiClient }) {
   const baseline_question_counts = normalizeBaselineQuestionCounts(
     safeSession.baseline_question_counts
   );
-  // Normalize persisted/in-memory state each turn so required derived/default
-  // fields (notably n_questions_in_baseline) are always present.
   const state = withPresetBaselineQuestionCount(
     safeSession.attacheState && typeof safeSession.attacheState === "object"
       ? safeSession.attacheState
@@ -409,18 +445,31 @@ async function runAttacheTurn({ userMessage, sessionState, openaiClient }) {
   const context = buildPromptContextFromState(state, safeSession, pattern.baselineNumber);
   context.attache_close_count =
     typeof safeSession.attache_close_count === "number" ? safeSession.attache_close_count : 0;
-  // We only surface a baseline question while in a baseline phase; once we
-  // move into close (e.g. after finishing baseline3), question_at_hand should
-  // be cleared so we don't keep echoing the last question into close turns.
+  context.attache_turn_count =
+    typeof safeSession.attache_turn_count === "number" ? safeSession.attache_turn_count : 0;
   const question_at_hand =
     state.phase && state.phase.startsWith("baseline")
       ? context.baselineN_questionQ || null
       : null;
 
-  // Scenario-specific turn instruction derived from AttacheState and
-  // baseline question; this is the third segment of the final system
-  // message used by attacheCall.
-  const turn_instruction = getSystemPrompt(state, context) || "";
+  const customStateInstructions = getAttacheCustomStateInstructionsPlaceholder(state.phase);
+
+  const turnBuilt = buildAgentTurn({
+    agentKey: "attache",
+    state,
+    context,
+  });
+  const customSegment = turnBuilt.custom;
+  const turn_instruction = customSegment;
+
+  const mockQueryBody = formatAttacheMockQueryBody({
+    customStateInstructions,
+    baselineQuestion: question_at_hand,
+  });
+  const mockQueryLine = formatAttacheMockQueryLine({
+    customStateInstructions,
+    baselineQuestion: question_at_hand,
+  });
 
   const is_phase_start =
     (state.phase === "baseline1" || state.phase === "baseline2" || state.phase === "baseline3") &&
@@ -433,33 +482,32 @@ async function runAttacheTurn({ userMessage, sessionState, openaiClient }) {
     is_phase_start,
     next_phase_instructions: null,
     turn_instruction,
+    mock_query: mockQueryLine,
   };
-  const pseudoSession = {
-    ...safeSession,
-    lastReturnClassification:
-      safeSession.baseline_return_greeting_pending === true &&
-      safeSession.baseline_refresh_return_category
-        ? { returnCategory: safeSession.baseline_refresh_return_category }
-        : null,
+  const composedResult = composeAttacheSystemPromptForSession(safeSession);
+  const composedPrompt = {
+    content: composedResult.content,
+    llmSafeState: composedResult.llmSafeState,
+    structuredOutputsResponseFormat: composedResult.structuredOutputsResponseFormat,
   };
-  const composedPrompt = composeAgentPrompt({
-    agentKey: "attache",
-    session: pseudoSession,
-    internalState: { mainState: { attache: { baselineCompleted: false } } },
-    attacheTurnInstruction: {
-      turnInstruction: turn_instruction,
-      attachePromptFamilyKey: pattern && pattern.key ? pattern.key : null,
-    },
-  });
   input.composed_system_prompt = composedPrompt.content;
+  input.structured_outputs_response_format = composedResult.structuredOutputsResponseFormat;
+
+  const prevTurnCountForMock =
+    typeof safeSession.attache_turn_count === "number" ? safeSession.attache_turn_count : 0;
 
   const callAttache = config.OFFLINE
     ? async () => {
-        const phaseIdLocal = state.current_phase_id || computeCurrentPhaseId(state);
+        const diagnosticReply = buildAttacheDiagnosticMockReply({
+          state,
+          userMessage,
+          composedPrompt,
+          customSegment,
+          mockQueryBody,
+        });
         return {
-          user_response: `[OFFLINE] ${phaseIdLocal} :: ${turn_instruction}`,
-          user_intends_explore: false,
-          user_intends_close: false,
+          ...buildMockAttacheLlmOutput({ turnNumber: prevTurnCountForMock }),
+          user_response: diagnosticReply,
         };
       }
     : createAttacheCall(openaiClient, { userMessage });
@@ -473,37 +521,34 @@ async function runAttacheTurn({ userMessage, sessionState, openaiClient }) {
         `${ansi.cyan}phase=${state.phase}[q=${state.question_index}]${ansi.reset} ` +
         `${ansi.yellow}pattern=${patternKeyBefore}${ansi.reset} ` +
         `${ansi.green}phase_id=${phaseIdBefore}${ansi.reset} ` +
-        `${ansi.cyan}question_at_hand=${question_at_hand || "(none)"}${ansi.reset}`
+        `${ansi.cyan}question_at_hand=${question_at_hand || "(none)"}${ansi.reset} ` +
+        `${ansi.dim}${mockQueryLine}${ansi.reset}`
     );
   }
 
   const output = await callAttache(input);
 
-  history.push({ role: "user", content: userMessage });
-  history.push({ role: "assistant", content: output.user_response });
+  let userFacingResponse =
+    typeof output.user_response === "string" ? output.user_response : "";
+  if (!userFacingResponse.trim()) {
+    userFacingResponse = buildAttacheDiagnosticMockReply({
+      state,
+      userMessage,
+      composedPrompt,
+      customSegment,
+      mockQueryBody,
+      machineStateExtra: { note: "empty_user_response_filled_with_diagnostic" },
+    });
+  }
 
   const intent = normalizeIntent(output);
-  const askedBaselineQuestionRaw = !!output.asked_baseline_question;
-  let askedBaselineQuestion = askedBaselineQuestionRaw;
-  // Offline dev mode: pretend the LLM always asked the baseline question
-  // whenever we are in a baseline phase and have a concrete question_at_hand,
-  // so the FSM can progress through baselines without getting stuck.
-  if (config.OFFLINE) {
-    if (state.phase && state.phase.startsWith("baseline") && question_at_hand) {
-      askedBaselineQuestion = true;
-    }
-  } else {
-    // Online heuristic: if the LLM forgot to set asked_baseline_question but
-    // clearly printed the baseline question text, treat it as having asked.
-    if (
-      !askedBaselineQuestion &&
-      question_at_hand &&
-      typeof output.user_response === "string" &&
-      output.user_response.includes(question_at_hand)
-    ) {
-      askedBaselineQuestion = true;
-    }
-  }
+  // Advance baseline question_index only when the LLM JSON sets asked_baseline_question
+  // (see attache_turn.schema.json and attacheMachine.transition).
+  const askedBaselineQuestion = !!output.asked_baseline_question;
+
+  history.push({ role: "user", content: userMessage });
+  history.push({ role: "assistant", content: userFacingResponse });
+
   const nextAttacheState = withPresetBaselineQuestionCount(
     transition(state, intent, askedBaselineQuestion),
     baseline_question_counts
@@ -571,6 +616,12 @@ async function runAttacheTurn({ userMessage, sessionState, openaiClient }) {
   const endedByTurnCap = nextTurnCount >= ATTACHE_MAX_TURNS;
   const sessionEnded = endedByFinalBaseline || endedByClose || endedByTurnCap;
 
+  // Clear return-greeting pending after the turn where the composed prompt
+  // actually carried the return preamble (same condition as pseudoSession.lastReturnClassification).
+  const returnPreambleConsumedThisTurn =
+    safeSession.baseline_return_greeting_pending === true &&
+    safeSession.baseline_refresh_return_category != null;
+
   const nextSessionState = {
     attacheState: nextAttacheState,
     chat_history: history,
@@ -581,7 +632,10 @@ async function runAttacheTurn({ userMessage, sessionState, openaiClient }) {
     baseline_answer_count: nextAnswerCount,
     baseline_question_stats,
     baseline_refresh_return_category: safeSession.baseline_refresh_return_category || null,
-    baseline_return_greeting_pending: returnPreamblePending ? false : !!safeSession.baseline_return_greeting_pending,
+    baseline_return_greeting_pending: returnPreambleConsumedThisTurn
+      ? false
+      : !!safeSession.baseline_return_greeting_pending,
+    stale_dossier_rebaseline: false,
   };
 
   if (config.DEBUG_LOGS) {
@@ -600,7 +654,6 @@ async function runAttacheTurn({ userMessage, sessionState, openaiClient }) {
         `${ansi.cyan}to=${toPhase}[q=${toIndex}]${ansi.reset} ` +
         `${ansi.yellow}intent=${intent}${ansi.reset} ` +
         `${ansi.yellow}pattern=${patternKey}${ansi.reset} ` +
-        `${ansi.yellow}asked_baseline_question_raw=${askedBaselineQuestionRaw}${ansi.reset} ` +
         `${ansi.yellow}asked_baseline_question=${askedBaselineQuestion}${ansi.reset} ` +
         `${ansi.green}phase_id=${phaseId}${ansi.reset} ` +
         `${ansi.red}close_count=${nextCloseCount}${ansi.reset} ` +
@@ -628,14 +681,16 @@ async function runAttacheTurn({ userMessage, sessionState, openaiClient }) {
 
   return {
     sessionState: nextSessionState,
-    user_response: output.user_response,
+    user_response: userFacingResponse,
     sessionEnded,
+    llmOutput: output,
   };
 }
 
 module.exports = {
   createInitialAttacheSessionState,
   runAttacheTurn,
+  composeAttacheSystemPromptForSession,
   getRandomIntroLine,
   getRandomFinalLine,
   buildPromptContextFromState,

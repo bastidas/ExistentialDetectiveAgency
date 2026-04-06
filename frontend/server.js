@@ -7,7 +7,22 @@ const express = require("express");
 const cookieParser = require("cookie-parser");
 const OpenAI = require("openai");
 
+const apiConfig = require("./api/src/config");
 const shared = require("./api/src/shared");
+const { seedSessionScenario } = require("./api/src/chatTestSeed");
+const {
+  buildPromptPreviewFromPreset,
+  validateAttachePresetOverrides,
+  previewChatMachineRouting,
+} = require("./api/src/chatScenarioPreview");
+const {
+  buildOrchestrationLabSnapshot,
+  runOrchestrationLabStep,
+} = require("./api/src/orchestration/orchestrationLabSnapshot");
+const {
+  EXISTENTIAL_THERAPY_PHASE_OPTIONS,
+  NARRATIVE_PHASE_OPTIONS,
+} = require("./api/src/chatScenarioLabPhases");
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = path.join(__dirname, "data");
@@ -21,12 +36,22 @@ if (!apiKey && !shared.OFFLINE) {
   process.exit(1);
 }
 
-const client = apiKey ? new OpenAI({ apiKey }) : null;
+const client = apiKey
+  ? new OpenAI({
+      apiKey,
+      timeout: apiConfig.OPENAI_TIMEOUT_MS,
+      maxRetries: 1,
+    })
+  : null;
 
 const app = express();
 app.use(express.json());
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, "public")));
+app.get("/contracts/chat-http.contract.json", (req, res) => {
+  res.type("application/json");
+  res.sendFile(path.join(__dirname, "contracts", "chat-http.contract.json"));
+});
 
 function getOrCreateSessionId(req, res) {
   let sessionId = req.cookies?.sessionId;
@@ -68,7 +93,7 @@ app.get("/api/config", (req, res) => {
     devMode: !!shared.DEV,
     debugLogs: !!shared.DEBUG_LOGS,
     debugLlm: !!shared.DEBUG_LLM,
-    debugState: !!shared.DEBUG_STATE,
+    debugState: shared.DEBUG_STATE_LEVEL,
   });
 });
 
@@ -88,7 +113,7 @@ app.get("/api/debug", async (req, res) => {
     offline: shared.OFFLINE,
     debugLogs: !!shared.DEBUG_LOGS,
     debugLlm: !!shared.DEBUG_LLM,
-    debugState: !!shared.DEBUG_STATE,
+    debugState: shared.DEBUG_STATE_LEVEL,
     model: shared.MODEL,
     serviceTier: shared.SERVICE_TIER || "(default)",
     userExchangeCount,
@@ -101,8 +126,8 @@ app.get("/api/debug", async (req, res) => {
     returnPolicyLogOnly: !!shared.RETURN_POLICY_LOG_ONLY,
     timeAwayDisableMinGuards: !!shared.TIME_AWAY_DISABLE_MIN_GUARDS,
     timeAwayBriefMs: shared.TIME_AWAY_BRIEF_MS,
+    timeAwayModerateMs: shared.TIME_AWAY_MODERATE_MS,
     timeAwayLongMs: shared.TIME_AWAY_LONG_MS,
-    timeAwayStaleMs: shared.TIME_AWAY_STALE_MS,
   });
 });
 
@@ -117,6 +142,174 @@ app.get("/api/chat-state", async (req, res) => {
       envelope: null,
       userProgress: {},
       error: err && err.message,
+    });
+  }
+});
+
+/** Dev only: seed chat orchestration state (`ALLOW_TEST_SEED=1`). See `/dev/chat-scenario.html`. */
+app.post("/api/dev/chat-scenario", (req, res) => {
+  if (!apiConfig.ALLOW_TEST_SEED) {
+    return res.status(404).end();
+  }
+  const sessionId = getOrCreateSessionId(req, res);
+  const raw = req.body && typeof req.body === "object" ? req.body : {};
+  const preset = raw.preset && typeof raw.preset === "object" ? raw.preset : raw;
+  const allowedBins = new Set(["brief", "moderate", "long", "stale"]);
+  const allowedAgents = new Set(["attache", "detective"]);
+  if (preset.timeAwayBin != null && !allowedBins.has(String(preset.timeAwayBin))) {
+    return res.status(400).json({ error: "Invalid timeAwayBin." });
+  }
+  if (preset.activeAgent != null && !allowedAgents.has(String(preset.activeAgent))) {
+    return res.status(400).json({ error: "Invalid activeAgent." });
+  }
+  if (
+    preset.baselineCompleted != null &&
+    typeof preset.baselineCompleted !== "boolean"
+  ) {
+    return res.status(400).json({ error: "baselineCompleted must be a boolean when set." });
+  }
+  if (
+    preset.msSinceLastVisit != null &&
+    (typeof preset.msSinceLastVisit !== "number" || !Number.isFinite(preset.msSinceLastVisit))
+  ) {
+    return res.status(400).json({ error: "Invalid msSinceLastVisit." });
+  }
+  const allowedAttachePhases = new Set([
+    "start",
+    "explore",
+    "baseline1",
+    "baseline2",
+    "baseline3",
+    "close",
+    "close_final",
+  ]);
+  if (
+    preset.attachePhase != null &&
+    String(preset.attachePhase).trim() !== "" &&
+    !allowedAttachePhases.has(String(preset.attachePhase).trim())
+  ) {
+    return res.status(400).json({ error: "Invalid attachePhase." });
+  }
+  const attInv = validateAttachePresetOverrides(preset);
+  if (attInv) {
+    return res.status(400).json({ error: attInv.error });
+  }
+  try {
+    const { envelope, tier } = seedSessionScenario(sessionId, preset);
+    const orchestration = buildOrchestrationLabSnapshot(sessionId);
+    return res.json({
+      ok: true,
+      envelope,
+      timeAwayTier: tier,
+      orchestration,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: err && err.message ? String(err.message) : "seed failed",
+    });
+  }
+});
+
+/** Dev only: dropdown option lists for scenario lab (`chatScenarioLabPhases.js` + `narrativePhases.js`). */
+app.get("/api/dev/chat-scenario-lab-options", (req, res) => {
+  if (!apiConfig.ALLOW_TEST_SEED) {
+    return res.status(404).end();
+  }
+  return res.json({
+    existentialTherapyPhaseOptions: EXISTENTIAL_THERAPY_PHASE_OPTIONS,
+    narrativePhaseOptions: NARRATIVE_PHASE_OPTIONS,
+  });
+});
+
+/** Dev only: preview composed system prompt for current form values (no mutation). */
+app.post("/api/dev/chat-scenario-preview", (req, res) => {
+  if (!apiConfig.ALLOW_TEST_SEED) {
+    return res.status(404).end();
+  }
+  const sessionId = getOrCreateSessionId(req, res);
+  const raw = req.body && typeof req.body === "object" ? req.body : {};
+  const preset = raw.preset && typeof raw.preset === "object" ? raw.preset : raw;
+  const allowedBins = new Set(["brief", "moderate", "long", "stale"]);
+  const allowedAgents = new Set(["attache", "detective"]);
+  if (preset.timeAwayBin != null && !allowedBins.has(String(preset.timeAwayBin))) {
+    return res.status(400).json({ error: "Invalid timeAwayBin." });
+  }
+  if (preset.activeAgent != null && !allowedAgents.has(String(preset.activeAgent))) {
+    return res.status(400).json({ error: "Invalid activeAgent." });
+  }
+  if (
+    preset.baselineCompleted != null &&
+    typeof preset.baselineCompleted !== "boolean"
+  ) {
+    return res.status(400).json({ error: "baselineCompleted must be a boolean when set." });
+  }
+  const allowedAttachePhases = new Set([
+    "start",
+    "explore",
+    "baseline1",
+    "baseline2",
+    "baseline3",
+    "close",
+    "close_final",
+  ]);
+  if (
+    preset.attachePhase != null &&
+    String(preset.attachePhase).trim() !== "" &&
+    !allowedAttachePhases.has(String(preset.attachePhase).trim())
+  ) {
+    return res.status(400).json({ error: "Invalid attachePhase." });
+  }
+  const attInvPrev = validateAttachePresetOverrides(preset);
+  if (attInvPrev) {
+    return res.status(400).json({ error: attInvPrev.error });
+  }
+  try {
+    const preview = buildPromptPreviewFromPreset(preset);
+    const orchestration = buildOrchestrationLabSnapshot(sessionId);
+    const derivedRouting = previewChatMachineRouting(sessionId, preset);
+    return res.json({ ok: true, preview, orchestration, derivedRouting });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: err && err.message ? String(err.message) : "preview failed",
+    });
+  }
+});
+
+/** Dev only: set last activity so the next POST /api/chat sees a synthetic time-away gap (ms). */
+app.post("/api/dev/chat-scenario-mock-return", (req, res) => {
+  if (!apiConfig.ALLOW_TEST_SEED) {
+    return res.status(404).end();
+  }
+  const sessionId = getOrCreateSessionId(req, res);
+  const raw = req.body && typeof req.body === "object" ? req.body : {};
+  const ms = raw.msSinceLastVisit;
+  if (typeof ms !== "number" || !Number.isFinite(ms)) {
+    return res.status(400).json({ error: "msSinceLastVisit required (number)." });
+  }
+  const gap = Math.max(0, ms);
+  shared.setMockLastActivityGapForSession(sessionId, gap);
+  return res.json({ ok: true, msSinceLastVisit: gap });
+});
+
+/** Dev only: synthetic XState-style step (detective policy, phase advance, philosopher narrative). */
+app.post("/api/dev/orchestration-step", (req, res) => {
+  if (!apiConfig.ALLOW_TEST_SEED) {
+    return res.status(404).end();
+  }
+  const sessionId = getOrCreateSessionId(req, res);
+  const raw = req.body && typeof req.body === "object" ? req.body : {};
+  try {
+    const orchestration = runOrchestrationLabStep(sessionId, {
+      type: raw.type,
+      payload: raw.payload,
+    });
+    return res.json({ ok: true, orchestration });
+  } catch (err) {
+    return res.status(400).json({
+      ok: false,
+      error: err && err.message ? String(err.message) : "step failed",
     });
   }
 });
@@ -203,6 +396,7 @@ app.listen(PORT, () => {
     console.log("OFFLINE=1: AI backend disabled, returning generic replies.");
   } else {
     console.log(`Model: ${shared.MODEL}`);
+    console.log(`OpenAI request timeout: ${apiConfig.OPENAI_TIMEOUT_MS}ms (set OPENAI_TIMEOUT_MS in .env)`);
     if (shared.SERVICE_TIER)
       console.log(`Service tier: ${shared.SERVICE_TIER}`);
   }

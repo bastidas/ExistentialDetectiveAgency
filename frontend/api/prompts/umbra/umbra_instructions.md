@@ -9,4 +9,4 @@
 
 4. **umbra_philosopher_callouts**: Optional. Array of pairs for the user's last message: each pair is `[word_or_phrase, mode]` where `mode` is one of `keyword`, `highlight`, or `strike`. These suggest annotating that term in the user's message (underline/keyword, highlight, or strike-through). Only include terms that actually appear in the user's message. Use empty array `[]` if none. Find one or two callout pairs.
 
-The JSON envelope includes a focused `conversation_state` with `dossier_summary`, `narrative_phase`, `secrets_revealed`, and `preceding_conversation_summary`. Use it to sharpen your framing and critique without naming fields in your prose.
+Use dossier or narrative context to sharpen framing and critique without naming internal fields in your prose.

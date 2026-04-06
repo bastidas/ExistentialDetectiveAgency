@@ -1,151 +1,100 @@
 "use strict";
 
-const {
-  DEFAULT_THERAPY_PHASE_KEY,
-  DEFAULT_EXISTENTIAL_PHASE_KEY,
-  DEFAULT_NARRATIVE_PHASE_KEY,
-  THERAPY_PHASE_LABELS,
-  EXISTENTIAL_PHASE_LABELS,
-  NARRATIVE_PHASE_LABELS,
-} = require("./orchestrationModels");
+/**
+ * Build a **raw** per-turn conversation slice keyed by agent.
+ *
+ * **Pipeline**
+ * 1. `buildLlmConversationState(agentKey, { session, internalState })` — this module (session + orchestrator mirrors).
+ * 2. `promptComposer.pickAllowedKeys` + `SAFE_VIEW_KEYS[agentKey]` — allowlisted subset.
+ * 3. `composeAgentPrompt` exposes that subset as `llmSafeState` on the composed result.
+ *
+ * **Not sent to OpenAI**: `llmSafeState` is for mocks, dev lab preview, and logging. Live calls pass
+ * `composed.content` (persona + instructions + catalog + custom + JSON schema appendix), and
+ * chat history — see `buildChatCompletionMessages` / `chatService` detective branch.
+ *
+ * Allowlisted keys should stay a subset of fields produced here for each agent.
+ *
+ * @param {string} agentKey
+ * @param {{ session?: object, internalState?: object }} input
+ * @returns {Record<string, unknown>}
+ */
+function buildLlmConversationState(agentKey, { session = {}, internalState = {} }) {
+  const s = session && typeof session === "object" ? session : {};
+  const internal = internalState && typeof internalState === "object" ? internalState : {};
+  const main = internal.mainState && typeof internal.mainState === "object" ? internal.mainState : {};
 
-function asTrimmedString(value) {
-  if (value == null) return null;
-  const s = String(value).trim();
-  return s || null;
-}
+  const str = (v) => (v == null ? "" : String(v));
 
-function readConfidence(entry) {
-  if (!entry || typeof entry !== "object") return null;
-  const c = entry.confidence;
-  return typeof c === "number" && Number.isFinite(c) ? c : null;
-}
+  const dossier_summary = str(
+    s.dossier_summary ?? s.dossierSummary ?? (s.dossier && s.dossier.summary)
+  );
+  const preceding_conversation_summary = str(
+    s.preceding_conversation_summary ?? s.precedingConversationSummary ?? s.conversation_summary
+  );
 
-function normalizeTraitDisplayValue(traitName, entry) {
-  if (!entry || typeof entry !== "object") return null;
-  const candidates = [entry.value, entry.topic, entry.range, entry.location, entry.trait];
-  for (const raw of candidates) {
-    const s = asTrimmedString(raw);
-    if (s) return s;
-  }
-  const fallback = asTrimmedString(entry[traitName]);
-  return fallback || null;
-}
+  const existential_therapy_phase = str(
+    s.existential_therapy_phase ??
+      s.existentialTherapyPhase ??
+      main.existential_therapy_phase
+  );
+  const ms_since_last_visit =
+    typeof s.ms_since_last_visit === "number" && Number.isFinite(s.ms_since_last_visit)
+      ? s.ms_since_last_visit
+      : null;
+  const time_away_context_line = str(s.time_away_context_line);
+  const narrative_phase = str(s.narrative_phase ?? s.narrativePhase ?? main.narrative_phase);
+  const secrets_revealed = str(s.secrets_revealed ?? s.secretsRevealed ?? main.secrets_revealed);
 
-function buildDossierSummaryForLlm(dossier) {
-  const explicitName =
-    dossier && dossier.explicit ? asTrimmedString(dossier.explicit.name) : null;
-  const inferred = dossier && dossier.inferred && typeof dossier.inferred === "object"
-    ? dossier.inferred
-    : {};
-
-  const traits = [];
-  for (const [traitName, entries] of Object.entries(inferred)) {
-    if (!Array.isArray(entries)) continue;
-    for (const entry of entries) {
-      const confidence = readConfidence(entry);
-      if (confidence == null || confidence < 0.5) continue;
-      const displayValue = normalizeTraitDisplayValue(traitName, entry);
-      if (!displayValue) continue;
-      traits.push({
-        traitName,
-        displayValue,
-        confidence,
-        evidence: asTrimmedString(entry.evidence),
-        notes: asTrimmedString(entry.notes),
-      });
-    }
-  }
-
-  return {
-    explicitName,
-    traits,
+  const base = {
+    dossier_summary,
+    preceding_conversation_summary,
+    existential_therapy_phase,
+    narrative_phase,
+    secrets_revealed,
   };
-}
 
-function buildPrecedingConversationSummary(sessionSummaries) {
-  if (!sessionSummaries || typeof sessionSummaries !== "object") return null;
-  const sections = [];
-  const baseline = asTrimmedString(sessionSummaries.baselineAttache);
-  const detective = asTrimmedString(sessionSummaries.userDetective);
-  const philosophers = asTrimmedString(sessionSummaries.philosophersInternal);
-
-  if (baseline) sections.push(`Baseline summary:\n${baseline}`);
-  if (detective) sections.push(`Detective summary:\n${detective}`);
-  if (philosophers) sections.push(`Philosopher summary:\n${philosophers}`);
-  if (!sections.length) return null;
-  return sections.join("\n\n");
-}
-
-function readNarrativePhase(internalState) {
-  const raw = asTrimmedString(
-    internalState &&
-      internalState.mainState &&
-      internalState.mainState.philosophers &&
-      internalState.mainState.philosophers.narrativePhase
-  );
-  const key = raw || DEFAULT_NARRATIVE_PHASE_KEY;
-  return NARRATIVE_PHASE_LABELS[key] || NARRATIVE_PHASE_LABELS[DEFAULT_NARRATIVE_PHASE_KEY];
-}
-
-function readTherapyPhase(internalState) {
-  const raw = asTrimmedString(
-    internalState &&
-      internalState.mainState &&
-      internalState.mainState.detective &&
-      internalState.mainState.detective.therapyPhase
-  );
-  const key = raw || DEFAULT_THERAPY_PHASE_KEY;
-  return THERAPY_PHASE_LABELS[key] || THERAPY_PHASE_LABELS[DEFAULT_THERAPY_PHASE_KEY];
-}
-
-function readExistentialPhase(internalState) {
-  const raw = asTrimmedString(
-    internalState &&
-      internalState.mainState &&
-      internalState.mainState.detective &&
-      internalState.mainState.detective.existentialPhase
-  );
-  const key = raw || DEFAULT_EXISTENTIAL_PHASE_KEY;
-  return EXISTENTIAL_PHASE_LABELS[key] || EXISTENTIAL_PHASE_LABELS[DEFAULT_EXISTENTIAL_PHASE_KEY];
-}
-
-function readSecrets(internalState, agentKey) {
-  const all =
-    internalState &&
-    internalState.mainState &&
-    internalState.mainState.philosophers &&
-    internalState.mainState.philosophers.secretsRevealed;
-  const list = all && typeof all === "object" ? all[agentKey] : null;
-  return Array.isArray(list) ? list.map(String).map((s) => s.trim()).filter(Boolean) : [];
-}
-
-function buildLlmConversationState(agentKey, options) {
-  const internalState =
-    options && options.internalState && typeof options.internalState === "object"
-      ? options.internalState
-      : {};
-  const session = options && options.session && typeof options.session === "object"
-    ? options.session
-    : {};
-  const dossierSummary = buildDossierSummaryForLlm(session.dossier || null);
-  const preceding = buildPrecedingConversationSummary(session.conversationSummaries);
-
-  const base = { dossier_summary: dossierSummary, preceding_conversation_summary: preceding };
-
-  if (agentKey === "detective" || agentKey === "final_detective") {
+  if (agentKey === "attache") {
+    const apids = s.attache_prompt_instruction_ids;
     return {
-      ...base,
-      therapy_phase: readTherapyPhase(internalState),
-      existential_phase: readExistentialPhase(internalState),
+      dossier_summary: base.dossier_summary,
+      preceding_conversation_summary: base.preceding_conversation_summary,
+      visit_bin: str(s.visit_bin),
+      ms_since_last_visit,
+      time_away_context_line,
+      dossier_stale_by_age: s.dossier_stale_by_age === true,
+      temporal_greeting_mode: str(s.temporal_greeting_mode),
+      attache_prompt_instruction_ids: Array.isArray(apids) ? apids : [],
+    };
+  }
+
+  if (agentKey === "detective") {
+    const ids = s.detective_prompt_instruction_ids;
+    const dtc = s.detective_turn_count;
+    const detective_turn_count =
+      typeof dtc === "number" && Number.isFinite(dtc) && dtc >= 0 ? dtc : null;
+    const cp = s.closure_phase;
+    const closure_phase =
+      cp === "penultimate" || cp === "ultimate" ? cp : null;
+    return {
+      dossier_summary: base.dossier_summary,
+      existential_therapy_phase: base.existential_therapy_phase,
+      preceding_conversation_summary: base.preceding_conversation_summary,
+      visit_bin: str(s.visit_bin),
+      ms_since_last_visit,
+      time_away_context_line,
+      temporal_greeting_mode: str(s.temporal_greeting_mode),
+      detective_prompt_instruction_ids: Array.isArray(ids) ? ids : [],
+      detective_turn_count,
+      closure_phase,
     };
   }
 
   if (agentKey === "lumen" || agentKey === "umbra") {
     return {
-      ...base,
-      narrative_phase: readNarrativePhase(internalState),
-      secrets_revealed: readSecrets(internalState, agentKey),
+      dossier_summary: base.dossier_summary,
+      narrative_phase: base.narrative_phase,
+      secrets_revealed: base.secrets_revealed,
+      preceding_conversation_summary: base.preceding_conversation_summary,
     };
   }
 
@@ -153,7 +102,5 @@ function buildLlmConversationState(agentKey, options) {
 }
 
 module.exports = {
-  buildDossierSummaryForLlm,
-  buildPrecedingConversationSummary,
   buildLlmConversationState,
 };

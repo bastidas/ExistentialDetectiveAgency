@@ -4,8 +4,13 @@
     "detective_response": {
       "type": "string",
       "description": "Your reply in character as the existential detective."
+    },
+    "suggest_existential_phase": {
+      "type": "string",
+      "enum": ["initial", "middle", "final"],
+      "description": "The existential therapy phase you believe should be persisted after this turn (see system instructions). Usually echo the current session phase unless a change is warranted. The server only applies legal single-step changes and may require two consecutive matching suggestions plus dossier rules."
     }
   },
-  "required": ["detective_response"],
+  "required": ["detective_response", "suggest_existential_phase"],
   "additionalProperties": false
 }

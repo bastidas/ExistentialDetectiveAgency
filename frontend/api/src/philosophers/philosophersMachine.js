@@ -1,35 +1,37 @@
 "use strict";
 
-const { setup, createMachine } = require("xstate");
+const { setup, assign } = require("xstate");
 
 /**
- * Placeholder for shared Umbra + Lumen orchestration.
- *
- * Both philosophers will eventually read and write the same XState context here
- * (e.g. debate phase, shared motifs) while keeping separate persona prompts.
- * Wire this into chatService when those flows are ready.
+ * Narrative-only state for Lumen/Umbra (parallel with detective).
+ * Not used as HTTP routing; `chatService` persists per-session snapshot and sends `NARRATIVE_TURN` after each detective turn.
  */
-
-const philosophersOrchestrationMachine = setup({
-  types: {},
+const philosophersNarrativeMachine = setup({
+  actions: {
+    incTurn: assign({
+      narrativeTurn: ({ context }) =>
+        (typeof context.narrativeTurn === "number" ? context.narrativeTurn : 0) + 1,
+    }),
+  },
 }).createMachine({
-  id: "philosophersOrchestration",
-  initial: "idle",
-  context: {},
+  id: "philosophersNarrative",
+  initial: "active",
+  context: {
+    narrativeTurn: 0,
+  },
   states: {
-    idle: {},
+    active: {
+      on: {
+        NARRATIVE_TURN: { actions: ["incTurn"] },
+      },
+    },
   },
 });
 
-/**
- * @param {unknown} _snapshot
- * @returns {Record<string, never>}
- */
-function buildPhilosophersOrchestrationView(_snapshot) {
-  return {};
-}
+/** @deprecated Use `philosophersNarrativeMachine`; kept for require() compatibility. */
+const philosophersMachine = philosophersNarrativeMachine;
 
 module.exports = {
-  philosophersOrchestrationMachine,
-  buildPhilosophersOrchestrationView,
+  philosophersNarrativeMachine,
+  philosophersMachine,
 };
