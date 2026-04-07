@@ -15,6 +15,18 @@ const ATTACHE_MAX_TURNS = 100;
 const RANDOM_Q_ORDER = true;
 
 /**
+ * **XState visualizers (Stately Studio, VS Code XState, @statelyai/inspect):**
+ * - Each state’s `description` names typical `prompt_catalog.json` entry ids for that domain phase.
+ * - `meta` holds structured catalog hints; in Stately Studio select a state to see it in the side panel.
+ *   With `@statelyai/inspect`, the inspected snapshot exposes merged meta for the current state.
+ * - [Tags](https://stately.ai/docs/tags) on each state (`phase:start`, `phase:explore`, `phase:baseline`, …) for
+ *   `snapshot.hasTag(...)` and Stately Studio grouping.
+ * - `@xstate-layout` on the machine controls graph layout in Stately Studio only.
+ * - Runtime ids for the outgoing LLM call: `context.attachePromptInstructionIds` after `ATTACHE_BEGIN_TURN`
+ *   (return tier may prepend `ATTACHE_RETURN_*`; see `attachePromptPolicy`).
+ */
+
+/**
  * @typedef {Object} AttacheState
  * @property {"start"|"explore"|"baseline1"|"baseline2"|"baseline3"|"close"} phase
  * @property {1|2|3|null} baseline_number
@@ -297,11 +309,41 @@ function isValidAttacheOneStepPhasePair(prevPhase, nextPhase) {
 }
 
 /**
- * XState chart for attaché phases (invoked from `chatMachine`).
- * - **intro** ↔ `AttacheState.phase === "start"`
- * - **exploring** ↔ `"explore"`
- * - **baseline1** | **baseline2** | **baseline3** ↔ baseline phases
- * - **closing** ↔ `"close"`
+ * Return-tier bucket for `ATTACHE_BEGIN_TURN` routing (lazy-requires `attachePromptPolicy` on first use).
+ *
+ * @param {Record<string, unknown>} raw — event.payload
+ * @returns {"none"|"dayOrSo"|"longGone"|"staleVisit"}
+ */
+function classifyFirstTurnReturnFromBeginPayload(raw) {
+  const { classifyAttacheFirstTurnReturnPrimary } = require("./attachePromptPolicy");
+  const facts = {
+    visit_bin: raw.visit_bin != null ? String(raw.visit_bin) : "",
+    baseline_return_greeting_pending: raw.baseline_return_greeting_pending === true,
+    stale_dossier_rebaseline: raw.stale_dossier_rebaseline === true,
+    returnCategory: raw.returnCategory != null ? String(raw.returnCategory) : "",
+    has_dossier: raw.has_dossier === true,
+    dossier_stale_by_age: raw.dossier_stale_by_age === true,
+  };
+  return classifyAttacheFirstTurnReturnPrimary(facts);
+}
+
+/**
+ * @param {unknown} event
+ * @returns {Record<string, unknown>|null}
+ */
+function attacheBeginTurnPayload(event) {
+  return event && /** @type {{ type?: string }} */ (event).type === "ATTACHE_BEGIN_TURN" && event.payload != null && typeof event.payload === "object"
+    ? /** @type {Record<string, unknown>} */ (event.payload)
+    : null;
+}
+
+/**
+ * XState chart for attaché phases (invoked from `chatMachine`). Uses [compound parent states](https://stately.ai/docs/parent-states):
+ * - **start.*** ↔ `AttacheState.phase === "start"` — children encode first-turn **return tier** (recency bin / pending /
+ *   `stale_dossier_rebaseline`) vs **subsequent** turns on start; ids still from `computeAttacheCatalogInstructionIds`.
+ * - **explore.exploring** ↔ `"explore"`
+ * - **baseline.baseline1|2|3** ↔ baseline phases
+ * - **close.closing** ↔ `"close"`
  *
  * `context.attacheState` is the source of truth for prompts/runtime; each `ATTACHE_TURN`
  * applies the pure `transition()`, then `always` routes to the matching state node.
@@ -316,11 +358,38 @@ function isValidAttacheOneStepPhasePair(prevPhase, nextPhase) {
  *   (early exit). After nominal baseline3 completion, `potential_next_phase` is `"close"`—generic
  *   `baseline` intent then stays in close for the handoff turn.
  *
- * Prompt catalog ids (`attache_prompt_instruction_ids`) are chosen from **AttacheState + session facts**
- * in `attachePromptPolicy`, not from XState node ids—keep `attacheState` and this machine in sync.
+ * Prompt catalog ids (`attachePromptInstructionIds` on context) are assigned on `ATTACHE_BEGIN_TURN`
+ * via `computeAttacheCatalogInstructionIds` in `attachePromptPolicy` (lazy-required to avoid circular
+ * import with that module). `ATTACHE_TURN` only advances `attacheState`; it does not recompute ids.
  */
 const attacheOrchestratorMachine = setup({
   actions: {
+    applyAttacheBeginTurn: assign(({ context, event }) => {
+      const { computeAttacheCatalogInstructionIds } = require("./attachePromptPolicy");
+      const e = event && event.type === "ATTACHE_BEGIN_TURN" ? event : null;
+      const raw = e && e.payload != null && typeof e.payload === "object" ? e.payload : {};
+      const attacheState =
+        raw.attacheState && typeof raw.attacheState === "object"
+          ? raw.attacheState
+          : context.attacheState != null
+            ? context.attacheState
+            : createAttacheState({});
+      const ids = computeAttacheCatalogInstructionIds({
+        attacheState,
+        attache_turn_count: raw.attache_turn_count,
+        attache_close_count: raw.attache_close_count,
+        visit_bin: raw.visit_bin,
+        baseline_return_greeting_pending: raw.baseline_return_greeting_pending,
+        stale_dossier_rebaseline: raw.stale_dossier_rebaseline,
+        returnCategory: raw.returnCategory,
+        has_dossier: raw.has_dossier,
+        dossier_stale_by_age: raw.dossier_stale_by_age,
+      });
+      return {
+        attacheState,
+        attachePromptInstructionIds: ids,
+      };
+    }),
     applyAttacheTransition: assign(({ context, event }) => {
       const e = event && event.type === "ATTACHE_TURN" ? event : null;
       let intent = "baseline";
@@ -345,94 +414,354 @@ const attacheOrchestratorMachine = setup({
           `Invalid attache domain transition ${String(prev.phase)} -> ${String(next.phase)} (intent=${intent})`
         );
       }
-      return { attacheState: next };
+      return {
+        attacheState: next,
+      };
     }),
   },
   guards: {
-    phaseIsStart: ({ context }) => context.attacheState?.phase === "start",
     phaseIsExplore: ({ context }) => context.attacheState?.phase === "explore",
     phaseIsBaseline1: ({ context }) => context.attacheState?.phase === "baseline1",
     phaseIsBaseline2: ({ context }) => context.attacheState?.phase === "baseline2",
     phaseIsBaseline3: ({ context }) => context.attacheState?.phase === "baseline3",
     phaseIsClose: ({ context }) => context.attacheState?.phase === "close",
+    /** `ATTACHE_BEGIN_TURN` routes explicit `start.*` reentry states; guards read `event.payload` (turn count + visit facts). */
+    beginTurnRoutesStartSubsequent: ({ event }) => {
+      const p = attacheBeginTurnPayload(event);
+      if (!p || p.attacheState?.phase !== "start") return false;
+      const tc = p.attache_turn_count;
+      const n = typeof tc === "number" && Number.isFinite(tc) ? Math.max(0, Math.trunc(tc)) : 0;
+      return n > 0;
+    },
+    beginTurnRoutesStartFirstStaleVisit: ({ event }) => {
+      const p = attacheBeginTurnPayload(event);
+      if (!p || p.attacheState?.phase !== "start") return false;
+      const tc = p.attache_turn_count;
+      const n = typeof tc === "number" && Number.isFinite(tc) ? Math.max(0, Math.trunc(tc)) : 0;
+      if (n !== 0) return false;
+      return classifyFirstTurnReturnFromBeginPayload(p) === "staleVisit";
+    },
+    beginTurnRoutesStartFirstLongGone: ({ event }) => {
+      const p = attacheBeginTurnPayload(event);
+      if (!p || p.attacheState?.phase !== "start") return false;
+      const tc = p.attache_turn_count;
+      const n = typeof tc === "number" && Number.isFinite(tc) ? Math.max(0, Math.trunc(tc)) : 0;
+      if (n !== 0) return false;
+      return classifyFirstTurnReturnFromBeginPayload(p) === "longGone";
+    },
+    beginTurnRoutesStartFirstDayOrSo: ({ event }) => {
+      const p = attacheBeginTurnPayload(event);
+      if (!p || p.attacheState?.phase !== "start") return false;
+      const tc = p.attache_turn_count;
+      const n = typeof tc === "number" && Number.isFinite(tc) ? Math.max(0, Math.trunc(tc)) : 0;
+      if (n !== 0) return false;
+      return classifyFirstTurnReturnFromBeginPayload(p) === "dayOrSo";
+    },
+    beginTurnRoutesStartFirstNoReturn: ({ event }) => {
+      const p = attacheBeginTurnPayload(event);
+      if (!p || p.attacheState?.phase !== "start") return false;
+      const tc = p.attache_turn_count;
+      const n = typeof tc === "number" && Number.isFinite(tc) ? Math.max(0, Math.trunc(tc)) : 0;
+      if (n !== 0) return false;
+      return classifyFirstTurnReturnFromBeginPayload(p) === "none";
+    },
   },
 }).createMachine({
-  /** @xstate-layout N4IgpgJg5mDOIC5QEMAurkGMAWYDyATjnKgWgPYEDEAggCp00DCAEgKID6dAqgEoByAbQAMAXUSgADuVgBLVLPIA7CSAAeiAIwA2YQDoALMIAcAVgDsAJnPCD1zeYA0IAJ6IAtAE5zegMy7TX0thYU9fTwNtTwBfaOc0DGJCYlhSCmoRcSQQaTkFZVUNBAtnNwRfYV89S0tTYU1fTRNLTQNfWPj0LFxk3FSyVEoqQU0sqRl5RRVsopLXRCNTPWNNY3NtY39PbVNTGLiQBO78Ij60wYzLMZyJ-OnQWad54pNDTVrLf0bQ81MDDsOXSSpxIAyGgl811ykwKM0QczK2k0mj0IW01mMxk8tXCmgBR2BKXO4IMUNuU0K8KeZXMDT0uhCvgMmkCnmMwm0+KBPRB-XSw1MZLyFLhxWpiGC+m0jVq5mMkXMVk2sQOSnIEDgqgJPKJYIIqmhd0pCE8pUQWL07zqlWl2gMbQaXMSOrOer0siUpHIBvJsIeEoihlCuNMxks7PqBjNCGsnmqq3WFSsbKdx16oPSejAakkABtKB6oD7hX71AGDEGwp4WWGI61o74VssratfEy7CzU4TXZmAEbIWBgXMesCaYsw+5lmOBoxVmvhkL154GeVB9HmXx7UPSvEHbUnXV9gdDkeWcdG0WWGfB6uhheR6OhnwhELhswb2zGLsujMXPT9wdhyUMBfHPEV-WnCtZxDWtFyjZ4NjjPZfDlZkE0if4925A8ez-TB8zkJQi2yQ1wKnK8oJvec63gsoHG0elahCOVkUCYxORVIA */
+  /** @xstate-layout N4IgpgJg5mDOIC5QEMAurkGMAWYDyATjnKgWgPYEDEAggCp00DCAEgKID6AQmwOICSAOQ50AqgCVBAbQAMAXUSgADuVgBLVGvIA7RSAAeiAIwBOAGwA6MwBYA7EYBMZgBxHr15w4A0IAJ6IAWiNHAGYLI1s7CJsI2xCAX3ifNAxiQmJYUgpqekZWTh4BYTFJKSMFJBAVdU0dPUMEIOsjCwcQ6xC451d3Z3Mff0aHawcLTttbMwBWGSMpueczW0Tk9CxcdNxMslRKWgZmdm4+IREJaQcK5VUNLV1KhocnC08psyNnW3M+6yWBwM61isbimoJkw2C0xWIBS63wRC2WV2OQO+WORTOpRCVyqN1q91ADVMJlaU2sJgcUwcMneIUp-0aUxCLRkXXsS1mb2hsLSCJIOz2uUOBROxXOUmsOOqtzqD2MtimFhk4LMIVcHziZlVDICtgcznClNsnxMU26Sym3LWvIySMFqKOhVOJWkUyleLu9WMZhkLwc9j6RhCISmppkzh1i19ZlNT3aarcJhMVtSGz522y+zyRxdsndNU9csZDhanRkofa+uCJlsOuCcxexvmznaNdMZhTcM2-Mzeb00vxXqGZosEzi4PGIxsOqepKp4f1nX9lI7SRh1rTtoF1DK+ZlBIMiDMow8SY8Jess2Vtb8iA8QOcM2Cw0fdKpnZtiO3VCkl37HtlQkjxPPoTHPNwr1ZBlJhaIxlSMH1JjJJNLTXHlNy-XtsX-AtAMPBBjwsU8wM8CC4Kg28EG6MIfVmX4ZBMEITFmVdVlTeEt17SUcP3IdCOI8DL3Im9BnIyxyKDNw4xkTpEjXbRyAgOA9HQjjMORHjByLXUGPCawzTaf1wymBU6xLMJnA6AzKXDRxljQjc1J7ZELEyZACFQTTCyAhAviBMC2kskNnGVEwI0ooJHEseMyVcWxlRbD8MOcyhXIwDyLDUbRSHIcQwDAbKCF8ABlABXAAjWAwAAR1KgrPMqAdvPwyzRgCtUrJChjwsGAJGIfKyQnBOYlneJKnIzFy3IyrKcoAMTUAhMkEXKwFQUqCAPJq8IaVqLHaoKzVCnrAk1MYrKpDwVUShz2O7SbUum1BMsK8gFqW1AABFkF8QhivILydsQPaDs646dSZWwXisyJIg8H0Elurt0ztAg0vc57ZoIN7FsyAAZHQoF4HQwEBg9dpGfaRg64LwYi5kSSC2jH1mY1rHG+7UfRmbXvezJiowAAbMAADU1BqMmhxB6nDq6sKzNLDpj2ZNwJhpDmUe3CwwH0JRBcoUnGoA8m730pVFmmdplUpJiGQQtqLbVEwPkWJkNc4lydb1g3td1-WCCyqBJaLckwnDLUmUvcEmRMBkHDA-aLZMyIg1DGx3fU1LyuQKrBayw3rlwk2ECYyxyTPGx5mYkYGVBA06QpNoIgWEMM5StHs9z-OLE7sA8+0MAjGDnz3CBcuwMr0wZBryiY19BuITPVkJjbh6O5zvvu97-uwAcYf8NHoikwn-Sp5nwZXFGTxG7iJ47DC1eue3reN53kJ94aQ-x9+U-q+8SjGKKgXlFGY3Q5iPy1pgfWVUP6BC1LBfSng6TxUfKZSilkDRfBpKNCkHxgwQOyBYKBqgwBEOgYHWBjRaR6QMsg4yaDBhhV9Fglw0w3BLAVHJeIQA */
   id: "attacheOrchestrator",
-  initial: "intro",
+  initial: "start",
   context: {
     /** @type {AttacheState|null} */
     attacheState: createAttacheState({ phase: "start" }),
+    /** @type {string[]} Resolved catalog ids for the outgoing prompt this turn (set by `ATTACHE_BEGIN_TURN`). */
+    attachePromptInstructionIds: [],
   },
   states: {
-    intro: {
-      description: "Opening / orientation (phase start)",
-
-      meta: {
-        domainPhase: "start",
-        domainNextPhases: ["explore", "baseline1", "close"],
-      }
-    },
-
-    exploring: {
-      description: "Agency exploration, baseline paused",
-      meta: {
-        domainPhase: "explore",
-        domainNextPhases: ["explore", "baseline1", "baseline2", "baseline3", "close"],
-        note: "Resume target is potential_next_phase (interrupted baseline).",
+    start: {
+      description:
+        "AttacheState.phase === \"start\". Children mirror first-turn return tier (visit bin / pending / stale dossier flag) vs later turns — `classifyAttacheFirstTurnReturnPrimary` + guarded `ATTACHE_BEGIN_TURN`.",
+      tags: ["domain:start", "phase:start"],
+      initial: "introFirstNoReturn",
+      states: {
+        introReentrySubsequent: {
+          tags: ["intro:active", "startReentry:subsequent"],
+          description:
+            "Still on start, attache_turn_count ≥ 1: no ATTACHE_RETURN_* block; phase tier only (orientation + baseline delivery when applicable).",
+          meta: {
+            domainPhase: "start",
+            domainNextPhases: ["explore", "baseline1", "close"],
+            promptCatalog: {
+              phaseTierTypical: ["ATTACHE_START_ORIENTATION", "ATTACHE_BASELINE_DELIVERY_START"],
+            },
+          },
+        },
+        introFirstNoReturn: {
+          tags: ["intro:active", "startReentry:first", "returnPrimary:none"],
+          description:
+            "First attaché turn, no primary return row (e.g. brief bin). Phase tier only; append ids only when return tier non-empty.",
+          meta: {
+            domainPhase: "start",
+            domainNextPhases: ["explore", "baseline1", "close"],
+            promptCatalog: {
+              phaseTierTypical: ["ATTACHE_START_ORIENTATION"],
+              returnTierPrimary: [],
+            },
+          },
+        },
+        introFirstDayOrSo: {
+          tags: ["intro:active", "startReentry:first", "returnPrimary:dayOrSo"],
+          description:
+            "First turn + ATTACHE_RETURN_DAY_OR_SO (+ one ATTACHE_RETURN_APPEND_*). Typical: visit_bin moderate or returnCategory.",
+          meta: {
+            domainPhase: "start",
+            promptCatalog: {
+              returnTierPrimary: ["ATTACHE_RETURN_DAY_OR_SO"],
+              phaseTierTypical: ["ATTACHE_START_ORIENTATION"],
+            },
+          },
+        },
+        introFirstLongGone: {
+          tags: ["intro:active", "startReentry:first", "returnPrimary:longGone"],
+          description:
+            "First turn + ATTACHE_RETURN_LONG_GONE (pending + long bin, or returnCategory).",
+          meta: {
+            domainPhase: "start",
+            promptCatalog: {
+              returnTierPrimary: ["ATTACHE_RETURN_LONG_GONE"],
+              phaseTierTypical: ["ATTACHE_START_ORIENTATION"],
+            },
+          },
+        },
+        introFirstStaleVisit: {
+          tags: ["intro:active", "startReentry:first", "returnPrimary:staleVisit"],
+          description:
+            "First turn + ATTACHE_RETURN_STALE_VISIT (pending + stale bin, or stale_dossier_rebaseline).",
+          meta: {
+            domainPhase: "start",
+            promptCatalog: {
+              returnTierPrimary: ["ATTACHE_RETURN_STALE_VISIT"],
+              phaseTierTypical: ["ATTACHE_START_ORIENTATION"],
+            },
+          },
+        },
       },
     },
 
-    baseline1: {
-      description: "Baseline phase 1",
-      meta: {
-        domainPhase: "baseline1",
-        domainNextPhases: ["baseline1", "baseline2", "explore", "close"],
+    explore: {
+      description: "Parent: AttacheState.phase === \"explore\".",
+      tags: ["domain:explore"],
+      initial: "exploring",
+      states: {
+        exploring: {
+          tags: ["phase:explore"],
+          description:
+            "explore → ATTACHE_EXPLORE_GENERAL or ATTACHE_EXPLORE_RESUME_BASELINE + ATTACHE_BASELINE_DELIVERY_START",
+          meta: {
+            domainPhase: "explore",
+            domainNextPhases: ["explore", "baseline1", "baseline2", "baseline3", "close"],
+            promptCatalog: {
+              whenResumingBaseline: ["ATTACHE_EXPLORE_RESUME_BASELINE", "ATTACHE_BASELINE_DELIVERY_START"],
+              whenExploringFromStart: ["ATTACHE_EXPLORE_GENERAL", "ATTACHE_BASELINE_DELIVERY_START"],
+            },
+            note: "Resume target is potential_next_phase (interrupted baseline).",
+          },
+        },
       },
     },
 
-    baseline2: {
-      description: "Baseline phase 2",
-      meta: {
-        domainPhase: "baseline2",
-        domainNextPhases: ["baseline2", "baseline3", "explore", "close"],
+    baseline: {
+      description: "Parent: baseline block (phases 1–3).",
+      tags: ["domain:baseline", "phase:baseline"],
+      initial: "baseline1",
+      states: {
+        baseline1: {
+          tags: ["baseline:1"],
+          description:
+            "baseline1 → ATTACHE_BASELINE_DELIVERY_START (question_index 0) or ATTACHE_BASELINE_MID_QUESTION (mid)",
+          meta: {
+            domainPhase: "baseline1",
+            domainNextPhases: ["baseline1", "baseline2", "explore", "close"],
+            promptCatalog: {
+              firstQuestionInBlock: ["ATTACHE_BASELINE_DELIVERY_START"],
+              midBlock: ["ATTACHE_BASELINE_MID_QUESTION"],
+            },
+          },
+        },
+
+        baseline2: {
+          tags: ["baseline:2"],
+          description:
+            "baseline2 → ATTACHE_BASELINE_DELIVERY_START (question_index 0) or ATTACHE_BASELINE_MID_QUESTION (mid)",
+          meta: {
+            domainPhase: "baseline2",
+            domainNextPhases: ["baseline2", "baseline3", "explore", "close"],
+            promptCatalog: {
+              firstQuestionInBlock: ["ATTACHE_BASELINE_DELIVERY_START"],
+              midBlock: ["ATTACHE_BASELINE_MID_QUESTION"],
+            },
+          },
+        },
+
+        baseline3: {
+          tags: ["baseline:3"],
+          description:
+            "baseline3 → ATTACHE_BASELINE_DELIVERY_START (question_index 0) or ATTACHE_BASELINE_MID_QUESTION (mid)",
+          meta: {
+            domainPhase: "baseline3",
+            domainNextPhases: ["baseline3", "explore", "close"],
+            promptCatalog: {
+              firstQuestionInBlock: ["ATTACHE_BASELINE_DELIVERY_START"],
+              midBlock: ["ATTACHE_BASELINE_MID_QUESTION"],
+            },
+          },
+        },
       },
     },
 
-    baseline3: {
-      description: "Baseline phase 3",
-      meta: {
-        domainPhase: "baseline3",
-        domainNextPhases: ["baseline3", "explore", "close"],
+    close: {
+      description: "Parent: handoff / close toward detective.",
+      tags: ["domain:close"],
+      initial: "closing",
+      states: {
+        closing: {
+          tags: ["phase:close"],
+          description:
+            "close → ATTACHE_CLOSE_EARLY_EXIT_CONFIRM | ATTACHE_CLOSE_FINAL | ATTACHE_CLOSE_DEFAULT (see phase_before_close, close_count, current_phase_id)",
+          meta: {
+            domainPhase: "close",
+            domainNextPhases: ["close", "explore", "baseline1", "baseline2", "baseline3"],
+            promptCatalog: {
+              earlyExitFromBaselineNotFinal: ["ATTACHE_CLOSE_EARLY_EXIT_CONFIRM"],
+              finalAfterBaseline3: ["ATTACHE_CLOSE_FINAL"],
+              defaultClose: ["ATTACHE_CLOSE_DEFAULT"],
+            },
+            note: "Resume baseline uses phase_before_close + question_index_before_close when applicable.",
+          },
+        },
       },
     },
-
-    closing: {
-      description: "Handoff / farewell toward detective",
-      meta: {
-        domainPhase: "close",
-        domainNextPhases: ["close", "explore", "baseline1", "baseline2", "baseline3"],
-        note: "Resume baseline uses phase_before_close + question_index_before_close when applicable.",
-      },
-    }
   },
   on: {
+    ATTACHE_BEGIN_TURN: [
+      {
+        guard: "beginTurnRoutesStartSubsequent",
+        target: ".start.introReentrySubsequent",
+        actions: ["applyAttacheBeginTurn"],
+      },
+      {
+        guard: "beginTurnRoutesStartFirstStaleVisit",
+        target: ".start.introFirstStaleVisit",
+        actions: ["applyAttacheBeginTurn"],
+      },
+      {
+        guard: "beginTurnRoutesStartFirstLongGone",
+        target: ".start.introFirstLongGone",
+        actions: ["applyAttacheBeginTurn"],
+      },
+      {
+        guard: "beginTurnRoutesStartFirstDayOrSo",
+        target: ".start.introFirstDayOrSo",
+        actions: ["applyAttacheBeginTurn"],
+      },
+      {
+        guard: "beginTurnRoutesStartFirstNoReturn",
+        target: ".start.introFirstNoReturn",
+        actions: ["applyAttacheBeginTurn"],
+      },
+      { actions: ["applyAttacheBeginTurn"] },
+    ],
     ATTACHE_TURN: {
       actions: ["applyAttacheTransition"],
     },
   },
-  /** Sync orchestrator node to `context.attacheState.phase` after each `ATTACHE_TURN`. */
+  /**
+   * Sync orchestrator to `context.attacheState.phase` after `ATTACHE_TURN`.
+   * Do **not** auto-target `start.*` here — `ATTACHE_BEGIN_TURN` guards own return-tier substates.
+   */
   always: [
-    { guard: "phaseIsStart", target: ".intro" },
-    { guard: "phaseIsExplore", target: ".exploring" },
-    { guard: "phaseIsBaseline1", target: ".baseline1" },
-    { guard: "phaseIsBaseline2", target: ".baseline2" },
-    { guard: "phaseIsBaseline3", target: ".baseline3" },
-    { guard: "phaseIsClose", target: ".closing" },
+    { guard: "phaseIsExplore", target: ".explore.exploring" },
+    { guard: "phaseIsBaseline1", target: ".baseline.baseline1" },
+    { guard: "phaseIsBaseline2", target: ".baseline.baseline2" },
+    { guard: "phaseIsBaseline3", target: ".baseline.baseline3" },
+    { guard: "phaseIsClose", target: ".close.closing" },
   ],
 });
 
+/** Pre–compound-state snapshots used a string `value` (e.g. `"intro"`). Maps to nested XState v5 value. */
+const ATTACHE_ORCH_FLAT_VALUE_TO_COMPOUND = {
+  intro: { start: "introFirstNoReturn" },
+  exploring: { explore: "exploring" },
+  baseline1: { baseline: "baseline1" },
+  baseline2: { baseline: "baseline2" },
+  baseline3: { baseline: "baseline3" },
+  closing: { close: "closing" },
+};
+
+/**
+ * Rewrite legacy `snapshot.value` so `createActor(attacheOrchestratorMachine, { snapshot })` accepts old persistence.
+ *
+ * @param {unknown} snapshot
+ * @returns {unknown}
+ */
+function migrateAttacheOrchestratorMachineSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") return snapshot;
+  const rec = /** @type {Record<string, unknown>} */ (snapshot);
+  const v = rec.value;
+  if (typeof v === "string") {
+    const compound = ATTACHE_ORCH_FLAT_VALUE_TO_COMPOUND[v];
+    if (!compound) return snapshot;
+    return { ...rec, value: compound };
+  }
+  if (v && typeof v === "object" && !Array.isArray(v) && /** @type {{ start?: string }} */ (v).start === "intro") {
+    return { ...rec, value: { .../** @type {Record<string, unknown>} */ (v), start: "introFirstNoReturn" } };
+  }
+  return snapshot;
+}
+
+/**
+ * Fix nested invoked child snapshot on a persisted `chatMachine` root (in-memory / disk).
+ *
+ * @param {unknown} persistedRoot
+ * @returns {unknown}
+ */
+function migratePersistedChatSnapshotAttacheOrchestrator(persistedRoot) {
+  if (!persistedRoot || typeof persistedRoot !== "object") return persistedRoot;
+  const root = /** @type {Record<string, unknown>} */ (persistedRoot);
+  const children = root.children;
+  if (!children || typeof children !== "object") return persistedRoot;
+  const ch = /** @type {Record<string, unknown>} */ (children);
+  const orch = ch.attacheOrchestrator;
+  if (!orch || typeof orch !== "object") return persistedRoot;
+  const o = /** @type {Record<string, unknown>} */ (orch);
+  const snap = o.snapshot;
+  const migrated = migrateAttacheOrchestratorMachineSnapshot(snap);
+  if (migrated === snap) return persistedRoot;
+  return {
+    ...root,
+    children: {
+      ...ch,
+      attacheOrchestrator: { ...o, snapshot: migrated },
+    },
+  };
+}
+
+/**
+ * @param {unknown} snapshot — persisted `attacheOrchestratorMachine` snapshot
+ * @returns {string[]}
+ */
+function getAttachePromptInstructionIdsFromSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") return [];
+  const ctx = /** @type {{ context?: { attachePromptInstructionIds?: unknown } }} */ (snapshot).context;
+  if (!ctx || typeof ctx !== "object") return [];
+  const ids = ctx.attachePromptInstructionIds;
+  if (!Array.isArray(ids)) return [];
+  return ids.map((id) => String(id || "").trim()).filter(Boolean);
+}
+
 module.exports = {
+  migrateAttacheOrchestratorMachineSnapshot,
+  migratePersistedChatSnapshotAttacheOrchestrator,
+  getAttachePromptInstructionIdsFromSnapshot,
   ATTACHE_MAX_TURNS,
   RANDOM_Q_ORDER,
   MIN_BASELINE1_QUESTIONS,

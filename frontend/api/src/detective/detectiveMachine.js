@@ -4,7 +4,10 @@ const { setup, assign } = require("xstate");
 const { composeAgentPrompt } = require("../prompts/promptComposer");
 const { getPromptRegistryEntry } = require("../prompts/promptRegistry");
 const { buildMockAgentReply } = require("../agents/mockAgentTurn");
-const { computeDetectiveCatalogInstructionIds } = require("./detectivePromptPolicy");
+const {
+  computeDetectiveCatalogInstructionIds,
+  DETECTIVE_CATALOG_ID_BY_VISIT_BIN,
+} = require("./detectivePromptPolicy");
 
 /**
  * Legal single-step transitions only: initial↔middle, middle↔final (no initial↔final).
@@ -32,6 +35,11 @@ function isLegalNeighborPhaseTransition(from, to) {
  *   [`runDetectivePromptPolicyTurn`](./detectiveExistentialSession.js).
  *
  * `MOCK_TURN` builds a diagnostic string via composeAgentPrompt + buildMockAgentReply (no HTTP).
+ *
+ * **Visualizers (Stately Studio, VS Code XState, @statelyai/inspect):** `description` and `meta` on
+ * `active` document how `visit_bin` and closure map to `prompt_catalog.json` ids. Inspect `state.meta`
+ * on the active node, or use Studio’s state panel. Runtime ids live in `context.instructionIds` after
+ * `POLICY_TURN`.
  */
 const detectiveMachine = setup({
   guards: {
@@ -127,6 +135,19 @@ const detectiveMachine = setup({
   },
   states: {
     active: {
+      description:
+        "POLICY_TURN → context.instructionIds. visit_bin → DETECTIVE_RETURN_*; closure_phase → DETECTIVE_CLOSURE_* (see meta.promptCatalog).",
+      meta: {
+        promptCatalog: {
+          visitBinToId: { ...DETECTIVE_CATALOG_ID_BY_VISIT_BIN },
+          closurePhaseToId: {
+            penultimate: "DETECTIVE_CLOSURE_PENULTIMATE",
+            ultimate: "DETECTIVE_CLOSURE_ULTIMATE",
+          },
+          legacyReturnCategory:
+            "When visit_bin missing: returnCategory maps to DETECTIVE_RETURN_BRIEF | DAY_OR_SO | LONG_GONE | UNKNOWN (see detectivePromptPolicy).",
+        },
+      },
       entry: [{ type: "seed" }],
       on: {
         MOCK_TURN: { actions: ["runMockTurn"] },

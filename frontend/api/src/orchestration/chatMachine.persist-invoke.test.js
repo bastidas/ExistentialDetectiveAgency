@@ -10,7 +10,13 @@ const {
   notifyAttachePreludeComplete,
   getChatEnvelopeForSession,
 } = require("./chatMachine");
-const { attacheOrchestratorMachine } = require("../attache/attacheMachine");
+const {
+  attacheOrchestratorMachine,
+  createAttacheState,
+  getAttachePromptInstructionIdsFromSnapshot,
+  migrateAttacheOrchestratorMachineSnapshot,
+  migratePersistedChatSnapshotAttacheOrchestrator,
+} = require("../attache/attacheMachine");
 
 test("chatMachine: dossier sync + USER_MESSAGE reaches attache agent + visit timeAway", () => {
   const actor = createActor(chatMachine);
@@ -43,10 +49,71 @@ test("getPersistedSnapshot retains invoked attacheOrchestrator child", () => {
   b.stop();
 });
 
+test("attacheOrchestratorMachine: ATTACHE_BEGIN_TURN sets ids; ATTACHE_TURN preserves attachePromptInstructionIds", () => {
+  const actor = createActor(attacheOrchestratorMachine);
+  actor.start();
+  actor.send({
+    type: "ATTACHE_BEGIN_TURN",
+    payload: {
+      attacheState: createAttacheState({ phase: "start" }),
+      attache_turn_count: 0,
+      attache_close_count: 0,
+      visit_bin: "brief",
+      baseline_return_greeting_pending: false,
+      stale_dossier_rebaseline: false,
+      returnCategory: "",
+      has_dossier: false,
+      dossier_stale_by_age: false,
+    },
+  });
+  const snap1 = actor.getSnapshot();
+  const ids = snap1.context.attachePromptInstructionIds;
+  assert.ok(Array.isArray(ids) && ids.includes("ATTACHE_START_ORIENTATION"));
+  actor.send({
+    type: "ATTACHE_TURN",
+    llmOutput: {
+      user_intends_explore: false,
+      user_intends_close: false,
+      asked_baseline_question: true,
+    },
+  });
+  const after = actor.getSnapshot().context.attachePromptInstructionIds;
+  assert.deepEqual(after, ids);
+  assert.equal(actor.getSnapshot().context.attacheState.phase, "baseline1");
+  const persisted =
+    typeof actor.getPersistedSnapshot === "function" ? actor.getPersistedSnapshot() : null;
+  if (persisted) {
+    assert.deepEqual(getAttachePromptInstructionIdsFromSnapshot(persisted), ids);
+  }
+  actor.stop();
+});
+
+test("attacheOrchestratorMachine: states expose Stately tags (hasTag)", () => {
+  const actor = createActor(attacheOrchestratorMachine);
+  actor.start();
+  const snap = actor.getSnapshot();
+  assert.deepEqual(snap.value, { start: "introFirstNoReturn" });
+  assert.equal(typeof snap.hasTag, "function");
+  assert.equal(snap.hasTag("phase:start"), true);
+  assert.equal(snap.hasTag("phase:baseline"), false);
+  actor.send({
+    type: "ATTACHE_TURN",
+    llmOutput: {
+      user_intends_explore: false,
+      user_intends_close: false,
+      asked_baseline_question: true,
+    },
+  });
+  const snap2 = actor.getSnapshot();
+  assert.equal(snap2.hasTag("phase:baseline"), true);
+  assert.equal(snap2.hasTag("baseline:1"), true);
+  actor.stop();
+});
+
 test("attacheOrchestratorMachine: explicit states follow AttacheState.phase", () => {
   const actor = createActor(attacheOrchestratorMachine);
   actor.start();
-  assert.equal(actor.getSnapshot().value, "intro");
+  assert.deepEqual(actor.getSnapshot().value, { start: "introFirstNoReturn" });
   assert.equal(actor.getSnapshot().context.attacheState.phase, "start");
   actor.send({
     type: "ATTACHE_TURN",
@@ -56,9 +123,74 @@ test("attacheOrchestratorMachine: explicit states follow AttacheState.phase", ()
       asked_baseline_question: true,
     },
   });
-  assert.equal(actor.getSnapshot().value, "baseline1");
+  assert.deepEqual(actor.getSnapshot().value, { baseline: "baseline1" });
   assert.equal(actor.getSnapshot().context.attacheState.phase, "baseline1");
   actor.stop();
+});
+
+test("migrateAttacheOrchestratorMachineSnapshot: flat value → compound", () => {
+  const flat = { status: "active", value: "intro", context: { attacheState: createAttacheState({ phase: "start" }) } };
+  const out = migrateAttacheOrchestratorMachineSnapshot(flat);
+  assert.deepEqual(/** @type {{ value: unknown }} */ (out).value, { start: "introFirstNoReturn" });
+});
+
+test("attacheOrchestratorMachine: ATTACHE_BEGIN_TURN routes start by return tier (moderate → introFirstDayOrSo)", () => {
+  const actor = createActor(attacheOrchestratorMachine);
+  actor.start();
+  actor.send({
+    type: "ATTACHE_BEGIN_TURN",
+    payload: {
+      attacheState: createAttacheState({ phase: "start" }),
+      attache_turn_count: 0,
+      attache_close_count: 0,
+      visit_bin: "moderate",
+      baseline_return_greeting_pending: false,
+      stale_dossier_rebaseline: false,
+      returnCategory: "",
+      has_dossier: true,
+      dossier_stale_by_age: false,
+    },
+  });
+  assert.deepEqual(actor.getSnapshot().value, { start: "introFirstDayOrSo" });
+  const ids = actor.getSnapshot().context.attachePromptInstructionIds;
+  assert.ok(ids.includes("ATTACHE_RETURN_DAY_OR_SO"));
+  assert.ok(ids.includes("ATTACHE_START_ORIENTATION"));
+  actor.stop();
+});
+
+test("attacheOrchestratorMachine: ATTACHE_BEGIN_TURN start + turn_count>0 → introReentrySubsequent", () => {
+  const actor = createActor(attacheOrchestratorMachine);
+  actor.start();
+  actor.send({
+    type: "ATTACHE_BEGIN_TURN",
+    payload: {
+      attacheState: createAttacheState({ phase: "start" }),
+      attache_turn_count: 1,
+      attache_close_count: 0,
+      visit_bin: "moderate",
+      baseline_return_greeting_pending: false,
+      stale_dossier_rebaseline: false,
+      returnCategory: "",
+      has_dossier: false,
+      dossier_stale_by_age: false,
+    },
+  });
+  assert.deepEqual(actor.getSnapshot().value, { start: "introReentrySubsequent" });
+  const ids = actor.getSnapshot().context.attachePromptInstructionIds;
+  assert.ok(!ids.some((id) => String(id).startsWith("ATTACHE_RETURN_")));
+  actor.stop();
+});
+
+test("migratePersistedChatSnapshotAttacheOrchestrator: nested child flat value", () => {
+  const root = {
+    children: {
+      attacheOrchestrator: {
+        snapshot: { status: "active", value: "baseline1", context: {} },
+      },
+    },
+  };
+  const out = migratePersistedChatSnapshotAttacheOrchestrator(root);
+  assert.deepEqual(out.children.attacheOrchestrator.snapshot.value, { baseline: "baseline1" });
 });
 
 test("runChatTurn session persistence restores agent + envelope", () => {

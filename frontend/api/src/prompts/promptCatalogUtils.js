@@ -4,6 +4,7 @@ const { extractReturnPromptFacts } = require("./returnPromptFacts");
 const { computeDetectiveCatalogInstructionIds } = require("../detective/detectivePromptPolicy");
 const { isDetectiveSessionFirstTurn } = require("../detective/detectiveSessionTurn");
 const { computeAttacheCatalogInstructionIds } = require("../attache/attachePromptPolicy");
+const { getAttachePromptInstructionIdsFromSnapshot } = require("../attache/attacheMachine");
 
 /**
  * @param {object|null|undefined} catalogJson
@@ -102,16 +103,24 @@ function buildDetectiveSessionForTurnInstructions(session, internalState) {
 }
 
 /**
- * Same session merge as `composeAgentPrompt` for attaché: effective `attache_prompt_instruction_ids`
- * from `AttacheState` + return/time-away facts (`computeAttacheCatalogInstructionIds`).
+ * Single precedence for attaché catalog ids: orchestrator snapshot (`ATTACHE_BEGIN_TURN`) wins, then explicit
+ * `session.attache_prompt_instruction_ids`, then `computeAttacheCatalogInstructionIds` (tests / no snapshot).
  *
  * @param {object|undefined|null} session
  * @param {object|undefined|null} internalState
- * @returns {Record<string, unknown>}
+ * @returns {string[]}
  */
-function buildAttacheSessionForTurnInstructions(session, internalState) {
+function resolveAttachePromptInstructionIdsForTurn(session, internalState) {
   const sess = session && typeof session === "object" ? session : {};
-  const facts = extractReturnPromptFacts(session, internalState);
+  const fromSnap = getAttachePromptInstructionIdsFromSnapshot(sess.attacheOrchestratorSnapshot);
+  if (fromSnap.length > 0) return fromSnap;
+
+  const explicit = Array.isArray(sess.attache_prompt_instruction_ids)
+    ? sess.attache_prompt_instruction_ids.map((id) => String(id || "").trim()).filter(Boolean)
+    : [];
+  if (explicit.length > 0) return explicit;
+
+  const facts = extractReturnPromptFacts(sess, internalState);
   const attacheState =
     sess.attacheState && typeof sess.attacheState === "object" ? sess.attacheState : null;
 
@@ -124,24 +133,30 @@ function buildAttacheSessionForTurnInstructions(session, internalState) {
       ? sess.attache_close_count
       : 0;
 
-  let effectiveIds = Array.isArray(sess.attache_prompt_instruction_ids)
-    ? sess.attache_prompt_instruction_ids.map((id) => String(id || "").trim()).filter(Boolean)
-    : null;
+  return computeAttacheCatalogInstructionIds({
+    attacheState,
+    attache_turn_count,
+    attache_close_count,
+    visit_bin: facts.visit_bin != null ? String(facts.visit_bin) : "",
+    baseline_return_greeting_pending: facts.baseline_return_greeting_pending === true,
+    stale_dossier_rebaseline: facts.stale_dossier_rebaseline === true,
+    returnCategory: facts.returnCategory != null ? String(facts.returnCategory) : "",
+    has_dossier: facts.has_dossier === true,
+    dossier_stale_by_age: facts.dossier_stale_by_age === true,
+  });
+}
 
-  if (effectiveIds == null) {
-    effectiveIds = computeAttacheCatalogInstructionIds({
-      attacheState,
-      attache_turn_count,
-      attache_close_count,
-      visit_bin: facts.visit_bin != null ? String(facts.visit_bin) : "",
-      baseline_return_greeting_pending: facts.baseline_return_greeting_pending === true,
-      stale_dossier_rebaseline: facts.stale_dossier_rebaseline === true,
-      returnCategory: facts.returnCategory != null ? String(facts.returnCategory) : "",
-      has_dossier: facts.has_dossier === true,
-      dossier_stale_by_age: facts.dossier_stale_by_age === true,
-    });
-  }
-
+/**
+ * Same session merge as `composeAgentPrompt` for attaché: effective `attache_prompt_instruction_ids`
+ * via {@link resolveAttachePromptInstructionIdsForTurn}.
+ *
+ * @param {object|undefined|null} session
+ * @param {object|undefined|null} internalState
+ * @returns {Record<string, unknown>}
+ */
+function buildAttacheSessionForTurnInstructions(session, internalState) {
+  const sess = session && typeof session === "object" ? session : {};
+  const effectiveIds = resolveAttachePromptInstructionIdsForTurn(sess, internalState);
   return Object.assign({}, sess, {
     attache_prompt_instruction_ids: effectiveIds,
   });
@@ -152,4 +167,5 @@ module.exports = {
   resolveSpecialInstructionEntries,
   buildDetectiveSessionForTurnInstructions,
   buildAttacheSessionForTurnInstructions,
+  resolveAttachePromptInstructionIdsForTurn,
 };

@@ -1,7 +1,8 @@
 "use strict";
 
 /**
- * Maps attaché domain phase to orchestrator state node id (see `attacheOrchestratorMachine`).
+ * Maps attaché domain phase to the **leaf** orchestrator state name inside compound regions
+ * (e.g. `intro` under `start`, `baseline1` under `baseline` — see `attacheOrchestratorMachine`).
  *
  * @param {string} [phase]
  * @returns {string}

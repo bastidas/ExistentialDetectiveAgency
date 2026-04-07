@@ -4,7 +4,9 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { selectSpecialInstructions } = require("./instructionSelection");
 const { computeAttacheReturnTierInstructionIds } = require("../attache/attachePromptPolicy");
-const { createAttacheState } = require("../attache/attacheMachine");
+const { createAttacheState, getAttachePromptInstructionIdsFromSnapshot } = require("../attache/attacheMachine");
+const { advanceAttacheOrchestratorForPromptTurn } = require("../attache/attacheOrchestratorAdvance");
+const { resolveAttachePromptInstructionIdsForTurn } = require("./promptCatalogUtils");
 
 test("selectSpecialInstructions attache returns [] (ids from attachePromptPolicy + session merge)", () => {
   assert.deepEqual(
@@ -91,4 +93,35 @@ test("computeAttacheReturnTierInstructionIds + phase: moderate then start orient
     "ATTACHE_RETURN_APPEND_NO_DOSSIER",
     "ATTACHE_START_ORIENTATION",
   ]);
+});
+
+test("resolveAttachePromptInstructionIdsForTurn prefers orchestrator snapshot over explicit session ids", () => {
+  const session = {
+    attacheState: createAttacheState({ phase: "baseline1", question_index: 1 }),
+    attache_turn_count: 0,
+    attache_close_count: 0,
+    visit_bin: "brief",
+    attache_prompt_instruction_ids: ["SHOULD_NOT_WIN"],
+  };
+  const snap = advanceAttacheOrchestratorForPromptTurn(null, session);
+  const fromSnap = getAttachePromptInstructionIdsFromSnapshot(snap);
+  assert.ok(fromSnap.length > 0);
+  const resolved = resolveAttachePromptInstructionIdsForTurn(
+    { ...session, attacheOrchestratorSnapshot: snap },
+    {}
+  );
+  assert.deepEqual(resolved, fromSnap);
+  assert.ok(!resolved.includes("SHOULD_NOT_WIN"));
+});
+
+test("resolveAttachePromptInstructionIdsForTurn uses explicit ids when no snapshot ids", () => {
+  const resolved = resolveAttachePromptInstructionIdsForTurn(
+    {
+      attacheState: createAttacheState({ phase: "start" }),
+      attache_turn_count: 0,
+      attache_prompt_instruction_ids: ["ATTACHE_START_ORIENTATION"],
+    },
+    {}
+  );
+  assert.deepEqual(resolved, ["ATTACHE_START_ORIENTATION"]);
 });

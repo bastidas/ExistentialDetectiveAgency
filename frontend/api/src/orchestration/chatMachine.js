@@ -4,7 +4,10 @@ const { setup, assign, createActor } = require("xstate");
 const { classifyTimeAway, getTimeAwayThresholds } = require("./timeAwayClassification");
 const { userHasPersistedDossier } = require("../dossier_and_summarize/dossierPresence");
 const { isDossierStaleByAge } = require("../dossier_and_summarize/dossierRecency");
-const { attacheOrchestratorMachine } = require("../attache/attacheMachine");
+const {
+  attacheOrchestratorMachine,
+  migratePersistedChatSnapshotAttacheOrchestrator,
+} = require("../attache/attacheMachine");
 const { detectiveMachine } = require("../detective/detectiveMachine");
 const { resetDetectiveExistentialPhaseForAttacheHandoff } = require("../detective/detectiveExistentialSession");
 const { logChatMachineState, getDebugStateLevel } = require("../logger");
@@ -258,7 +261,9 @@ function runChatTurn(sessionId, _message, turnOptions = {}) {
   const dossierStaleByAge = isDossierStaleByAge(turnOptions.dossier, Date.now());
 
   const key = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
-  const persisted = key ? persistedSnapshotBySessionId.get(key) : undefined;
+  const persistedRaw = key ? persistedSnapshotBySessionId.get(key) : undefined;
+  const persisted =
+    persistedRaw !== undefined ? migratePersistedChatSnapshotAttacheOrchestrator(persistedRaw) : undefined;
   const prevCtx = readContextFromPersistedSnapshot(persisted);
   const prevHasDossier = !!(prevCtx && prevCtx.hasDossier);
 
@@ -358,8 +363,9 @@ function runChatTurn(sessionId, _message, turnOptions = {}) {
 function notifyAttachePreludeComplete(sessionId) {
   const key = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
   if (!key) return;
-  const persisted = persistedSnapshotBySessionId.get(key);
-  if (!persisted) return;
+  const persistedRaw = persistedSnapshotBySessionId.get(key);
+  if (!persistedRaw) return;
+  const persisted = migratePersistedChatSnapshotAttacheOrchestrator(persistedRaw);
   let actor;
   try {
     actor = createActor(chatMachine, { snapshot: persisted });
@@ -394,8 +400,9 @@ function notifyAttachePreludeComplete(sessionId) {
 function getChatEnvelopeForSession(sessionId) {
   const key = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
   if (!key) return null;
-  const persisted = persistedSnapshotBySessionId.get(key);
-  if (!persisted) return null;
+  const persistedRaw = persistedSnapshotBySessionId.get(key);
+  if (!persistedRaw) return null;
+  const persisted = migratePersistedChatSnapshotAttacheOrchestrator(persistedRaw);
   let actor;
   try {
     actor = createActor(chatMachine, { snapshot: persisted });

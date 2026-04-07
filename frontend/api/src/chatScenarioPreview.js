@@ -13,7 +13,12 @@ const {
   createInitialAttacheSessionState,
   composeAttacheSystemPromptForSession,
 } = require("./attache/attacheRuntime");
-const { createAttacheState, computeCurrentPhaseId } = require("./attache/attacheMachine");
+const {
+  createAttacheState,
+  computeCurrentPhaseId,
+  getAttachePromptInstructionIdsFromSnapshot,
+} = require("./attache/attacheMachine");
+const { advanceAttacheOrchestratorForPromptTurn } = require("./attache/attacheOrchestratorAdvance");
 const {
   createEmptyDossier,
   normalizeDossier,
@@ -454,6 +459,13 @@ function buildPromptPreviewFromPreset(preset) {
   if (hasDossier && dossierForClassification) {
     sessionState.dossier_summary = buildTherapistSafeDossierSummary(dossierForClassification);
   }
+
+  const beginSnapshot = advanceAttacheOrchestratorForPromptTurn(null, sessionState);
+  const orchIds = getAttachePromptInstructionIdsFromSnapshot(beginSnapshot);
+  if (orchIds.length > 0) {
+    sessionState.attache_prompt_instruction_ids = orchIds;
+  }
+  sessionState.attacheOrchestratorSnapshot = beginSnapshot;
 
   const composed = composeAttacheSystemPromptForSession(sessionState);
   const mergedForLab = buildAttacheSessionForTurnInstructions(sessionState, {});

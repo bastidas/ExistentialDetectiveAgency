@@ -6,6 +6,7 @@ const { createAttacheState } = require("./attacheMachine");
 const {
   computeAttacheCatalogInstructionIds,
   computeAttachePhaseInstructionIds,
+  classifyAttacheFirstTurnReturnPrimary,
 } = require("./attachePromptPolicy");
 
 test("computeAttachePhaseInstructionIds: start first vs second turn", () => {
@@ -128,4 +129,40 @@ test("computeAttacheCatalogInstructionIds: omits ATTACHE_RETURN_* when attache_t
   assert.ok(!ids.includes("ATTACHE_RETURN_DAY_OR_SO"));
   assert.ok(!ids.some((id) => String(id).startsWith("ATTACHE_RETURN_APPEND_")));
   assert.deepEqual(ids, ["ATTACHE_START_ORIENTATION", "ATTACHE_BASELINE_DELIVERY_START"]);
+});
+
+test("classifyAttacheFirstTurnReturnPrimary: buckets mirror computeAttacheReturnTierInstructionIds", () => {
+  const base = {
+    baseline_return_greeting_pending: false,
+    stale_dossier_rebaseline: false,
+    returnCategory: "",
+    has_dossier: false,
+    dossier_stale_by_age: false,
+  };
+  assert.equal(classifyAttacheFirstTurnReturnPrimary({ ...base, visit_bin: "moderate" }), "dayOrSo");
+  assert.equal(classifyAttacheFirstTurnReturnPrimary({ ...base, visit_bin: "brief" }), "none");
+  assert.equal(
+    classifyAttacheFirstTurnReturnPrimary({
+      ...base,
+      visit_bin: "stale",
+      baseline_return_greeting_pending: true,
+    }),
+    "staleVisit"
+  );
+  assert.equal(
+    classifyAttacheFirstTurnReturnPrimary({
+      ...base,
+      visit_bin: "long",
+      baseline_return_greeting_pending: true,
+    }),
+    "longGone"
+  );
+  assert.equal(
+    classifyAttacheFirstTurnReturnPrimary({
+      ...base,
+      visit_bin: "brief",
+      stale_dossier_rebaseline: true,
+    }),
+    "staleVisit"
+  );
 });

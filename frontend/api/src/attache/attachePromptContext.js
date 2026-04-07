@@ -1,8 +1,12 @@
 "use strict";
 
 /**
+ * @deprecated Prefer loading copy from `prompts/attache/prompt_catalog.json` and
+ * `prompts/attache/attache_phase_transition_instructions.json` at the call site; this module remains
+ * the shared template helper for `{baselineN_*}` tokens until call sites migrate.
+ *
  * Shared template context for attaché prompts: baseline question pools and `{baselineN_*}` tokens.
- * Used by `attacheRuntime` and `buildAttacheTurnInstructionBlock` (single source of truth).
+ * Used by `attacheRuntime` and `buildAttacheTurnInstructionBlock`.
  */
 
 const {
@@ -11,33 +15,44 @@ const {
 } = require("./attacheMachine");
 
 const ATTACHE_QUESTIONS_BANK = require("../../prompts/attache/attache_questions.json");
+const PHASE_TRANSITION = require("../../prompts/attache/attache_phase_transition_instructions.json");
 const ADMINISTER_BASELINE_KEYS = {
   1: "administerBaseline1",
   2: "administerBaseline2",
   3: "administerBaseline3",
 };
 
-/** Per-baseline introductory instructions (same text as legacy `attachePrompts.js`). */
-const BASELINE1_INSTRUCTIONS = [
-  "This is Phase 1, this is a sort of baseline.",
-  "It is just warming you up, that's all.",
-  "In this phase you don't answer the question; you just repeat what is in the brackets as fast as possible.",
-  "So just repetition.",
-].join(" ");
+/**
+ * @param {string} s
+ * @returns {string}
+ */
+function stripOuterBackticks(s) {
+  const t = typeof s === "string" ? s.trim() : "";
+  if (t.length >= 2 && t.startsWith("`") && t.endsWith("`")) {
+    return t.slice(1, -1).trim();
+  }
+  return t;
+}
 
-const BASELINE2_INSTRUCTIONS = [
-  "Despite the numerous anomalies we have detected, you are doing quite well.",
-  "And we can continue.",
-  "In this section just answer these questions genuinely.",
-  "Feel free to be as brief as you like; just move through the questions like water.",
-].join(" ");
+/**
+ * @param {1|2|3} baselineNumber
+ * @returns {string}
+ */
+function baselineInstructionsFromPhaseJson(baselineNumber) {
+  const key = ADMINISTER_BASELINE_KEYS[baselineNumber];
+  if (!key) return "";
+  const raw =
+    PHASE_TRANSITION.phase_intro_sentences &&
+    typeof PHASE_TRANSITION.phase_intro_sentences === "object"
+      ? PHASE_TRANSITION.phase_intro_sentences[key]
+      : null;
+  return raw != null ? stripOuterBackticks(String(raw)) : "";
+}
 
-const BASELINE3_INSTRUCTIONS = [
-  "In this phase we will go deeper.",
-  "We will ask some questions that may be more difficult to answer, but please just do your best.",
-  "Actually, these are not even questions, just ideas, and there are no right or wrong answers.",
-  "Just reply with whatever comes to mind, and try to keep moving through them.",
-].join(" ");
+/** Per-baseline introductory instructions (from `attache_phase_transition_instructions.json`). */
+const BASELINE1_INSTRUCTIONS = baselineInstructionsFromPhaseJson(1);
+const BASELINE2_INSTRUCTIONS = baselineInstructionsFromPhaseJson(2);
+const BASELINE3_INSTRUCTIONS = baselineInstructionsFromPhaseJson(3);
 
 /**
  * @param {1|2|3} baselineNumber

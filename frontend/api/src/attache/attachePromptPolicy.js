@@ -12,14 +12,19 @@
  * then a short dossier continuity line (no vs stale vs fresh file). Append ids are **last within the return tier block**
  * so phase instructions (`ATTACHE_START_ORIENTATION`, …) still follow the full return stack.
  *
- * **Catalog vs XState:** Instruction ids are resolved from **`AttacheState` + session facts** (visit bin, turn
- * counts, dossier flags). The attaché orchestrator machine mirrors `attacheState.phase` into its own nodes
- * (`intro` / `exploring` / …); it does **not** select catalog rows. Composed `# TURN INSTRUCTIONS` are the
- * **union** of rows for those ids (see `buildAttacheTurnInstructionBlock` + `fillTemplate` for placeholders
- * like `{baselineN_questionQ}`). Keep policy branching aligned with `transition()` in `attacheMachine.js`.
+ * **Catalog vs XState:** `computeAttacheCatalogInstructionIds` implements the policy; at runtime the **source of truth**
+ * for which ids apply to the outgoing prompt is `context.attachePromptInstructionIds` on the orchestrator snapshot
+ * after `ATTACHE_BEGIN_TURN` (see `attacheOrchestratorAdvance` + `attacheOrchestratorMachine`). Callers should resolve ids
+ * via `resolveAttachePromptInstructionIdsForTurn` / `buildAttacheSessionForTurnInstructions` so snapshot precedence is
+ * consistent. The chart mirrors `attacheState.phase` into regions; `start` has explicit return-tier children. Composed
+ * `# TURN INSTRUCTIONS` are the
+ * **union** of rows for those ids. Keep policy aligned with `transition()` in `attacheMachine.js`.
  *
  * **`stale_dossier_rebaseline`:** No longer maps to a separate catalog row; when set without other primary return
  * rows, policy uses `ATTACHE_RETURN_STALE_VISIT` plus dossier append (same story as pending + stale visit bin).
+ *
+ * **XState `attacheOrchestratorMachine`:** `classifyAttacheFirstTurnReturnPrimary` buckets the same primary rows for
+ * explicit `start.*` child states (see guarded `ATTACHE_BEGIN_TURN` targets in `attacheMachine.js`).
  */
 
 const { computeCurrentPhaseId } = require("./attacheMachine");
@@ -84,6 +89,26 @@ function computeAttacheReturnTierInstructionIds(facts) {
     f.dossier_stale_by_age === true
   );
   return [...primary, appendId];
+}
+
+/**
+ * Which primary return row applies on attaché turn 0 (before `ATTACHE_RETURN_APPEND_*`). Derived from
+ * `computeAttacheReturnTierInstructionIds` so the chart and catalog never drift.
+ *
+ * @param {Record<string, unknown>} facts — same shape as `computeAttacheCatalogInstructionIds` return-tier facts
+ * @returns {"none"|"dayOrSo"|"longGone"|"staleVisit"}
+ */
+function classifyAttacheFirstTurnReturnPrimary(facts) {
+  const ids = computeAttacheReturnTierInstructionIds(facts);
+  for (const id of ids) {
+    const s = String(id);
+    if (!/^ATTACHE_RETURN_/.test(s)) continue;
+    if (s.startsWith("ATTACHE_RETURN_APPEND_")) continue;
+    if (s === "ATTACHE_RETURN_STALE_VISIT") return "staleVisit";
+    if (s === "ATTACHE_RETURN_LONG_GONE") return "longGone";
+    if (s === "ATTACHE_RETURN_DAY_OR_SO") return "dayOrSo";
+  }
+  return "none";
 }
 
 /**
@@ -209,6 +234,7 @@ function computeAttacheCatalogInstructionIds(payload) {
 module.exports = {
   computeAttacheCatalogInstructionIds,
   computeAttacheReturnTierInstructionIds,
+  classifyAttacheFirstTurnReturnPrimary,
   computeAttachePhaseInstructionIds,
   computeDossierAppendInstructionId,
 };

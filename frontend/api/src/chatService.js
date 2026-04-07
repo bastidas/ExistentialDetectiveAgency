@@ -12,7 +12,10 @@ const {
   attacheOrchestratorMachine,
   transition,
   normalizeIntent,
+  getAttachePromptInstructionIdsFromSnapshot,
+  migrateAttacheOrchestratorMachineSnapshot,
 } = require("./attache/attacheMachine");
+const { advanceAttacheOrchestratorForPromptTurn } = require("./attache/attacheOrchestratorAdvance");
 const { buildMockReplyFromRegistry } = require("./agents/mockAgentTurn");
 const { composeAgentPrompt } = require("./prompts/promptComposer");
 const { createDetectiveCall } = require("./detective/detectiveCall");
@@ -115,7 +118,8 @@ function mergeLlmRefusalIntoBody(body, metas) {
 function advanceAttacheOrchestratorSnapshot(prevSnapshot, llmOutput, authoritativeAttacheState) {
   if (!llmOutput || typeof llmOutput !== "object") return prevSnapshot;
   try {
-    const actor = createActor(attacheOrchestratorMachine, prevSnapshot ? { snapshot: prevSnapshot } : {});
+    const snap = prevSnapshot ? migrateAttacheOrchestratorMachineSnapshot(prevSnapshot) : undefined;
+    const actor = createActor(attacheOrchestratorMachine, snap ? { snapshot: snap } : {});
     actor.start();
     actor.send({ type: "ATTACHE_TURN", llmOutput });
     const out =
@@ -126,7 +130,10 @@ function advanceAttacheOrchestratorSnapshot(prevSnapshot, llmOutput, authoritati
     if (authoritativeAttacheState && out && typeof out === "object" && out.context) {
       return {
         ...out,
-        context: { ...out.context, attacheState: authoritativeAttacheState },
+        context: {
+          ...out.context,
+          attacheState: authoritativeAttacheState,
+        },
       };
     }
     return out;
@@ -492,9 +499,22 @@ async function composeChatResponse(sessionId, message, options = {}) {
       temporal_greeting_mode: temporalAttache,
       lastReturnClassification: { returnCategory: classificationAttache.returnCategory },
     });
+    const beginSnapshot = advanceAttacheOrchestratorForPromptTurn(
+      prev && prev.attacheOrchestratorSnapshot,
+      prev
+    );
+    const orchIds = getAttachePromptInstructionIdsFromSnapshot(beginSnapshot);
+    /** @type {Record<string, unknown>} */
+    const sessionForAttacheTurn = {
+      ...prev,
+      attacheOrchestratorSnapshot: beginSnapshot,
+    };
+    if (orchIds.length > 0) {
+      sessionForAttacheTurn.attache_prompt_instruction_ids = orchIds;
+    }
     const result = await runAttacheTurn({
       userMessage: message,
-      sessionState: prev,
+      sessionState: sessionForAttacheTurn,
       openaiClient: options && options.openaiClient ? options.openaiClient : null,
     });
     const nextSession = {
@@ -507,7 +527,7 @@ async function composeChatResponse(sessionId, message, options = {}) {
         lastReturnClassification: { returnCategory: classificationAttache.returnCategory },
       }),
       attacheOrchestratorSnapshot: advanceAttacheOrchestratorSnapshot(
-        prev && prev.attacheOrchestratorSnapshot,
+        sessionForAttacheTurn.attacheOrchestratorSnapshot,
         result.llmOutput,
         result.sessionState.attacheState
       ),
@@ -927,11 +947,8 @@ function simulateAttacheLabStep(sessionId, type, payload) {
   const intent = normalizeIntent(llmOutput);
   const asked = llmOutput.asked_baseline_question !== false;
   const nextAttacheState = transition(prev.attacheState, intent, asked);
-  const nextOrchSnap = advanceAttacheOrchestratorSnapshot(
-    prev.attacheOrchestratorSnapshot,
-    llmOutput,
-    nextAttacheState
-  );
+  const beginSnap = advanceAttacheOrchestratorForPromptTurn(prev.attacheOrchestratorSnapshot, prev);
+  const nextOrchSnap = advanceAttacheOrchestratorSnapshot(beginSnap, llmOutput, nextAttacheState);
 
   const nextSession = {
     ...prev,
