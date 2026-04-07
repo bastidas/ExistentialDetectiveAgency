@@ -5,13 +5,41 @@
  * Combines return/time-away tier (legacy `instructionSelection` attache rules) with phase/baseline/close rows.
  *
  * Ordering: **return / stale tier first** (only when `attache_turn_count === 0`), then **phase / baseline / close**.
- * Return-tier rows (`ATTACHE_RETURN_*`, `ATTACHE_STALE_DOSSIER_REBASELINE`) must not repeat on later attaché turns.
+ * Return-tier rows (`ATTACHE_RETURN_*`, optional `ATTACHE_RETURN_APPEND_*`) must not repeat on later attaché turns.
+ *
+ * **Return tier layout:** For each qualifying first turn, policy emits one **primary** return id (visit bin / pending /
+ * `returnCategory`), then **one dossier append** id (`ATTACHE_RETURN_APPEND_*`) so copy layers: greeting + bin story,
+ * then a short dossier continuity line (no vs stale vs fresh file). Append ids are **last within the return tier block**
+ * so phase instructions (`ATTACHE_START_ORIENTATION`, …) still follow the full return stack.
+ *
+ * **Catalog vs XState:** Instruction ids are resolved from **`AttacheState` + session facts** (visit bin, turn
+ * counts, dossier flags). The attaché orchestrator machine mirrors `attacheState.phase` into its own nodes
+ * (`intro` / `exploring` / …); it does **not** select catalog rows. Composed `# TURN INSTRUCTIONS` are the
+ * **union** of rows for those ids (see `buildAttacheTurnInstructionBlock` + `fillTemplate` for placeholders
+ * like `{baselineN_questionQ}`). Keep policy branching aligned with `transition()` in `attacheMachine.js`.
+ *
+ * **`stale_dossier_rebaseline`:** No longer maps to a separate catalog row; when set without other primary return
+ * rows, policy uses `ATTACHE_RETURN_STALE_VISIT` plus dossier append (same story as pending + stale visit bin).
  */
 
 const { computeCurrentPhaseId } = require("./attacheMachine");
 
 /**
- * Return-tier ids only (0–1 primary rows, plus optional legacy `returnCategory` adds).
+ * One short catalog line for dossier dimension on return / re-entry (turn 0 only).
+ *
+ * @param {boolean} hasDossier
+ * @param {boolean} dossierStaleByAge
+ * @returns {string}
+ */
+function computeDossierAppendInstructionId(hasDossier, dossierStaleByAge) {
+  if (!hasDossier) return "ATTACHE_RETURN_APPEND_NO_DOSSIER";
+  if (dossierStaleByAge) return "ATTACHE_RETURN_APPEND_STALE_DOSSIER";
+  return "ATTACHE_RETURN_APPEND_FRESH_DOSSIER";
+}
+
+/**
+ * Return-tier ids only: primary row(s) from visit bin / pending / `returnCategory`, then one dossier append when
+ * any primary applies.
  * Mirrors `instructionSelection` for `agentKey === "attache"`.
  *
  * @param {Record<string, unknown>} facts
@@ -19,31 +47,43 @@ const { computeCurrentPhaseId } = require("./attacheMachine");
  */
 function computeAttacheReturnTierInstructionIds(facts) {
   const f = facts && typeof facts === "object" ? facts : {};
-  const ids = [];
+  /** @type {string[]} */
+  const primary = [];
   const vb = f.visit_bin != null ? String(f.visit_bin).trim().toLowerCase() : "";
   const pending = f.baseline_return_greeting_pending === true;
 
   if (pending) {
-    if (vb === "stale") return ["ATTACHE_RETURN_STALE_VISIT"];
-    if (vb === "long") return ["ATTACHE_RETURN_LONG_GONE"];
+    if (vb === "stale") primary.push("ATTACHE_RETURN_STALE_VISIT");
+    else if (vb === "long") primary.push("ATTACHE_RETURN_LONG_GONE");
   }
 
-  if (f.stale_dossier_rebaseline === true) {
-    return ["ATTACHE_STALE_DOSSIER_REBASELINE"];
+  if (primary.length === 0 && vb === "moderate") {
+    primary.push("ATTACHE_RETURN_DAY_OR_SO");
   }
 
-  if (vb === "moderate") {
-    return ["ATTACHE_RETURN_DAY_OR_SO"];
+  if (primary.length === 0) {
+    const cat = f.returnCategory != null ? String(f.returnCategory) : "";
+    if (cat === "moderate" || cat === "day_or_so" || cat === "DAY_OR_SO") {
+      primary.push("ATTACHE_RETURN_DAY_OR_SO");
+    }
+    if (cat === "long" || cat === "long_gone" || cat === "LONG_GONE") {
+      primary.push("ATTACHE_RETURN_LONG_GONE");
+    }
   }
 
-  const cat = f.returnCategory != null ? String(f.returnCategory) : "";
-  if (cat === "moderate" || cat === "day_or_so" || cat === "DAY_OR_SO") {
-    ids.push("ATTACHE_RETURN_DAY_OR_SO");
+  if (primary.length === 0 && f.stale_dossier_rebaseline === true) {
+    primary.push("ATTACHE_RETURN_STALE_VISIT");
   }
-  if (cat === "long" || cat === "long_gone" || cat === "LONG_GONE") {
-    ids.push("ATTACHE_RETURN_LONG_GONE");
+
+  if (primary.length === 0) {
+    return [];
   }
-  return ids;
+
+  const appendId = computeDossierAppendInstructionId(
+    f.has_dossier === true,
+    f.dossier_stale_by_age === true
+  );
+  return [...primary, appendId];
 }
 
 /**
@@ -126,6 +166,8 @@ function computeAttachePhaseInstructionIds(input) {
  * @property {string} [visit_bin]
  * @property {boolean} [baseline_return_greeting_pending]
  * @property {boolean} [stale_dossier_rebaseline]
+ * @property {boolean} [has_dossier]
+ * @property {boolean} [dossier_stale_by_age]
  * @property {string} [returnCategory]
  */
 
@@ -147,6 +189,8 @@ function computeAttacheCatalogInstructionIds(payload) {
     baseline_return_greeting_pending: p.baseline_return_greeting_pending === true,
     stale_dossier_rebaseline: p.stale_dossier_rebaseline === true,
     returnCategory: p.returnCategory != null ? String(p.returnCategory) : "",
+    has_dossier: p.has_dossier === true,
+    dossier_stale_by_age: p.dossier_stale_by_age === true,
   };
 
   /** Return / re-entry catalog copy only on the first attaché turn of the session. */
@@ -166,4 +210,5 @@ module.exports = {
   computeAttacheCatalogInstructionIds,
   computeAttacheReturnTierInstructionIds,
   computeAttachePhaseInstructionIds,
+  computeDossierAppendInstructionId,
 };

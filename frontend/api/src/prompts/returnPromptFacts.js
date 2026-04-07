@@ -1,5 +1,23 @@
 "use strict";
 
+const { userHasPersistedDossier } = require("../dossier_and_summarize/dossierPresence");
+
+/**
+ * Whether the chat session carries dossier material the attaché/detective prompts should treat as “has a dossier”
+ * (loaded row or non-empty summary string from preview / compose).
+ *
+ * @param {object} session
+ * @returns {boolean}
+ */
+function sessionHasDossierForPrompts(session) {
+  const s = session && typeof session === "object" ? session : {};
+  if (s.dossier != null && typeof s.dossier === "object" && userHasPersistedDossier(s.dossier)) {
+    return true;
+  }
+  const summary = s.dossier_summary ?? s.dossierSummary;
+  return typeof summary === "string" && summary.trim() !== "";
+}
+
 /**
  * Facts for `instructionSelection` / special-instruction catalog lookups.
  *
@@ -41,9 +59,11 @@ function extractReturnPromptFacts(session, internalState) {
     dossier_stale_by_age: dossierStaleByAge,
     stale_dossier_rebaseline: staleDossierRebaseline,
     baseline_return_greeting_pending: baselineReturnGreetingPending,
+    has_dossier: sessionHasDossierForPrompts(s),
   };
 }
 
 module.exports = {
   extractReturnPromptFacts,
+  sessionHasDossierForPrompts,
 };

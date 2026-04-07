@@ -6,8 +6,10 @@ const assert = require("node:assert/strict");
 test("getDebugPromptsLevel parses DEBUG_PROMPTS_LEVEL", () => {
   const { getDebugPromptsLevel } = require("./logger");
   const saved = process.env.DEBUG_PROMPTS_LEVEL;
+  const savedTypo = process.env.DEBUG_PROMPT_LEVEL;
   try {
     delete process.env.DEBUG_PROMPTS_LEVEL;
+    delete process.env.DEBUG_PROMPT_LEVEL;
     assert.equal(getDebugPromptsLevel(), 0);
 
     process.env.DEBUG_PROMPTS_LEVEL = "3";
@@ -21,7 +23,44 @@ test("getDebugPromptsLevel parses DEBUG_PROMPTS_LEVEL", () => {
 
     process.env.DEBUG_PROMPTS_LEVEL = "not-a-number";
     assert.equal(getDebugPromptsLevel(), 0);
+
+    delete process.env.DEBUG_PROMPTS_LEVEL;
+    process.env.DEBUG_PROMPT_LEVEL = "3";
+    assert.equal(getDebugPromptsLevel(), 3);
   } finally {
+    if (saved === undefined) delete process.env.DEBUG_PROMPTS_LEVEL;
+    else process.env.DEBUG_PROMPTS_LEVEL = saved;
+    if (savedTypo === undefined) delete process.env.DEBUG_PROMPT_LEVEL;
+    else process.env.DEBUG_PROMPT_LEVEL = savedTypo;
+  }
+});
+
+test("composeAgentPrompt logs turn instructions only when DEBUG_PROMPTS_LEVEL=2", () => {
+  const saved = process.env.DEBUG_PROMPTS_LEVEL;
+  const logs = [];
+  const orig = console.log;
+  console.log = (...args) => {
+    logs.push(args.join(" "));
+  };
+  try {
+    process.env.DEBUG_PROMPTS_LEVEL = "2";
+    const { composeAgentPrompt } = require("./prompts/promptComposer");
+    composeAgentPrompt({
+      agentKey: "attache",
+      session: {},
+      internalState: {},
+      custom: "CUSTOM_TAIL_L2",
+      debugContext: { activeAgent: "attache" },
+    });
+    const joined = logs.join("\n");
+    assert.ok(joined.includes("[turnInstructions]"), "expected turnInstructions header");
+    assert.ok(joined.includes("# TURN INSTRUCTIONS"), "expected turn instructions heading in body");
+    assert.ok(joined.includes("CUSTOM_TAIL_L2"), "level 2 logs suffix after heading (custom tail in same slice)");
+    assert.ok(joined.includes("agentKey=attache"), "expected agentKey");
+    assert.ok(!joined.includes("exact system role string"), "level 2 must not dump full system prompt");
+    assert.ok(!joined.includes("[composedPrompt]"), "level 2 must not dump composed full system");
+  } finally {
+    console.log = orig;
     if (saved === undefined) delete process.env.DEBUG_PROMPTS_LEVEL;
     else process.env.DEBUG_PROMPTS_LEVEL = saved;
   }
@@ -46,6 +85,7 @@ test("composeAgentPrompt logs full prompt when DEBUG_PROMPTS_LEVEL=3", () => {
     });
     assert.ok(typeof out.content === "string" && out.content.includes("CUSTOM_TAIL_DEBUG"));
     const joined = logs.join("\n");
+    assert.ok(!joined.includes("[turnInstructions]"), "level 3 skips colored turn-only block (use level 2 for that)");
     assert.ok(joined.includes("[composedPrompt]"), "expected composedPrompt header");
     assert.ok(joined.includes("exact system role string"), "expected banner");
     assert.ok(joined.includes("agentKey=attache"), "expected agentKey");
@@ -144,6 +184,7 @@ test("composeAgentPrompt does not dump when DEBUG_PROMPTS_LEVEL is 0", () => {
     });
     const joined = logs.join("\n");
     assert.ok(!joined.includes("[composedPrompt]"));
+    assert.ok(!joined.includes("[turnInstructions]"));
     assert.ok(!joined.includes("SHOULD_NOT_APPEAR_IN_LOGS"));
   } finally {
     console.log = orig;

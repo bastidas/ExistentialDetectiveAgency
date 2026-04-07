@@ -26,7 +26,7 @@ const {
   normalizeDossier,
   runDossierAnalyzer,
   user_dossier_updater,
-  buildDossierSnippet,
+  buildTherapistSafeDossierSummary,
 } = require("./dossier_and_summarize/dossier");
 const { narrativePhaseFromTurn, narrativeTurnForPhaseLabel } = require("./narrativePhases");
 const { pickExistentialTherapyPhase, pickNarrativePhase } = require("./chatScenarioLabPhases");
@@ -47,6 +47,57 @@ const { createInitialAttacheSessionState } = require("./attache/attacheRuntime")
  * @param {{ llmRefusal?: unknown }} body
  * @param {unknown[]} metas
  */
+/**
+ * @returns {number} refresh every N completed detective exchanges (env override, default 3)
+ */
+function resolveDossierRefreshEveryNDetectiveTurns() {
+  const n = Number(process.env.DOSSIER_REFRESH_EVERY_N_DETECTIVE_TURNS);
+  if (Number.isFinite(n) && n > 0) return Math.floor(n);
+  return 3;
+}
+
+/**
+ * Periodic trait merge from detective chat history (does not set lastBaselineCompletedAt).
+ *
+ * @param {string} sessionId
+ * @param {{ openaiClient?: import("openai").default }} options
+ */
+async function refreshDossierFromDetectiveConversation(sessionId, options) {
+  const openaiClient = options && options.openaiClient;
+  if (config.OFFLINE || !openaiClient) return;
+  const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
+  if (!id) return;
+  const prev = dossierBySessionId.get(id) ?? null;
+  if (!userHasPersistedDossier(prev)) return;
+  const recentMessages = detectiveChatHistoryBySessionId.get(id) || [];
+  if (!Array.isArray(recentMessages) || recentMessages.length === 0) return;
+  try {
+    const base = normalizeDossier(prev, id);
+    const nowMs = Date.now();
+    const analyzerOutput = await runDossierAnalyzer({
+      userId: id,
+      recentMessages,
+      currentDossier: base,
+      openaiClient,
+      recentMessageLimit: 12,
+    });
+    const merged = user_dossier_updater(base, analyzerOutput, {
+      lastUserMessageAt: nowMs,
+      environment: {
+        ...((base.meta && base.meta.environment) || {}),
+        lastSeenAt: nowMs,
+      },
+    });
+    dossierBySessionId.set(id, merged);
+  } catch (err) {
+    logger.warn(
+      "chatService",
+      "refreshDossierFromDetectiveConversation",
+      err && err.message ? err.message : String(err)
+    );
+  }
+}
+
 function mergeLlmRefusalIntoBody(body, metas) {
   const flat = (metas || []).filter(Boolean);
   if (!flat.length) return;
@@ -134,6 +185,8 @@ function bumpDetectiveTurnCount(sessionId) {
 
 /**
  * Merge time-away / return facts onto attaché session for catalog + compose (same request as detective payload).
+ * `visit_bin` / `ms_since_last_visit` reflect client time-away; `dossier_stale_by_age` reflects
+ * `isDossierStaleByAge` from `meta.lastBaselineCompletedAt` (independent of visit gap).
  *
  * @param {object|null} prev
  * @param {Record<string, unknown>} facts
@@ -221,7 +274,7 @@ function buildPhilosopherComposeSession(sessionId, dossier) {
     narrative_phase: narrativePhaseFromTurn(narrativeTurn),
   };
   if (dossier) {
-    session.dossier_summary = buildDossierSnippet(dossier);
+    session.dossier_summary = buildTherapistSafeDossierSummary(dossier);
   }
   return session;
 }
@@ -527,7 +580,7 @@ async function composeChatResponse(sessionId, message, options = {}) {
       lastReturnClassification: { returnCategory: classification.returnCategory },
     };
     if (dossier) {
-      sessionPayload.dossier_summary = buildDossierSnippet(dossier);
+      sessionPayload.dossier_summary = buildTherapistSafeDossierSummary(dossier);
     }
 
     sessionPayload.detective_prompt_instruction_ids = runDetectivePromptPolicyTurn(sessionId, {
@@ -700,6 +753,20 @@ async function composeChatResponse(sessionId, message, options = {}) {
 
     advancePhilosopherNarrative(sessionId);
     bumpDetectiveTurnCount(sessionId);
+
+    const detCountAfter = getDetectiveTurnCount(sessionId);
+    const refreshEvery = resolveDossierRefreshEveryNDetectiveTurns();
+    if (
+      !config.OFFLINE &&
+      options.openaiClient &&
+      userHasPersistedDossier(dossierBySessionId.get(sessionId)) &&
+      detCountAfter > 0 &&
+      detCountAfter % refreshEvery === 0
+    ) {
+      await refreshDossierFromDetectiveConversation(sessionId, {
+        openaiClient: options.openaiClient,
+      });
+    }
 
     const body = createChatPostSuccessBody({
       reply,

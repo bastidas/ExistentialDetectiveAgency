@@ -78,7 +78,8 @@ function loadJson(filePath) {
 
 /**
  * Catalog entries normally require a non-empty `body`. Entries may set `tags` to include `allow_empty_body`
- * when intentionally blank (e.g. `DETECTIVE_RETURN_BRIEF`: under the brief time-away threshold — no return-instruction block).
+ * when intentionally blank (e.g. `DETECTIVE_RETURN_BRIEF`: under the brief time-away threshold — no return-instruction block;
+ * `ATTACHE_RETURN_APPEND_FRESH_DOSSIER`: no extra dossier append line when the file is already current).
  *
  * @param {{ strict?: boolean }} [opts]
  * @returns {{ ok: boolean, errors: string[] }}

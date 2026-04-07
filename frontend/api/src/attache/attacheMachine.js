@@ -247,7 +247,16 @@ function transition(state, intent, askedBaselineQuestion = true) {
       next.phase = "explore";
     } else if (intent === "close") {
       return next;
-    } else if (next.phase_before_close && next.phase_before_close.startsWith("baseline")) {
+    } else if (
+      potential_next_phase &&
+      String(potential_next_phase).startsWith("baseline") &&
+      next.phase_before_close &&
+      String(next.phase_before_close).startsWith("baseline")
+    ) {
+      // Resume interrupted baseline only when we *exited* with a baseline still in play
+      // (`potential_next_phase` still points at baseline1/2/3). Nominal completion of
+      // baseline3 sets `potential_next_phase` to `"close"`; generic LLM intent "baseline"
+      // (neither explore nor close) must *not* snap back to baseline during the handoff turn.
       next.phase = next.phase_before_close;
       next.question_index = next.question_index_before_close ?? 0;
     }
@@ -260,6 +269,34 @@ function transition(state, intent, askedBaselineQuestion = true) {
 }
 
 /**
+ * One-step domain phase adjacency for `transition()` (used for docs + optional dev asserts).
+ * Orchestrator nodes map 1:1: start→intro, explore→exploring, baseline*→baseline*, close→closing.
+ * Resume-from-close picks the baseline in `phase_before_close` / `potential_next_phase`; explore
+ * returns via `potential_next_phase` to the interrupted baseline.
+ *
+ * @type {Record<string, ReadonlySet<string>>}
+ */
+const ATTACHE_DOMAIN_ONE_STEP_PHASES = {
+  start: new Set(["explore", "baseline1", "close"]),
+  explore: new Set(["explore", "baseline1", "baseline2", "baseline3", "close"]),
+  baseline1: new Set(["explore", "close", "baseline1", "baseline2"]),
+  baseline2: new Set(["explore", "close", "baseline2", "baseline3"]),
+  baseline3: new Set(["explore", "close", "baseline3"]),
+  close: new Set(["explore", "close", "baseline1", "baseline2", "baseline3"]),
+};
+
+/**
+ * @param {string|undefined} prevPhase
+ * @param {string|undefined} nextPhase
+ * @returns {boolean}
+ */
+function isValidAttacheOneStepPhasePair(prevPhase, nextPhase) {
+  if (prevPhase === nextPhase) return true;
+  const allowed = ATTACHE_DOMAIN_ONE_STEP_PHASES[prevPhase];
+  return Boolean(allowed && nextPhase && allowed.has(nextPhase));
+}
+
+/**
  * XState chart for attaché phases (invoked from `chatMachine`).
  * - **intro** ↔ `AttacheState.phase === "start"`
  * - **exploring** ↔ `"explore"`
@@ -268,6 +305,19 @@ function transition(state, intent, askedBaselineQuestion = true) {
  *
  * `context.attacheState` is the source of truth for prompts/runtime; each `ATTACHE_TURN`
  * applies the pure `transition()`, then `always` routes to the matching state node.
+ *
+ * Logical domain edges (see `ATTACHE_DOMAIN_ONE_STEP_PHASES`):
+ * - **start** → explore | baseline1 | close
+ * - **explore** → same | any baseline | close (resume target lives in `potential_next_phase`)
+ * - **baseline1** → explore | close | baseline2 | same (mid-question)
+ * - **baseline2** → explore | close | baseline3 | same
+ * - **baseline3** → explore | close | same (then close when block completes)
+ * - **close** → explore | same | resume baseline only if `potential_next_phase` still names a baseline
+ *   (early exit). After nominal baseline3 completion, `potential_next_phase` is `"close"`—generic
+ *   `baseline` intent then stays in close for the handoff turn.
+ *
+ * Prompt catalog ids (`attache_prompt_instruction_ids`) are chosen from **AttacheState + session facts**
+ * in `attachePromptPolicy`, not from XState node ids—keep `attacheState` and this machine in sync.
  */
 const attacheOrchestratorMachine = setup({
   actions: {
@@ -287,6 +337,14 @@ const attacheOrchestratorMachine = setup({
       }
       const prev = context.attacheState != null ? context.attacheState : createAttacheState({});
       const next = transition(prev, intent, asked);
+      if (
+        process.env.ATTACHE_ASSERT_DOMAIN_TRANSITIONS === "1" &&
+        !isValidAttacheOneStepPhasePair(prev.phase, next.phase)
+      ) {
+        throw new Error(
+          `Invalid attache domain transition ${String(prev.phase)} -> ${String(next.phase)} (intent=${intent})`
+        );
+      }
       return { attacheState: next };
     }),
   },
@@ -299,7 +357,7 @@ const attacheOrchestratorMachine = setup({
     phaseIsClose: ({ context }) => context.attacheState?.phase === "close",
   },
 }).createMachine({
-  /** @xstate-layout N4IgpgJg5mDOIC5QEMAurkGMAWYDyATjnKgWgPYEDEAggCp00DCAEgKID6dAqgEoByAbQAMAXUSgADuVgBLVLPIA7CSAAeiAEzCAbADoAnJoDMAFlMB2CwA5hARjsXLAGhABPRHc0Bfb67QYxITEsKQU1CLiSCDScgrKqhoIAKwWrh4IxsLGepqayfbGdsLWmnamxr7+6Fi4wbihZKiUVIJ2UVIy8ooq0Ump6Yimwsl61nbWFjrWxjoGOsnJBlUgAbX4RA1hzRGaHTFd8b2g-WnuiAXWeqZeySY6RcIGFsmmK2tBmyRNLYLG+7Fugk+hczhkdA49MJdJobNYjMljAY7O8ap8QttfqYAYceolQYMEBY7DkdNDsjdEQZbDpUYE6l9GuFWskcXE8SCUmCtNC9A9bjZTDorJoZr4-CAlOQIHBVB8GRifgRVICjviEAZCfC9IjboiynYdLCLHT1vVvuE9LIlKRyCrccCTloDKZrk8kXZkqVbPZTITYQZchMplkLJpqab0VslXowGpJAAbSjWqD29mO9TO13DAwer2i6HlQnGcZjW4TYxmUxlZKRhXRy0AI2QsDACetYDsaaBx0zCHD2fdyPzPqL5wQpmsg6NFmMSy9-LrG0VTZbbY7mm7as5A7dueH3sLfvHXosUPJousqSyk6X5qZOz0zdb7aUYGMW45Tv7Lr3ecPvqEtMgZLMYgoOJMQpvBK8rLg2j6YEmchKKm0Sql+fa7jm-4FoB46OPoRoFMINgOIi1i0uKQA */
+  /** @xstate-layout N4IgpgJg5mDOIC5QEMAurkGMAWYDyATjnKgWgPYEDEAggCp00DCAEgKID6dAqgEoByAbQAMAXUSgADuVgBLVLPIA7CSAAeiAIwA2YQDoALMIAcAVgDsAJnPCD1zeYA0IAJ6IAtAE5zegMy7TX0thYU9fTwNtTwBfaOc0DGJCYlhSCmoRcSQQaTkFZVUNBAtnNwRfYV89S0tTYU1fTRNLTQNfWPj0LFxk3FSyVEoqQU0sqRl5RRVsopLXRCNTPWNNY3NtY39PbVNTGLiQBO78Ij60wYzLMZyJ-OnQWad54pNDTVrLf0bQ81MDDsOXSSpxIAyGgl811ykwKM0QczK2k0mj0IW01mMxk8tXCmgBR2BKXO4IMUNuU0K8KeZXMDT0uhCvgMmkCnmMwm0+KBPRB-XSw1MZLyFLhxWpiGC+m0jVq5mMkXMVk2sQOSnIEDgqgJPKJYIIqmhd0pCE8pUQWL07zqlWl2gMbQaXMSOrOer0siUpHIBvJsIeEoihlCuNMxks7PqBjNCGsnmqq3WFSsbKdx16oPSejAakkABtKB6oD7hX71AGDEGwp4WWGI61o74VssratfEy7CzU4TXZmAEbIWBgXMesCaYsw+5lmOBoxVmvhkL154GeVB9HmXx7UPSvEHbUnXV9gdDkeWcdG0WWGfB6uhheR6OhnwhELhswb2zGLsujMXPT9wdhyUMBfHPEV-WnCtZxDWtFyjZ4NjjPZfDlZkE0if4925A8ez-TB8zkJQi2yQ1wKnK8oJvec63gsoHG0elahCOVkUCYxORVIA */
   id: "attacheOrchestrator",
   initial: "intro",
   context: {
@@ -309,28 +367,61 @@ const attacheOrchestratorMachine = setup({
   states: {
     intro: {
       description: "Opening / orientation (phase start)",
+
+      meta: {
+        domainPhase: "start",
+        domainNextPhases: ["explore", "baseline1", "close"],
+      }
     },
+
     exploring: {
       description: "Agency exploration, baseline paused",
+      meta: {
+        domainPhase: "explore",
+        domainNextPhases: ["explore", "baseline1", "baseline2", "baseline3", "close"],
+        note: "Resume target is potential_next_phase (interrupted baseline).",
+      },
     },
+
     baseline1: {
       description: "Baseline phase 1",
+      meta: {
+        domainPhase: "baseline1",
+        domainNextPhases: ["baseline1", "baseline2", "explore", "close"],
+      },
     },
+
     baseline2: {
       description: "Baseline phase 2",
+      meta: {
+        domainPhase: "baseline2",
+        domainNextPhases: ["baseline2", "baseline3", "explore", "close"],
+      },
     },
+
     baseline3: {
       description: "Baseline phase 3",
+      meta: {
+        domainPhase: "baseline3",
+        domainNextPhases: ["baseline3", "explore", "close"],
+      },
     },
+
     closing: {
       description: "Handoff / farewell toward detective",
-    },
+      meta: {
+        domainPhase: "close",
+        domainNextPhases: ["close", "explore", "baseline1", "baseline2", "baseline3"],
+        note: "Resume baseline uses phase_before_close + question_index_before_close when applicable.",
+      },
+    }
   },
   on: {
     ATTACHE_TURN: {
       actions: ["applyAttacheTransition"],
     },
   },
+  /** Sync orchestrator node to `context.attacheState.phase` after each `ATTACHE_TURN`. */
   always: [
     { guard: "phaseIsStart", target: ".intro" },
     { guard: "phaseIsExplore", target: ".exploring" },
@@ -350,6 +441,8 @@ module.exports = {
   MAX_BASELINE2_QUESTIONS,
   MIN_BASELINE3_QUESTIONS,
   MAX_BASELINE3_QUESTIONS,
+  ATTACHE_DOMAIN_ONE_STEP_PHASES,
+  isValidAttacheOneStepPhasePair,
   getRandomBaselineQuestionCount,
   getBaselineNumberFromPhase,
   createAttacheState,

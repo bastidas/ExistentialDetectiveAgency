@@ -7,6 +7,8 @@
  * - `msSinceLastVisit` — optional non-negative ms (wins over `timeAwayBin` if both set)
  * - `timeAwayBin` — optional `brief` | `moderate` | `long` | `stale` (derived ms from current `getTimeAwayThresholds()`)
  * - `hasDossier` — when true, seeds a minimal persisted dossier (`lastBaselineCompletedAt`) so `userHasPersistedDossier` is true
+ * - `dossierBaselineAge` — optional `fresh` | `stale` | `custom` (controls `lastBaselineCompletedAt`; when omitted: attaché→stale-by-threshold, detective→fresh)
+ * - `dossierLastBaselineCompletedAtOffsetMs` — non-negative ms before now when `dossierBaselineAge` is `custom`
  * - `activeAgent` — `attache` | `detective` — target routing after seed (see rules below)
  * - `baselineCompleted` — optional boolean; when set, overrides `activeAgent` (`true` → detective handoff path, `false` → attaché prelude)
  * - `attachePhase` — optional lab key when final routing is attaché: `start` | `explore` | `baseline1` | `baseline2` | `baseline3` | `close` | `close_final` (seeds in-memory attaché session for the next chat turn)
@@ -29,7 +31,8 @@ const {
   setAttacheSessionForDevSession,
   syncLabDetectiveOrchestrationFromPreset,
 } = require("./chatService");
-const { createEmptyDossier } = require("./dossier_and_summarize/dossier");
+const { createEmptyDossier, normalizeDossier } = require("./dossier_and_summarize/dossier");
+const { resolveLabLastBaselineCompletedAt } = require("./dossier_and_summarize/dossierLabPreset");
 const { createInitialAttacheSessionState } = require("./attache/attacheRuntime");
 const { attacheStateFromLabPreset } = require("./chatScenarioPreview");
 
@@ -70,27 +73,6 @@ function deriveMs(preset) {
 
 /**
  * @param {string} sessionId
- * @returns {object}
- */
-function buildFreshMinimalDossier(sessionId) {
-  const d = createEmptyDossier(sessionId);
-  d.meta.lastBaselineCompletedAt = Date.now();
-  return d;
-}
-
-/**
- * @param {string} sessionId
- * @param {number} longMsBound
- * @returns {object}
- */
-function buildStaleMinimalDossier(sessionId, longMsBound) {
-  const d = createEmptyDossier(sessionId);
-  d.meta.lastBaselineCompletedAt = Date.now() - longMsBound - 60_000;
-  return d;
-}
-
-/**
- * @param {string} sessionId
  * @param {object} [preset]
  * @returns {{ envelope: object|null, tier: ReturnType<typeof classifyTimeAway> }}
  */
@@ -119,10 +101,11 @@ function seedSessionScenario(sessionId, preset) {
 
   let dossier = null;
   if (hasDossier) {
-    dossier =
-      activeAgent === "attache"
-        ? buildStaleMinimalDossier(sessionId, longMs)
-        : buildFreshMinimalDossier(sessionId);
+    const nowMs = Date.now();
+    const d = createEmptyDossier(sessionId);
+    const lb = resolveLabLastBaselineCompletedAt(p, nowMs);
+    if (lb != null) d.meta.lastBaselineCompletedAt = lb;
+    dossier = normalizeDossier(d, sessionId);
     setDossierForDevSession(sessionId, dossier);
   }
 

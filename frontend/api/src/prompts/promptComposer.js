@@ -9,7 +9,8 @@ const {
 const { selectSpecialInstructions } = require("./instructionSelection");
 const { extractReturnPromptFacts } = require("./returnPromptFacts");
 const { buildLlmConversationState } = require("../orchestration/buildLlmConversationState");
-const { logComposedPromptFull } = require("../logger");
+const { logComposedPromptFull, logTurnInstructionsBlock } = require("../logger");
+const { extractFromTurnInstructionsHeadingThroughEnd } = require("./turnInstructionsExtract");
 const {
   resolveSpecialInstructionBodies,
   resolveSpecialInstructionEntries,
@@ -25,6 +26,9 @@ const {
  * Per-agent allowlist for `llmSafeState` (filtered slice of `buildLlmConversationState`).
  * Used for diagnostics and the chat scenario lab — **not** appended to `messages[]` unless a future
  * feature explicitly serializes it (production today does not).
+ *
+ * Attaché: narrative context only (dossier / prior summary). Routing ids, visit bins, and policy
+ * flags are **not** included — see dev lab `labOrchestrationMeta` for attaché preview.
  */
 const SAFE_VIEW_KEYS = Object.freeze({
   detective: [
@@ -51,16 +55,7 @@ const SAFE_VIEW_KEYS = Object.freeze({
     "secrets_revealed",
     "preceding_conversation_summary",
   ],
-  attache: [
-    "dossier_summary",
-    "preceding_conversation_summary",
-    "visit_bin",
-    "ms_since_last_visit",
-    "time_away_context_line",
-    "dossier_stale_by_age",
-    "temporal_greeting_mode",
-    "attache_prompt_instruction_ids",
-  ],
+  attache: ["dossier_summary", "preceding_conversation_summary"],
 });
 
 let registryValidated = false;
@@ -305,7 +300,7 @@ function resolveCustomSegment(custom, attacheTurnInstruction) {
  * @param {string[]} [input.additionalSpecialInstructions]
  * @param {{ turnInstruction?: string, attachePromptFamilyKey?: string|null }} [input.attacheTurnInstruction]
  * @param {string} [input.custom] Per-agent custom prompt tail (xstate + prompts library); overrides `turnInstruction` when set.
- * @param {{ activeAgent?: string }} [input.debugContext] Optional labels for DEBUG_PROMPTS_LEVEL=3 logging only.
+ * @param {{ activeAgent?: string }} [input.debugContext] Optional labels for DEBUG_PROMPTS_LEVEL 2–3 logging (2: from `# TURN INSTRUCTIONS` through end of system; 3: full system).
  * @returns {ComposedAgentPrompt}
  */
 function composeAgentPrompt({
@@ -380,6 +375,11 @@ function composeAgentPrompt({
     llmSafeState: conversationState,
   };
 
+  logTurnInstructionsBlock({
+    agentKey,
+    activeAgent: debugContext && debugContext.activeAgent,
+    turnInstructionsText: extractFromTurnInstructionsHeadingThroughEnd(result.content),
+  });
   logComposedPromptFull({
     agentKey,
     activeAgent: debugContext && debugContext.activeAgent,

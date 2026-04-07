@@ -115,6 +115,22 @@ test("seedSessionScenario: attaché after long absence with dossier", () => {
   clearPersistedChatMachineSnapshot(sid);
 });
 
+test("seedSessionScenario: dossierBaselineAge custom seeds without error", () => {
+  const sid = "seed-test-custom-lb-" + Date.now();
+  clearPersistedChatMachineSnapshot(sid);
+  const { envelope } = seedSessionScenario(sid, {
+    hasDossier: true,
+    baselineCompleted: true,
+    timeAwayBin: "brief",
+    dossierBaselineAge: "custom",
+    dossierLastBaselineCompletedAtOffsetMs: 123_456,
+  });
+  assert.ok(envelope);
+  assert.equal(envelope.has_dossier, true);
+  clearPersistedChatMachineSnapshot(sid);
+});
+
+
 test("returnClassification: classifyFromSessionAndDossier resolves", () => {
   const { classifyFromSessionAndDossier } = require("./session/returnClassification");
   const d = require("./dossier_and_summarize/dossier").createEmptyDossier("u1");

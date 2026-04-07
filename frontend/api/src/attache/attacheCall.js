@@ -80,13 +80,14 @@ function createAttacheCall(openaiClient, opts) {
 
     logger.logLLMCall("attacheCall", {
       model: config.MODEL,
+      messages,
       messageCount: messages.length,
       historyTurns: Array.isArray(input?.chat_history) ? input.chat_history.length : 0,
       userMessageLength: userMessage.length,
       systemPromptLength: systemContent.length,
     });
 
-    logger.logFullLlmMessages("attacheCall", "attache", messages);
+    logger.logOpenAiChatCompletionCreatePayload("attacheCall", "attache", createPayload);
 
     try {
       const response = await openaiClient.chat.completions.create(createPayload);

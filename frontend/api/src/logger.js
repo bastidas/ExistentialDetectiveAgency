@@ -6,7 +6,7 @@
  * Levels:
  * - info / warn / error: always logged.
  * - debug: only when DEBUG_LOGS is truthy.
- * - DEBUG_PROMPTS_LEVEL: 0 = off, 1–2 reserved, 3 = log exact system string (includes schema appendix) + full messages array from LLM calls.
+ * - DEBUG_PROMPTS_LEVEL: 0 = off, 1 = legacy truthy only (unused for prompt dumps), 2 = from `# TURN INSTRUCTIONS` through **end of system** per agent (color-coded) + `[auxLLM]` lines for any `logLLMCall` (summarizer, dossier analyzers, main agent calls), 3 = full composed system + **exact `openai.chat.completions.create` payload** (JSON) for each call — no separate turn banner (use 2 for that).
  *
  * Color semantics (when stdout is a TTY):
  * - magenta: user-facing messages or content.
@@ -149,12 +149,29 @@ function getDebugStateLevel() {
 }
 
 /**
- * DEBUG_PROMPTS_LEVEL: 0 = off, 1–2 reserved, 3 = log exact strings (see `logComposedPromptFull`, `logFullLlmMessages`).
+ * Reads DEBUG_PROMPTS_LEVEL (or legacy typo DEBUG_PROMPT_LEVEL). Strips BOM / trims.
+ * @returns {string|null}
+ */
+function rawDebugPromptsLevelEnv() {
+  const primary = process.env.DEBUG_PROMPTS_LEVEL;
+  const fallback = process.env.DEBUG_PROMPT_LEVEL;
+  const raw =
+    primary != null && String(primary).trim() !== ""
+      ? primary
+      : fallback != null && String(fallback).trim() !== ""
+        ? fallback
+        : null;
+  if (raw == null) return null;
+  return String(raw).replace(/^\uFEFF/, "").trim();
+}
+
+/**
+ * DEBUG_PROMPTS_LEVEL: 0 = off, 1 = unused for dumps, 2 = from `# TURN INSTRUCTIONS` through end of system + auxiliary LLM notices, 3 = full composed + exact OpenAI create() payload JSON.
  */
 function getDebugPromptsLevel() {
-  const raw = process.env.DEBUG_PROMPTS_LEVEL;
+  const raw = rawDebugPromptsLevelEnv();
   if (raw == null || raw === "") return 0;
-  const n = Number(String(raw).trim());
+  const n = Number(raw);
   if (Number.isFinite(n) && n >= 0 && n <= 3) return Math.trunc(n);
   if (/^(1|true|yes)$/i.test(String(raw))) return 1;
   return 0;
@@ -189,9 +206,44 @@ function logFullLlmMessages(scope, agentKey, messages) {
 }
 
 /**
- * When DEBUG_PROMPTS_LEVEL >= 3: log the exact system-role string from composeAgentPrompt (includes response-format instructions).
- * @param {{ agentKey: string, activeAgent?: string|null, systemContentExact: string }} input
+ * Per-agent ANSI color for system-prompt suffix debug from `# TURN INSTRUCTIONS` (DEBUG_PROMPTS_LEVEL === 2).
+ * @param {string} [agentKey]
+ * @returns {string} ANSI open sequence (use with `ansi.reset` to close).
  */
+function ansiColorForAgentPromptDebug(agentKey) {
+  const k = String(agentKey || "").toLowerCase();
+  if (k === "attache") return ansi.cyan;
+  if (k === "detective") return ansi.green;
+  if (k === "lumen") return ansi.blue;
+  if (k === "umbra") return ansi.magenta;
+  return ansi.yellow;
+}
+
+/**
+ * When DEBUG_PROMPTS_LEVEL === 2: log from `# TURN INSTRUCTIONS` through **end of system message**
+ * (color-coded by agentKey), so response-format / schema tails stay visible. At level 3, use composed + wire JSON instead.
+ * @param {{ agentKey: string, activeAgent?: string|null, turnInstructionsText: string }} input
+ */
+function logTurnInstructionsBlock({ agentKey, activeAgent, turnInstructionsText }) {
+  const lvl = getDebugPromptsLevel();
+  if (lvl < 2 || lvl >= 3) return;
+  const raw = String(turnInstructionsText || "").trim();
+  if (!raw) return;
+  const a = ansi;
+  const c = ansiColorForAgentPromptDebug(agentKey);
+  const key = agentKey != null ? String(agentKey) : "(unknown)";
+  let header =
+    `${a.dim}[turnInstructions]${a.reset} ${c}${a.bold}# TURN INSTRUCTIONS${a.reset} ${a.dim}agentKey=${a.reset}${c}${key}${a.reset}`;
+  if (activeAgent != null && String(activeAgent).trim() !== "") {
+    header += ` ${a.dim}activeAgent=${a.reset}${a.yellow}${String(activeAgent)}${a.reset}`;
+  }
+  console.log(header);
+  const rule = `${a.dim}${"—".repeat(72)}${a.reset}`;
+  console.log(rule);
+  console.log(`${c}${raw}${a.reset}`);
+  console.log(rule);
+}
+
 function logComposedPromptFull({ agentKey, activeAgent, systemContentExact }) {
   if (getDebugPromptsLevel() < 3) return;
   const a = ansi;
@@ -207,6 +259,34 @@ function logComposedPromptFull({ agentKey, activeAgent, systemContentExact }) {
   const rule = `${a.dim}${"—".repeat(72)}${a.reset}`;
   console.log(rule);
   console.log(systemContentExact == null ? "" : String(systemContentExact));
+  console.log(rule);
+}
+
+/**
+ * When DEBUG_PROMPTS_LEVEL >= 3: log the exact object passed to `openai.chat.completions.create` (JSON).
+ * This is the authoritative “full LLM call” (model, messages[], temperature, response_format, …).
+ * @param {string} scope — e.g. "attacheCall"
+ * @param {string} agentKey — e.g. "attache"
+ * @param {Record<string, unknown>} createPayload — payload passed to `.create()`
+ */
+function logOpenAiChatCompletionCreatePayload(scope, agentKey, createPayload) {
+  if (getDebugPromptsLevel() < 3) return;
+  const a = ansi;
+  const sc = scope != null ? String(scope) : "(scope)";
+  const key = agentKey != null ? String(agentKey) : "(unknown)";
+  console.log(
+    `${a.cyan}[openai.chat.completions.create]${a.reset} ${a.bold}${a.green}${sc}${a.reset} ` +
+      `${a.dim}agentKey=${a.reset}${a.magenta}${key}${a.reset}`
+  );
+  const rule = `${a.dim}${"—".repeat(72)}${a.reset}`;
+  console.log(rule);
+  let out;
+  try {
+    out = JSON.stringify(createPayload, null, 2);
+  } catch (_) {
+    out = String(createPayload);
+  }
+  console.log(out);
   console.log(rule);
 }
 
@@ -249,9 +329,32 @@ function debug(scope, ...args) {
   baseLog("debug", scope, args);
 }
 
-/** Optional structured LLM logging (used by summarization and similar). */
+/** Optional structured LLM logging (used by summarization, dossier analyzers, agent calls). */
 function logLLMCall(scope, payload) {
   debug(scope, "LLM call", payload);
+  if (getDebugPromptsLevel() < 2) return;
+  const p = payload || {};
+  const label = p.label != null ? String(p.label) : "";
+  const model =
+    p.params && p.params.model != null
+      ? String(p.params.model)
+      : p.model != null
+        ? String(p.model)
+        : "";
+  const msgs = Array.isArray(p.messages) ? p.messages : [];
+  let approxChars = 0;
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i];
+    if (m && m.content != null) approxChars += String(m.content).length;
+  }
+  const sc = scope != null ? String(scope) : "(scope)";
+  console.log(
+    `${ansi.dim}[auxLLM]${ansi.reset} ${ansi.bold}${ansi.yellow}${sc}${ansi.reset}` +
+      (label ? ` ${ansi.dim}${label}${ansi.reset}` : "") +
+      ` ${ansi.dim}model=${ansi.reset}${model}` +
+      ` ${ansi.dim}messages=${ansi.reset}${msgs.length}` +
+      ` ${ansi.dim}~chars=${ansi.reset}${approxChars}`
+  );
 }
 
 const a = ansi;
@@ -279,7 +382,11 @@ module.exports = {
   logLLMCall,
   getDebugStateLevel,
   getDebugPromptsLevel,
+  rawDebugPromptsLevelEnv,
   logComposedPromptFull,
+  logTurnInstructionsBlock,
+  ansiColorForAgentPromptDebug,
+  logOpenAiChatCompletionCreatePayload,
   logFullLlmMessages,
   logChatMachineState,
   formatStructuredAgentContextForDebug,

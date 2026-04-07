@@ -2,7 +2,10 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { extractTurnInstructionsFromSystemPrompt } = require("./turnInstructionsExtract");
+const {
+  extractTurnInstructionsFromSystemPrompt,
+  extractFromTurnInstructionsHeadingThroughEnd,
+} = require("./turnInstructionsExtract");
 
 test("extractTurnInstructions: empty when marker missing", () => {
   assert.equal(extractTurnInstructionsFromSystemPrompt("hello"), "");
@@ -48,4 +51,27 @@ test("extractTurnInstructions: ignores quoted substring before real heading (att
   assert.ok(out.includes("The querent is just arriving"));
   assert.ok(!out.includes("user_intends_explore"));
   assert.ok(!out.includes("# Response format"));
+});
+
+test("extractThroughEnd: includes everything after # TURN INSTRUCTIONS to EOF (next H1 does not truncate)", () => {
+  const sys = [
+    "# Identity",
+    "foo",
+    "# TURN INSTRUCTIONS",
+    "### Visit context",
+    "stay under",
+    "# Response format",
+    "Reply with JSON only.",
+    "",
+    "more tail",
+  ].join("\n");
+  const out = extractFromTurnInstructionsHeadingThroughEnd(sys);
+  assert.ok(out.startsWith("# TURN INSTRUCTIONS\n"));
+  assert.ok(out.includes("# Response format"));
+  assert.ok(out.includes("more tail"));
+  assert.ok(!out.includes("# Identity"));
+});
+
+test("extractThroughEnd: empty when heading missing", () => {
+  assert.equal(extractFromTurnInstructionsHeadingThroughEnd("no marker"), "");
 });

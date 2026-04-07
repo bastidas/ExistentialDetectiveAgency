@@ -1,0 +1,1756 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Chat scenario lab</title>
+    <style>
+      :root {
+        font-family: system-ui, sans-serif;
+        line-height: 1.35;
+        color: #e8e4dc;
+        background: #141210;
+        --stack-detective: #c9a227;
+        --stack-detective-bg: rgba(201, 162, 39, 0.09);
+        --stack-lumen: #d95a5a;
+        --stack-lumen-bg: rgba(217, 90, 90, 0.12);
+        --stack-umbra: #6b9bd4;
+        --stack-umbra-bg: rgba(107, 155, 212, 0.1);
+        --stack-attache: #6faf8a;
+        --stack-attache-bg: rgba(111, 175, 138, 0.09);
+      }
+      body {
+        margin: 0;
+        padding: 0.65rem 0.85rem 1.25rem;
+      }
+      .page-title {
+        font-size: 1.1rem;
+        font-weight: 600;
+        margin: 0 0 0.35rem;
+      }
+      .hint {
+        font-size: 0.72rem;
+        color: #8a8478;
+        margin: 0 0 0.65rem;
+        max-width: 58rem;
+        line-height: 1.4;
+      }
+      .hint--sync {
+        margin-top: -0.4rem;
+        margin-bottom: 0.75rem;
+        padding: 0.4rem 0.5rem;
+        background: rgba(0, 0, 0, 0.22);
+        border-radius: 4px;
+        border: 1px solid #2a2824;
+        max-width: 58rem;
+      }
+      .page-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        max-width: 96rem;
+        margin: 0 auto;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 22rem) minmax(0, 1fr);
+        gap: 0.75rem;
+        align-items: start;
+      }
+      @media (max-width: 900px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+      }
+      .panel {
+        background: #1e1c18;
+        border: 1px solid #353028;
+        border-radius: 6px;
+        padding: 0.65rem 0.75rem;
+      }
+      .panel h2 {
+        font-size: 0.82rem;
+        font-weight: 600;
+        margin: 0 0 0.45rem;
+        color: #b8b3a5;
+        letter-spacing: 0.02em;
+      }
+      .ctrl-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 0.28rem;
+      }
+      .ctrl-row {
+        display: grid;
+        grid-template-columns: minmax(5.5rem, 7rem) minmax(0, 1fr);
+        align-items: center;
+        gap: 0.35rem 0.5rem;
+        font-size: 0.76rem;
+        cursor: default;
+      }
+      @media (max-width: 420px) {
+        .ctrl-row {
+          grid-template-columns: 1fr;
+        }
+      }
+      .ctrl-label {
+        color: #a39d90;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .ctrl-row--check {
+        grid-template-columns: 1fr;
+        margin-top: 0.15rem;
+      }
+      .row-check {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.4rem;
+        cursor: pointer;
+        margin: 0;
+        font-size: 0.76rem;
+        color: #c4beb2;
+      }
+      .row-check input {
+        margin-top: 0.15rem;
+        flex-shrink: 0;
+      }
+      .row-check code {
+        font-size: 0.68rem;
+        color: #9ec8ff;
+      }
+      .turn-counts-group {
+        margin-top: 0.35rem;
+        padding-top: 0.35rem;
+        border-top: 1px solid #353028;
+      }
+      .ctrl-row--subhead {
+        grid-template-columns: 1fr;
+        margin-bottom: 0.08rem;
+      }
+      .ctrl-row--subhead .ctrl-label {
+        font-size: 0.68rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #8a8478;
+      }
+      .ctrl-row input[readonly] {
+        cursor: default;
+        background: #1a1815;
+        color: #c4beb2;
+      }
+      select,
+      button,
+      .ctrl-row input[type="number"],
+      .ctrl-row input[type="text"] {
+        font: inherit;
+        padding: 0.28rem 0.4rem;
+        border-radius: 4px;
+        border: 1px solid #454038;
+        background: #26231e;
+        color: #e8e4dc;
+        margin: 0;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      select:disabled {
+        opacity: 0.45;
+      }
+      .apply-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        margin-top: 0.45rem;
+      }
+      button {
+        width: auto;
+        cursor: pointer;
+        padding: 0.3rem 0.55rem;
+        font-size: 0.76rem;
+      }
+      button:hover {
+        background: #36322b;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .apply-status {
+        font-size: 0.68rem;
+        color: #7a7568;
+      }
+      .apply-status.is-busy {
+        color: #c9a227;
+      }
+      pre {
+        margin: 0;
+        padding: 0.45rem 0.5rem;
+        background: #0c0b0a;
+        border: 1px solid #2a2824;
+        border-radius: 3px;
+        overflow: auto;
+        font-size: 0.6rem;
+        line-height: 1.28;
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: min(52vh, 42rem);
+      }
+      .preview-section h3 {
+        font-size: 0.68rem;
+        font-weight: 600;
+        margin: 0.55rem 0 0.22rem;
+        color: #a09888;
+        padding-left: 0.25rem;
+        border-left: 2px solid rgba(255, 255, 255, 0.12);
+      }
+      .preview-section:first-child h3 {
+        margin-top: 0;
+      }
+      #previewBlocks {
+        max-height: none;
+      }
+      .preview-meta {
+        font-size: 0.68rem;
+        color: #8f8a7e;
+        margin-bottom: 0.35rem;
+        line-height: 1.35;
+      }
+      .preview-stack-block {
+        margin-top: 0.65rem;
+        padding: 0.45rem 0.5rem 0.5rem;
+        border-radius: 4px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-left-width: 4px;
+        border-left-color: var(--stack-accent, #555);
+        background: var(--stack-bg, rgba(0, 0, 0, 0.15));
+      }
+      .preview-stack-block:first-child {
+        margin-top: 0;
+      }
+      .preview-stack-block.stack--detective {
+        --stack-accent: var(--stack-detective);
+        --stack-bg: var(--stack-detective-bg);
+      }
+      .preview-stack-block.stack--lumen {
+        --stack-accent: var(--stack-lumen);
+        --stack-bg: var(--stack-lumen-bg);
+      }
+      .preview-stack-block.stack--umbra {
+        --stack-accent: var(--stack-umbra);
+        --stack-bg: var(--stack-umbra-bg);
+      }
+      .preview-stack-block.stack--attache {
+        --stack-accent: var(--stack-attache);
+        --stack-bg: var(--stack-attache-bg);
+      }
+      .preview-stack-block h2.stack-title {
+        font-size: 0.78rem;
+        font-weight: 600;
+        margin: 0 0 0.4rem;
+        color: #ddd8cc;
+        letter-spacing: 0.02em;
+      }
+      .preview-stack-block .preview-section h3 {
+        border-left-color: var(--stack-accent, rgba(255, 255, 255, 0.12));
+      }
+      .err {
+        color: #f08070;
+      }
+      a {
+        color: #8ec4ff;
+      }
+      .apply-result {
+        margin-top: 0.55rem;
+        padding-top: 0.5rem;
+        border-top: 1px solid #353028;
+      }
+      .apply-result h2 {
+        font-size: 0.78rem;
+        margin-bottom: 0.3rem;
+      }
+      .apply-result pre {
+        max-height: min(32vh, 20rem);
+        font-size: 0.58rem;
+      }
+      .detective-phase-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.28rem;
+      }
+      .preview-legend {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem 0.85rem;
+        font-size: 0.65rem;
+        color: #8f8a7e;
+        margin: 0 0 0.5rem;
+        padding: 0.35rem 0.45rem;
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 4px;
+        border: 1px solid #2a2824;
+      }
+      .preview-legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.28rem;
+      }
+      .lab-dot {
+        width: 0.55rem;
+        height: 0.55rem;
+        border-radius: 2px;
+        flex-shrink: 0;
+      }
+      .lab-dot--system {
+        background: #6b9e7a;
+        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+      }
+      .lab-dot--user {
+        background: #6b8fd4;
+        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+      }
+      .lab-dot--schema {
+        background: #c9a85a;
+        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+      }
+      .lab-dot--meta {
+        background: #9a8a9e;
+        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+      }
+      .preview-section.lab-block--system h3 {
+        border-left-color: #6b9e7a;
+        color: #b8d4c0;
+      }
+      .preview-section.lab-block--user h3 {
+        border-left-color: #6b8fd4;
+        color: #b4c8f0;
+      }
+      .preview-section.lab-block--schema-msg h3 {
+        border-left-color: #c9a85a;
+        color: #e0d0a8;
+      }
+      .preview-section.lab-block--history h3 {
+        border-left-color: #5a8a9e;
+        color: #a8c4d4;
+      }
+      .preview-section.lab-block--input h3 {
+        border-left-color: #d98a6a;
+        color: #f0c8b8;
+      }
+      .preview-section.lab-block--schema h3 {
+        border-left-color: #c9a85a;
+        color: #d8c898;
+      }
+      .preview-section.lab-block--meta h3 {
+        border-left-color: #9a8a9e;
+        color: #c4b8c8;
+      }
+      pre.lab-pre--system {
+        border-left: 3px solid #6b9e7a;
+      }
+      pre.lab-pre--user {
+        border-left: 3px solid #6b8fd4;
+      }
+      pre.lab-pre--schema {
+        font-family: ui-monospace, "Cascadia Code", monospace;
+        border-left: 3px solid #c9a85a;
+        background: #0a0908;
+      }
+      pre.lab-pre--meta {
+        border-left: 3px solid #9a8a9e;
+        background: #100e12;
+        opacity: 0.95;
+      }
+      .orch-panel {
+        border: 1px solid #353028;
+        border-radius: 6px;
+        padding: 0.65rem 0.75rem;
+        background: #181610;
+      }
+      .orch-panel h2 {
+        font-size: 0.82rem;
+        font-weight: 600;
+        margin: 0 0 0.45rem;
+        color: #b8b3a5;
+      }
+      /* Cap diagram band height; diagrams share one row when viewport allows */
+      .orch-diagrams {
+        --orch-diagram-band: 20vh;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+        gap: 0.5rem;
+        margin-bottom: 0.55rem;
+        width: 100%;
+        box-sizing: border-box;
+        max-height: var(--orch-diagram-band);
+        overflow: auto;
+        align-items: start;
+      }
+      .orch-mermaid-wrap {
+        width: 100%;
+        min-width: 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        max-height: var(--orch-diagram-band);
+      }
+      .orch-mermaid-slot {
+        width: 100%;
+        min-width: 0;
+        min-height: 0;
+        flex: 1 1 auto;
+        overflow: auto;
+      }
+      .orch-diagrams .mermaid {
+        font-size: 0.65rem;
+        background: #0f0e0c;
+        border: 1px solid #2a2820;
+        border-radius: 4px;
+        padding: 0.3rem 0.35rem;
+        margin: 0;
+        overflow: auto;
+        width: 100%;
+        max-width: 100%;
+        max-height: calc(var(--orch-diagram-band) - 1.6rem);
+        box-sizing: border-box;
+      }
+      .orch-json {
+        font-size: 0.68rem;
+        max-height: 22rem;
+        overflow: auto;
+        margin: 0.35rem 0;
+        padding: 0.45rem;
+        background: #0a0908;
+        border: 1px solid #353028;
+        border-radius: 4px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .orch-step-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem;
+        align-items: center;
+        margin-top: 0.45rem;
+      }
+      .orch-step-row button {
+        font-size: 0.72rem;
+        padding: 0.25rem 0.45rem;
+        cursor: pointer;
+        background: #2a2620;
+        border: 1px solid #454030;
+        color: #e0dcd4;
+        border-radius: 4px;
+      }
+      .orch-step-row button:hover {
+        background: #353028;
+      }
+      .orch-hint {
+        font-size: 0.68rem;
+        color: #8a8478;
+        margin: 0 0 0.35rem;
+      }
+      .orch-mermaid-wrap h3 {
+        font-size: 0.68rem;
+        font-weight: 600;
+        color: #9a948a;
+        margin: 0 0 0.2rem;
+        letter-spacing: 0.03em;
+      }
+      .orch-top {
+        width: 100%;
+      }
+      .orch-view-title {
+        font-size: 0.78rem;
+        font-weight: 600;
+        margin: 0 0 0.5rem;
+        letter-spacing: 0.02em;
+      }
+      .page-grid.is-attache-routing .orch-view-title {
+        color: var(--stack-attache);
+        border-bottom: 1px solid rgba(111, 175, 138, 0.35);
+        padding-bottom: 0.35rem;
+      }
+      .page-grid.is-detective-routing .orch-view-title {
+        color: var(--stack-detective);
+        border-bottom: 1px solid rgba(201, 162, 39, 0.35);
+        padding-bottom: 0.35rem;
+      }
+      .page-grid.is-attache-routing .orch-panel-routing {
+        display: none !important;
+      }
+      .page-grid.is-detective-routing .orch-panel-attache {
+        display: none !important;
+      }
+      .orch-diagrams svg {
+        max-width: 100% !important;
+        max-height: calc(var(--orch-diagram-band) - 2rem) !important;
+        width: auto !important;
+        height: auto !important;
+        display: block;
+        margin: 0 auto;
+      }
+      .lab-fs {
+        border: 1px solid #353028;
+        border-radius: 5px;
+        padding: 0.45rem 0.5rem 0.5rem;
+        margin: 0 0 0.45rem;
+      }
+      .lab-fs legend {
+        font-size: 0.68rem;
+        color: #9a948a;
+        padding: 0 0.35rem;
+      }
+      .lab-fs--attache {
+        border-left: 3px solid rgba(111, 175, 138, 0.45);
+      }
+      .lab-fs--detective {
+        border-left: 3px solid rgba(201, 162, 39, 0.45);
+      }
+      .lab-fs--closure {
+        border-left: 3px solid rgba(154, 138, 158, 0.35);
+      }
+      .preview-tab-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem;
+        margin: 0 0 0.45rem;
+        align-items: center;
+      }
+      .preview-tab {
+        font: inherit;
+        font-size: 0.72rem;
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        border: 1px solid #454038;
+        background: #26231e;
+        color: #b8b3a5;
+        cursor: pointer;
+      }
+      .preview-tab:hover {
+        background: #2e2a24;
+      }
+      .preview-tab.is-active {
+        color: #e8e4dc;
+        border-color: #6b9e7a;
+        box-shadow: inset 0 -2px 0 rgba(107, 158, 122, 0.5);
+      }
+      .preview-tab-panel[hidden] {
+        display: none !important;
+      }
+      .preview-panel-note {
+        margin: -0.2rem 0 0.45rem;
+        font-size: 0.68rem;
+        color: #8f8a7e;
+      }
+      .turn-instr-stacks {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        min-height: 3rem;
+      }
+      .turn-instr-stack {
+        border-radius: 4px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-left-width: 4px;
+        border-left-color: var(--stack-accent, #555);
+        background: var(--stack-bg, rgba(0, 0, 0, 0.15));
+        padding: 0.4rem 0.5rem 0.45rem;
+      }
+      .turn-instr-stack.stack--detective {
+        --stack-accent: var(--stack-detective);
+        --stack-bg: var(--stack-detective-bg);
+      }
+      .turn-instr-stack.stack--lumen {
+        --stack-accent: var(--stack-lumen);
+        --stack-bg: var(--stack-lumen-bg);
+      }
+      .turn-instr-stack.stack--umbra {
+        --stack-accent: var(--stack-umbra);
+        --stack-bg: var(--stack-umbra-bg);
+      }
+      .turn-instr-stack.stack--attache {
+        --stack-accent: var(--stack-attache);
+        --stack-bg: var(--stack-attache-bg);
+      }
+      .turn-instr-label {
+        font-size: 0.65rem;
+        font-weight: 600;
+        color: #c4beb2;
+        margin: 0 0 0.28rem;
+        letter-spacing: 0.02em;
+      }
+      .turn-instr-pre {
+        margin: 0;
+        padding: 0;
+        font-family: ui-monospace, "Cascadia Code", "SF Mono", Menlo, monospace;
+        font-size: 0.62rem;
+        line-height: 1.35;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: #e8e4dc;
+        background: transparent;
+        border: none;
+      }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="/dev/chat-scenario-diagrams.js"></script>
+  </head>
+  <body>
+    <h1 class="page-title">Chat scenario lab</h1>
+    <p class="hint">
+      <code>ALLOW_TEST_SEED=1</code> · session cookie ·
+      <a href="/">main chat</a> · Preview = next-turn payloads;
+      <strong style="color: #c9a227">detective</strong> /
+      <strong style="color: #d95a5a">lumen</strong> /
+      <strong style="color: #6b9bd4">umbra</strong> (parallel when baseline done) ·
+      <strong style="color: #6faf8a">attaché</strong> otherwise. Hover labels for detail. Scenario auto-applies after you
+      change a control (debounced).
+      <strong>Dossier:</strong> <code>Fixture</code> = minimal persisted dossier on the session;
+      <code>None</code> = no dossier. <strong>Baseline age</strong> (when Fixture) sets
+      <code>lastBaselineCompletedAt</code> for stale-by-age; Auto = attaché→stale / detective→fresh (legacy defaults).
+    </p>
+    <p class="hint hint--sync">
+      <strong>State sync:</strong> The <strong>LLM preview</strong> (TURN INSTRUCTIONS, full payload) is composed from the
+      scenario form only — it does <em>not</em> mutate in-memory orchestrators. <strong>Apply</strong> seeds the session
+      and writes detective existential phase + narrative arc from the form into the real XState snapshots; diagrams and
+      Orchestration JSON read that persisted state and refresh after Apply, preview, or step buttons. Until you Apply,
+      Mermaid can lag controls you have not yet applied. Preview JSON includes <code>derivedRouting</code> (dry-run
+      <code>chatMachine.runTurn</code>, no snapshot write): <code>visit_bin</code> + envelope. POST
+      <code>/api/dev/chat-scenario-mock-return</code> with <code>{ "msSinceLastVisit": N }</code> sets a synthetic gap for
+      the next main <code>/api/chat</code> message.
+    </p>
+
+    <div class="page-grid is-detective-routing" id="pageGrid">
+      <div class="orch-top orch-panel">
+        <h2>Orchestration (in-memory session)</h2>
+        <p class="orch-hint">
+          Diagrams show <strong>persisted</strong> orchestrators (not the form by itself). They update after
+          <strong>Apply</strong> (seed + sync form → detective/philosophers), after preview, or after step buttons. Use
+          <strong>Apply</strong> before interactive steps so snapshots exist. XState:
+          <strong style="color: #6faf8a">highlighted</strong> = current state.
+        </p>
+
+        <div class="orch-panel-attache">
+          <p class="orch-view-title">◆ Attaché</p>
+          <div class="orch-diagrams orch-diagrams--attache">
+            <div class="orch-mermaid-wrap">
+              <h3>attacheOrchestrator</h3>
+              <div class="orch-mermaid-slot" data-orch-diagram="attache"></div>
+            </div>
+          </div>
+          <div class="orch-step-row orch-step-row--attache">
+            <span style="font-size: 0.72rem; color: #a39d90">Attaché steps (dev):</span>
+            <button
+              type="button"
+              id="stepAttacheAdvanceQ"
+              title="ATTACHE_ADVANCE_QUESTION_INDEX — only while question_index + 1 &lt; n_questions_in_baseline (seed n≥2 to practice mid-baseline)"
+            >
+              Advance question index
+            </button>
+            <button type="button" id="stepAttacheBaselineFull" title="ATTACHE_TURN_BASELINE — full FSM step (rolls phase when at last question in block)">
+              Baseline turn (full)
+            </button>
+            <button type="button" id="stepAttacheExplore" title="ATTACHE_TURN_EXPLORE">Intent: explore</button>
+            <button type="button" id="stepAttacheClose" title="ATTACHE_TURN_CLOSE">Intent: close</button>
+          </div>
+        </div>
+
+        <div class="orch-panel-routing">
+          <p class="orch-view-title">⚙ Routing + detectives</p>
+          <div class="orch-diagrams orch-diagrams--routing">
+            <div class="orch-mermaid-wrap">
+              <h3>chatMachine · parallel regions</h3>
+              <div class="orch-mermaid-slot" data-orch-diagram="chat"></div>
+            </div>
+            <div class="orch-mermaid-wrap">
+              <h3>detectiveOrchestrator</h3>
+              <div class="orch-mermaid-slot" data-orch-diagram="detective"></div>
+            </div>
+            <div class="orch-mermaid-wrap">
+              <h3>philosophersNarrative</h3>
+              <div class="orch-mermaid-slot" data-orch-diagram="philosophers"></div>
+            </div>
+          </div>
+          <div class="orch-step-row orch-step-row--routing">
+            <span style="font-size: 0.72rem; color: #a39d90">Detective / philosophers:</span>
+            <button type="button" id="stepDetectivePolicy" title="DETECTIVE_POLICY_TURN with visit_bin from form">
+              Detective POLICY_TURN
+            </button>
+            <button type="button" id="stepDetectivePhase" title="Lab: advance existential phase one step (DETECTIVE_PHASE_ADVANCE)">Detective phase advance</button>
+            <button type="button" id="stepPhilNarrative" title="NARRATIVE_TURN">Philosopher narrative +1</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="layout">
+        <div class="panel">
+          <h2>Scenario</h2>
+          <div class="ctrl-grid">
+            <fieldset class="lab-fs">
+              <legend>◇ Session / routing</legend>
+              <div
+                class="ctrl-row"
+                title="Fixture: minimal persisted dossier (lastBaselineCompletedAt). None: no dossier. Drives return classification, dossier_summary, and attaché return-tier dossier lines in preview."
+              >
+                <span class="ctrl-label">Dossier</span>
+                <select id="hasDossier" name="hasDossier">
+                  <option value="0">None</option>
+                  <option value="1">Fixture</option>
+                </select>
+              </div>
+
+              <div
+                id="rowDossierBaselineAge"
+                class="ctrl-row"
+                hidden
+                title="When Fixture is on: how old last baseline completion is (dossier_stale_by_age, attaché return append). Auto matches former defaults (attaché→stale, detective→fresh)."
+              >
+                <span class="ctrl-label">Baseline age</span>
+                <select id="dossierBaselineAge" name="dossierBaselineAge">
+                  <option value="">Auto (attaché→stale, detective→fresh)</option>
+                  <option value="fresh">Fresh</option>
+                  <option value="stale">Stale (past long threshold)</option>
+                  <option value="custom">Custom offset</option>
+                </select>
+              </div>
+              <div
+                id="rowDossierBaselineOffset"
+                class="ctrl-row"
+                hidden
+                title="Milliseconds before now for lastBaselineCompletedAt when Baseline age is Custom."
+              >
+                <span class="ctrl-label">Offset ms</span>
+                <input
+                  type="number"
+                  id="dossierLastBaselineOffsetMs"
+                  name="dossierLastBaselineOffsetMs"
+                  min="0"
+                  step="1"
+                  placeholder="e.g. 86400000"
+                />
+              </div>
+
+              <label
+                class="ctrl-row ctrl-row--check row-check"
+                for="baselineCompleted"
+                title="Checked: baseline_completed → seeded detective path (parallel Lumen+Umbra in prod). Unchecked: attaché prelude; pick phase below."
+              >
+                <input type="checkbox" id="baselineCompleted" name="baselineCompleted" checked />
+                <span>Baseline done → <code>detective</code></span>
+              </label>
+
+              <div
+                class="ctrl-row"
+                title="Synced with baseline checkbox: detective vs attaché. POST /api/dev/chat-scenario uses this envelope."
+              >
+                <span class="ctrl-label">Target agent</span>
+                <select id="activeAgent" name="activeAgent">
+                  <option value="attache">attaché</option>
+                  <option value="detective" selected>detective</option>
+                </select>
+              </div>
+
+              <div
+                class="ctrl-row"
+                title="Time-away tier when ms field is empty. Detective+dossier: clamped below stale. Attaché+dossier: ms bumped to at least stale."
+              >
+                <span class="ctrl-label">Time-away bin</span>
+                <select id="timeAwayBin" name="timeAwayBin">
+                  <option value="brief">brief</option>
+                  <option value="moderate" selected>moderate</option>
+                  <option value="stale">stale</option>
+                  <option value="long">long</option>
+                </select>
+              </div>
+
+              <div
+                class="ctrl-row"
+                title="If set, overrides the bin with exact milliseconds since last visit (must be ≥ 0)."
+              >
+                <span class="ctrl-label">ms last visit</span>
+                <input
+                  type="number"
+                  id="msSinceLastVisit"
+                  name="msSinceLastVisit"
+                  min="0"
+                  step="1"
+                  placeholder="(bin)"
+                />
+              </div>
+            </fieldset>
+
+            <fieldset class="lab-fs lab-fs--attache" id="fieldsetAttache">
+              <legend>◆ Attaché</legend>
+              <div
+                id="rowAttachePhase"
+                class="ctrl-row"
+                hidden
+                title="Attaché machine phase after seed. Shown only when target agent is attaché. Used for attaché-only preview + seed."
+              >
+                <span class="ctrl-label">Attaché phase</span>
+                <select id="attachePhase" name="attachePhase">
+                  <option value="start" selected>start</option>
+                  <option value="explore">explore</option>
+                  <option value="baseline1">baseline1</option>
+                  <option value="baseline2">baseline2</option>
+                  <option value="baseline3">baseline3</option>
+                  <option value="close">close</option>
+                  <option value="close_final">close (post b3)</option>
+                </select>
+              </div>
+
+              <div id="rowAttacheOverrides" class="ctrl-row" hidden title="Merged into attaché state for preview + seed (optional).">
+                <span class="ctrl-label">potential_next_phase</span>
+                <select id="potentialNextPhase" name="potentialNextPhase">
+                  <option value="" selected>(default)</option>
+                  <option value="baseline1">baseline1</option>
+                  <option value="baseline2">baseline2</option>
+                  <option value="baseline3">baseline3</option>
+                  <option value="close">close</option>
+                </select>
+              </div>
+              <div id="rowQuestionIndex" class="ctrl-row" hidden title="Optional question index within current baseline phase (attaché routing only).">
+                <span class="ctrl-label">question_index</span>
+                <input type="number" id="questionIndex" name="questionIndex" min="0" step="1" placeholder="(default)" />
+              </div>
+            </fieldset>
+
+            <fieldset
+              class="lab-fs lab-fs--detective"
+              id="fieldsetDetective"
+              title="Apply writes these into the detective + philosophers orchestrators so Mermaid matches. Preview alone only composes prompts — use Apply to sync session state."
+            >
+              <legend>⚙ Detective / philosophers</legend>
+              <div id="detectivePhaseGroup" class="detective-phase-group">
+                <div
+                  class="ctrl-row"
+                  title="conversation_state.existential_therapy_phase — Initial / Middle / Final (see existential_therapy/*.md). Empty = unset for preview."
+                >
+                  <span class="ctrl-label" style="color: #c9a227">existential_therapy_phase</span>
+                  <select id="existentialTherapyPhase" name="existentialTherapyPhase"></select>
+                </div>
+                <div
+                  class="ctrl-row"
+                  title="narrative_phase for Lumen/Umbra — same arc labels as production (turn index maps to Exposition…Coda; see narrativePhases.js)."
+                >
+                  <span class="ctrl-label" style="color: #d95a5a">narrative_phase</span>
+                  <select id="narrativePhase" name="narrativePhase"></select>
+                </div>
+              </div>
+            </fieldset>
+
+            <fieldset class="lab-fs lab-fs--closure">
+              <legend>◇ Preview / closure</legend>
+              <div
+                class="turn-counts-group"
+                style="margin-top: 0; padding-top: 0; border-top: none"
+                title="Preview only: mirrors server attache_exchange_count + detective_turn_count. Total = attaché + detective."
+              >
+                <div class="ctrl-row ctrl-row--subhead"><span class="ctrl-label">Turn counts (preview)</span></div>
+                <div class="ctrl-row">
+                  <span class="ctrl-label">Attaché turn #</span>
+                  <input
+                    type="number"
+                    id="attacheTurnCount"
+                    name="attacheTurnCount"
+                    min="0"
+                    step="1"
+                    value="0"
+                  />
+                </div>
+                <div class="ctrl-row">
+                  <span class="ctrl-label">Detective turn #</span>
+                  <input
+                    type="number"
+                    id="detectiveTurnCount"
+                    name="detectiveTurnCount"
+                    min="0"
+                    step="1"
+                    value="0"
+                  />
+                </div>
+                <div class="ctrl-row">
+                  <span class="ctrl-label">Total turns</span>
+                  <input
+                    type="text"
+                    id="totalTurnCount"
+                    name="totalTurnCount"
+                    readonly
+                    value="0"
+                    aria-readonly="true"
+                    title="Sum of attaché + detective (read-only)"
+                  />
+                </div>
+                <div
+                  class="ctrl-row"
+                  title="Optional. Mirrors server MAX_USER_EXCHANGE cap for closure preview. Empty = server env default."
+                >
+                  <span class="ctrl-label">Max user exchanges</span>
+                  <input
+                    type="number"
+                    id="maxUserExchanges"
+                    name="maxUserExchanges"
+                    min="0"
+                    step="1"
+                    placeholder="(env)"
+                  />
+                </div>
+              </div>
+            </fieldset>
+          </div>
+
+          <div class="apply-actions">
+            <button type="button" id="apply" title="POST /api/dev/chat-scenario immediately (same as debounced auto-apply)">
+              Apply now
+            </button>
+            <span class="apply-status" id="applyStatus"></span>
+          </div>
+
+          <div class="apply-result">
+            <h2>Last apply</h2>
+            <pre id="out">(no run yet)</pre>
+          </div>
+        </div>
+
+        <div class="panel panel-preview">
+          <h2>LLM payload preview (next turn)</h2>
+          <p class="preview-meta preview-panel-note">
+            From the form only — see <strong>State sync</strong> above. Matches messages that would be sent on the next
+            turn if composition stayed as shown.
+          </p>
+          <div class="preview-tab-bar" role="tablist" aria-label="Preview sections">
+            <button type="button" class="preview-tab is-active" role="tab" aria-selected="true" id="previewTabBtnTurn" data-preview-panel="panelPreviewTurn">
+              TURN INSTRUCTIONS
+            </button>
+            <button type="button" class="preview-tab" role="tab" aria-selected="false" id="previewTabBtnFull" data-preview-panel="panelPreviewFull">
+              Full payload
+            </button>
+            <button type="button" class="preview-tab" role="tab" aria-selected="false" id="previewTabBtnJson" data-preview-panel="panelPreviewJson">
+              Orchestration JSON
+            </button>
+          </div>
+          <div id="panelPreviewTurn" class="preview-tab-panel">
+            <p class="preview-meta" id="previewMetaTurn">Loading…</p>
+            <div id="previewTurnInstrStacks" class="turn-instr-stacks" aria-live="polite"></div>
+          </div>
+          <div id="panelPreviewFull" class="preview-tab-panel" hidden>
+            <p class="preview-legend" id="previewLegend">
+              <span><span class="lab-dot lab-dot--system" aria-hidden="true"></span> system (sent)</span>
+              <span><span class="lab-dot lab-dot--user" aria-hidden="true"></span> user (history + this turn)</span>
+              <span><span class="lab-dot lab-dot--schema" aria-hidden="true"></span> raw schema JSON (duplicate of system appendix)</span>
+              <span><span class="lab-dot lab-dot--meta" aria-hidden="true"></span> internal (not sent)</span>
+            </p>
+            <p class="preview-meta" id="previewMeta">Loading…</p>
+            <div id="previewBlocks">(waiting)</div>
+          </div>
+          <div id="panelPreviewJson" class="preview-tab-panel" hidden>
+            <p class="preview-meta">In-memory orchestration snapshot (same as server lab GET after apply / preview / step).</p>
+            <pre class="orch-json" id="orchJson">(run Apply or Preview)</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        var apply = document.getElementById("apply");
+        var out = document.getElementById("out");
+        var applyStatus = document.getElementById("applyStatus");
+        var pageGrid = document.getElementById("pageGrid");
+        var previewBlocks = document.getElementById("previewBlocks");
+        var previewMeta = document.getElementById("previewMeta");
+        var previewMetaTurn = document.getElementById("previewMetaTurn");
+        var previewTurnInstrStacks = document.getElementById("previewTurnInstrStacks");
+        function val(id) {
+          return document.getElementById(id);
+        }
+
+        /**
+         * Renders server-provided turnInstructionsPreview per agent stack. Content is set via textContent only
+         * (raw API strings; line breaks preserved with white-space: pre-wrap).
+         */
+        function renderTurnInstructionsPreview(pr) {
+          var host = previewTurnInstrStacks;
+          if (!host) return;
+          host.textContent = "";
+          if (!pr || typeof pr !== "object") {
+            var pre0 = document.createElement("pre");
+            pre0.className = "turn-instr-pre";
+            pre0.textContent = "(No preview.)";
+            host.appendChild(pre0);
+            return;
+          }
+          function appendStack(agentKey, label, rawText) {
+            var stackClass = stackClassForAgent(agentKey);
+            if (!stackClass) stackClass = "stack--detective";
+            var section = document.createElement("section");
+            section.className = "turn-instr-stack " + stackClass;
+            section.setAttribute("data-agent", String(agentKey || "").toLowerCase() || "unknown");
+            var cap = document.createElement("div");
+            cap.className = "turn-instr-label";
+            cap.textContent = label != null ? String(label) : String(agentKey || "stack");
+            var pre = document.createElement("pre");
+            pre.className = "turn-instr-pre";
+            var text = rawText == null ? "" : String(rawText);
+            if (text === "") {
+              pre.textContent =
+                "(Empty turnInstructionsPreview — no # TURN INSTRUCTIONS region in composed system prompt.)";
+            } else {
+              pre.textContent = text;
+            }
+            section.appendChild(cap);
+            section.appendChild(pre);
+            host.appendChild(section);
+          }
+          appendStack(pr.activeAgent, pr.title || pr.activeAgent || "primary", pr.turnInstructionsPreview);
+          (Array.isArray(pr.parallelPhilosophers) ? pr.parallelPhilosophers : []).forEach(function (sub) {
+            appendStack(sub.activeAgent, sub.title || sub.activeAgent || "parallel", sub.turnInstructionsPreview);
+          });
+        }
+
+        function clearTurnInstructionsPreview() {
+          if (previewTurnInstrStacks) previewTurnInstrStacks.textContent = "";
+        }
+
+        function setActivePreviewTab(panelId) {
+          var map = {
+            panelPreviewTurn: document.getElementById("previewTabBtnTurn"),
+            panelPreviewFull: document.getElementById("previewTabBtnFull"),
+            panelPreviewJson: document.getElementById("previewTabBtnJson"),
+          };
+          ["panelPreviewTurn", "panelPreviewFull", "panelPreviewJson"].forEach(function (pid) {
+            var p = document.getElementById(pid);
+            if (p) p.hidden = pid !== panelId;
+            var b = map[pid];
+            if (b) {
+              var on = pid === panelId;
+              b.classList.toggle("is-active", on);
+              b.setAttribute("aria-selected", on ? "true" : "false");
+            }
+          });
+        }
+
+        document.querySelectorAll("[data-preview-panel]").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            var id = btn.getAttribute("data-preview-panel");
+            if (id) setActivePreviewTab(id);
+          });
+        });
+
+        function stackClassForAgent(agent) {
+          var a = String(agent || "").toLowerCase();
+          if (a === "detective") return "stack--detective";
+          if (a === "lumen") return "stack--lumen";
+          if (a === "umbra") return "stack--umbra";
+          if (a === "attache") return "stack--attache";
+          return "";
+        }
+
+        function isLegacyAgentContextJsonString(s) {
+          var t = String(s == null ? "" : s).trim();
+          if (!t.startsWith("{")) return false;
+          try {
+            var o = JSON.parse(t);
+            return o && o.type === "agent_context";
+          } catch (e) {
+            return false;
+          }
+        }
+
+        function renderAgentPayloadIntoContainer(container, pr) {
+          var systemExact =
+            pr.systemRoleExact != null && pr.systemRoleExact !== ""
+              ? pr.systemRoleExact
+              : pr.systemPrompt != null
+                ? pr.systemPrompt
+                : "";
+
+          function addSection(title, body, wrapClass, preClass) {
+            var wrap = document.createElement("div");
+            wrap.className = "preview-section" + (wrapClass ? " " + wrapClass : "");
+            var h = document.createElement("h3");
+            h.textContent = title;
+            var pre = document.createElement("pre");
+            pre.textContent = body == null ? "" : String(body);
+            if (preClass) pre.className = preClass;
+            wrap.appendChild(h);
+            wrap.appendChild(pre);
+            container.appendChild(wrap);
+          }
+
+          if (isLegacyAgentContextJsonString(systemExact)) {
+            addSection(
+              "⚠️ Not your current system prompt (legacy JSON — not sent as-is today)",
+              "This blob is the legacy JSON envelope (type \"agent_context\"). Current servers send plain text as the system role, not this JSON.\n\nRestart the Node process so it loads the latest API code, then reload this page. Do not treat the JSON below as messages[0].content.",
+              "lab-block--meta",
+              "lab-pre--meta"
+            );
+            try {
+              var parsed = JSON.parse(String(systemExact));
+              if (parsed && typeof parsed.identity === "string" && parsed.identity.trim()) {
+                addSection(
+                  "Legacy JSON only — identity field (reference)",
+                  parsed.identity,
+                  "lab-block--meta",
+                  "lab-pre--meta"
+                );
+              }
+            } catch (e) {}
+          } else {
+            addSection(
+              "System → messages[0].role === \"system\" (sent)",
+              systemExact,
+              "lab-block--system",
+              "lab-pre--system"
+            );
+          }
+
+          var extra = Array.isArray(pr.additionalMessages) ? pr.additionalMessages : [];
+          extra.forEach(function (m) {
+            var role = m && m.role ? m.role : "user";
+            var label = m && m.label ? m.label : "";
+            var title = role + (label ? " — " + label : "") + " (sent)";
+            var wrapClass = "lab-block--user";
+            var lab = String(label);
+            if (/[Cc]onversation history|history/i.test(lab)) wrapClass += " lab-block--history";
+            else if (/[Cc]urrent user message|current turn/i.test(lab)) wrapClass += " lab-block--input";
+            addSection(title, m && m.content != null ? m.content : "", wrapClass, "lab-pre--user");
+          });
+
+          var schemaJson = pr.outputSchemaJson != null ? String(pr.outputSchemaJson) : "";
+          if (schemaJson.trim()) {
+            addSection(
+              "Turn schema JSON (reference — raw object; same text is embedded under “# Response format” in the system message above)",
+              schemaJson,
+              "lab-block--schema lab-block--reference",
+              "lab-pre--schema"
+            );
+          }
+
+          if (pr.labLlmSafeState && typeof pr.labLlmSafeState === "object") {
+            try {
+              addSection(
+                "Internal: llmSafeState — narrative context slice for lab/mocks (NOT sent to the API; attaché excludes routing ids)",
+                JSON.stringify(pr.labLlmSafeState, null, 2),
+                "lab-block--meta",
+                "lab-pre--meta"
+              );
+            } catch (e) {
+              addSection(
+                "Internal: llmSafeState — narrative context slice for lab/mocks (NOT sent to the API)",
+                String(pr.labLlmSafeState),
+                "lab-block--meta",
+                "lab-pre--meta"
+              );
+            }
+          }
+          if (pr.labOrchestrationMeta && typeof pr.labOrchestrationMeta === "object") {
+            try {
+              addSection(
+                "Internal: orchestration / routing (dev lab only — NOT sent to the API)",
+                JSON.stringify(pr.labOrchestrationMeta, null, 2),
+                "lab-block--meta",
+                "lab-pre--meta"
+              );
+            } catch (e) {
+              addSection(
+                "Internal: orchestration / routing (dev lab only — NOT sent to the API)",
+                String(pr.labOrchestrationMeta),
+                "lab-block--meta",
+                "lab-pre--meta"
+              );
+            }
+          }
+        }
+
+        function renderPreviewSections(pr) {
+          previewBlocks.textContent = "";
+          var block = document.createElement("div");
+          block.className = "preview-stack-block " + stackClassForAgent(pr.activeAgent);
+          if (pr.title) {
+            var h2p = document.createElement("h2");
+            h2p.className = "stack-title";
+            h2p.textContent = pr.title;
+            block.appendChild(h2p);
+          }
+          renderAgentPayloadIntoContainer(block, pr);
+          previewBlocks.appendChild(block);
+
+          var parallel = Array.isArray(pr.parallelPhilosophers) ? pr.parallelPhilosophers : [];
+          parallel.forEach(function (sub) {
+            var b = document.createElement("div");
+            b.className = "preview-stack-block " + stackClassForAgent(sub.activeAgent);
+            var h2 = document.createElement("h2");
+            h2.className = "stack-title";
+            h2.textContent = sub.title || sub.activeAgent || "Parallel agent";
+            b.appendChild(h2);
+            renderAgentPayloadIntoContainer(b, sub);
+            previewBlocks.appendChild(b);
+          });
+        }
+        var bcEl = val("baselineCompleted");
+        var agentEl = val("activeAgent");
+        var phaseEl = val("attachePhase");
+
+        function syncOrchRoutingClass() {
+          var att = !bcEl.checked;
+          if (pageGrid) {
+            pageGrid.classList.toggle("is-attache-routing", att);
+            pageGrid.classList.toggle("is-detective-routing", !att);
+          }
+        }
+
+        function updateRowVisibility() {
+          var det = agentEl.value === "detective";
+          var fa = val("fieldsetAttache");
+          var fd = val("fieldsetDetective");
+          if (fa) fa.hidden = det;
+          if (fd) fd.hidden = !det;
+          syncOrchRoutingClass();
+          updatePhaseDisabled();
+        }
+
+        function syncAgentFromBaseline() {
+          agentEl.value = bcEl.checked ? "detective" : "attache";
+          updateRowVisibility();
+        }
+        function syncBaselineFromAgent() {
+          bcEl.checked = agentEl.value === "detective";
+          updateRowVisibility();
+        }
+        function updatePhaseDisabled() {
+          phaseEl.disabled = bcEl.checked;
+        }
+
+        bcEl.addEventListener("change", syncAgentFromBaseline);
+        agentEl.addEventListener("change", syncBaselineFromAgent);
+
+        function fillSelect(sel, values, unsetForEmpty) {
+          sel.innerHTML = "";
+          values.forEach(function (v) {
+            var opt = document.createElement("option");
+            opt.value = v;
+            opt.textContent = unsetForEmpty && v === "" ? "(unset)" : String(v);
+            sel.appendChild(opt);
+          });
+        }
+
+        function syncTotalTurnCounts() {
+          var aEl = val("attacheTurnCount");
+          var dEl = val("detectiveTurnCount");
+          var tEl = val("totalTurnCount");
+          if (!aEl || !dEl || !tEl) return;
+          var a = Number(aEl.value);
+          var d = Number(dEl.value);
+          var ac = Number.isFinite(a) && a >= 0 ? Math.floor(a) : 0;
+          var dc = Number.isFinite(d) && d >= 0 ? Math.floor(d) : 0;
+          tEl.value = String(ac + dc);
+        }
+
+        function syncDossierBaselineRows() {
+          var hd = val("hasDossier");
+          var rowAge = document.getElementById("rowDossierBaselineAge");
+          var rowOff = document.getElementById("rowDossierBaselineOffset");
+          var dba = val("dossierBaselineAge");
+          if (!rowAge || !rowOff) return;
+          var show = hd && hd.value === "1";
+          rowAge.hidden = !show;
+          rowOff.hidden = !show || !(dba && dba.value === "custom");
+        }
+
+        function buildPreset() {
+          var msRaw = val("msSinceLastVisit").value.trim();
+          var baselineCompleted = val("baselineCompleted").checked;
+          var preset = {
+            hasDossier: val("hasDossier").value === "1",
+            timeAwayBin: val("timeAwayBin").value,
+            baselineCompleted: baselineCompleted,
+            activeAgent: baselineCompleted ? "detective" : "attache",
+          };
+          var attRaw = val("attacheTurnCount").value.trim();
+          var detRaw = val("detectiveTurnCount").value.trim();
+          var atc = attRaw === "" ? 0 : Number(attRaw);
+          var dtc = detRaw === "" ? 0 : Number(detRaw);
+          if (!Number.isFinite(atc) || atc < 0) {
+            return { error: "Invalid attaché turn count (use 0, 1, 2, …)." };
+          }
+          if (!Number.isFinite(dtc) || dtc < 0) {
+            return { error: "Invalid detective turn count (use 0, 1, 2, …)." };
+          }
+          preset.attacheTurnCount = Math.floor(atc);
+          preset.detectiveTurnCount = Math.floor(dtc);
+          var maxExRaw = val("maxUserExchanges").value.trim();
+          if (maxExRaw !== "") {
+            var maxEx = Number(maxExRaw);
+            if (!Number.isFinite(maxEx) || maxEx < 0) {
+              return { error: "Invalid max user exchanges (use 0, 1, 2, … or leave empty)." };
+            }
+            preset.maxUserExchanges = Math.floor(maxEx);
+          }
+          if (!baselineCompleted) {
+            preset.attachePhase = val("attachePhase").value;
+            var pnp = val("potentialNextPhase").value.trim();
+            if (pnp) preset.potential_next_phase = pnp;
+            var qiRaw = val("questionIndex").value.trim();
+            if (qiRaw !== "") {
+              var qi = Number(qiRaw);
+              if (Number.isFinite(qi) && qi >= 0) preset.question_index = Math.floor(qi);
+            }
+          }
+          if (baselineCompleted) {
+            preset.existentialTherapyPhase = val("existentialTherapyPhase").value;
+            preset.narrativePhase = val("narrativePhase").value;
+          }
+          if (msRaw !== "") {
+            var n = Number(msRaw);
+            if (!Number.isFinite(n) || n < 0) {
+              return { error: "Invalid msSinceLastVisit." };
+            }
+            preset.msSinceLastVisit = n;
+            delete preset.timeAwayBin;
+          }
+          if (preset.hasDossier) {
+            var dbaEl = val("dossierBaselineAge");
+            if (dbaEl && dbaEl.value) {
+              preset.dossierBaselineAge = dbaEl.value;
+            }
+            if (preset.dossierBaselineAge === "custom") {
+              var offRaw = val("dossierLastBaselineOffsetMs").value.trim();
+              if (offRaw === "") {
+                return { error: "Set offset ms when Baseline age is Custom." };
+              }
+              var offMs = Number(offRaw);
+              if (!Number.isFinite(offMs) || offMs < 0) {
+                return { error: "Invalid dossier offset ms (non-negative number)." };
+              }
+              preset.dossierLastBaselineCompletedAtOffsetMs = Math.floor(offMs);
+            }
+          }
+          return { preset: preset };
+        }
+
+        var previewTimer = null;
+        function schedulePreview() {
+          if (previewTimer) clearTimeout(previewTimer);
+          previewTimer = setTimeout(runPreview, 180);
+        }
+
+        var applyTimer = null;
+        var scenarioDirty = false;
+        var applyInFlight = false;
+        var orchJson = document.getElementById("orchJson");
+
+        function renderOrchestration(orch) {
+          if (!orchJson) return;
+          if (!orch) {
+            orchJson.textContent = "(no orchestration)";
+          } else {
+            try {
+              orchJson.textContent = JSON.stringify(orch, null, 2);
+            } catch (e) {
+              orchJson.textContent = String(e);
+            }
+          }
+          renderMermaidDiagrams(orch);
+        }
+
+        function renderMermaidDiagrams(orch) {
+          if (typeof window.EDAChatScenarioDiagrams === "undefined" || typeof mermaid === "undefined") {
+            return;
+          }
+          var keys = [];
+          document.querySelectorAll("[data-orch-diagram]").forEach(function (slot) {
+            var k = slot.getAttribute("data-orch-diagram");
+            if (k) keys.push(k);
+          });
+          var dm =
+            typeof window.EDAChatScenarioDiagrams.buildForKeys === "function"
+              ? window.EDAChatScenarioDiagrams.buildForKeys(orch || {}, keys)
+              : window.EDAChatScenarioDiagrams.buildAll(orch || {});
+          var slots = document.querySelectorAll("[data-orch-diagram]");
+          var pres = [];
+          slots.forEach(function (slot) {
+            var key = slot.getAttribute("data-orch-diagram");
+            var text = dm[key] || "";
+            slot.textContent = "";
+            var pre = document.createElement("pre");
+            pre.className = "mermaid";
+            pre.textContent = text;
+            slot.appendChild(pre);
+            pres.push(pre);
+          });
+          if (!pres.length || typeof mermaid.run !== "function") return;
+          try {
+            var run = mermaid.run({ nodes: pres });
+            Promise.resolve(run).catch(function (e) {
+              console.warn("[chat-scenario] mermaid.run", e);
+            });
+          } catch (e) {
+            console.warn("[chat-scenario] mermaid.run", e);
+          }
+        }
+
+        if (typeof mermaid !== "undefined") {
+          mermaid.initialize({
+            startOnLoad: false,
+            theme: "dark",
+            securityLevel: "loose",
+            flowchart: {
+              htmlLabels: false,
+              useMaxWidth: true,
+              padding: 8,
+            },
+            themeVariables: {
+              fontSize: "11px",
+            },
+          });
+        }
+        renderMermaidDiagrams({});
+
+        function scheduleApply() {
+          if (!scenarioDirty) return;
+          if (applyTimer) clearTimeout(applyTimer);
+          applyTimer = setTimeout(runApply, 520);
+        }
+
+        function runApply() {
+          applyTimer = null;
+          if (applyInFlight) return;
+          var built = buildPreset();
+          if (built.error) return;
+          applyInFlight = true;
+          applyStatus.textContent = "Applying…";
+          applyStatus.className = "apply-status is-busy";
+          fetch("/api/dev/chat-scenario", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(built.preset),
+          })
+            .then(function (r) {
+              return r.text().then(function (t) {
+                var j = {};
+                if (t) {
+                  try {
+                    j = JSON.parse(t);
+                  } catch (_) {
+                    j = { raw: t };
+                  }
+                } else if (!r.ok) {
+                  j = { error: "Empty response (is ALLOW_TEST_SEED=1 set?)" };
+                }
+                return { ok: r.ok, status: r.status, body: j };
+              });
+            })
+            .then(function (x) {
+              out.className = x.ok ? "" : "err";
+              out.textContent = JSON.stringify(x.body, null, 2);
+              if (x.ok && x.body && x.body.orchestration) {
+                renderOrchestration(x.body.orchestration);
+              }
+              return fetch("/api/chat-state", { credentials: "same-origin" });
+            })
+            .then(function (r) {
+              return r.json();
+            })
+            .then(function (snap) {
+              out.textContent += "\n\n--- GET /api/chat-state ---\n" + JSON.stringify(snap, null, 2);
+              applyStatus.textContent = "Applied " + new Date().toLocaleTimeString();
+              applyStatus.className = "apply-status";
+            })
+            .catch(function (e) {
+              out.className = "err";
+              out.textContent = String(e && e.message ? e.message : e);
+              applyStatus.textContent = "Apply failed";
+              applyStatus.className = "apply-status";
+            })
+            .finally(function () {
+              applyInFlight = false;
+              runPreview();
+            });
+        }
+
+        function runPreview() {
+          var built = buildPreset();
+          if (built.error) {
+            if (previewMeta) previewMeta.textContent = built.error;
+            if (previewMetaTurn) previewMetaTurn.textContent = built.error;
+            clearTurnInstructionsPreview();
+            previewBlocks.textContent = "";
+            previewBlocks.className = "err";
+            return;
+          }
+          if (previewMeta) previewMeta.textContent = "…";
+          if (previewMetaTurn) previewMetaTurn.textContent = "…";
+          previewBlocks.className = "";
+          fetch("/api/dev/chat-scenario-preview", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(built.preset),
+          })
+            .then(function (r) {
+              return r.text().then(function (t) {
+                var j = {};
+                if (t) {
+                  try {
+                    j = JSON.parse(t);
+                  } catch (_) {
+                    j = { raw: t };
+                  }
+                } else if (!r.ok) {
+                  j = { error: "Empty response (ALLOW_TEST_SEED=1?)" };
+                }
+                return { ok: r.ok, body: j };
+              });
+            })
+            .then(function (x) {
+              if (!x.ok || !x.body.preview) {
+                var err = x.body.error || "Preview failed";
+                if (previewMeta) previewMeta.textContent = err;
+                if (previewMetaTurn) previewMetaTurn.textContent = err;
+                clearTurnInstructionsPreview();
+                previewBlocks.textContent = JSON.stringify(x.body, null, 2);
+                previewBlocks.className = "err";
+                return;
+              }
+              var pr = x.body.preview;
+              if (pr.noAssistantLlm) {
+                var tc = pr.labTurnCounts || {};
+                var cap = typeof pr.labMaxUserExchanges === "number" ? pr.labMaxUserExchanges : "?";
+                var sum = (tc.attache_exchange_count || 0) + (tc.detective_turn_count || 0);
+                var noLlmMsg =
+                  (pr.title || "No assistant LLM") +
+                  " — completed exchanges (attaché+detective) before next reply: " +
+                  sum +
+                  " ≥ cap+1 (" +
+                  cap +
+                  "+1). Same as production HTTP 204 (no assistant message).";
+                if (previewMeta) previewMeta.textContent = noLlmMsg;
+                if (previewMetaTurn) previewMetaTurn.textContent = noLlmMsg;
+                clearTurnInstructionsPreview();
+                previewBlocks.textContent = "";
+                previewBlocks.className = "";
+                return;
+              }
+              var meta =
+                pr.title + (pr.phaseId ? " — phase_id: " + pr.phaseId : "") + " — " + pr.activeAgent;
+              if (pr.labTurnCounts) {
+                meta +=
+                  " · turns att" +
+                  pr.labTurnCounts.attache_exchange_count +
+                  "+det" +
+                  pr.labTurnCounts.detective_turn_count +
+                  "=" +
+                  pr.labTurnCounts.total_turn_count;
+              }
+              if (typeof pr.labMaxUserExchanges === "number") {
+                meta += " · cap " + pr.labMaxUserExchanges;
+              }
+              if (pr.labClosurePhase) {
+                meta += " · closure " + pr.labClosurePhase;
+              }
+              if (Array.isArray(pr.parallelPhilosophers) && pr.parallelPhilosophers.length) {
+                meta +=
+                  " · ‖ " +
+                  pr.parallelPhilosophers
+                    .map(function (x) {
+                      return x.activeAgent || "?";
+                    })
+                    .join(", ");
+              }
+              if (x.body.derivedRouting && x.body.derivedRouting.envelope) {
+                meta +=
+                  " · chatMachine→" +
+                  (x.body.derivedRouting.envelope.active_agent || "?") +
+                  " · bin " +
+                  (x.body.derivedRouting.visit_bin || "?");
+              }
+              if (previewMeta) previewMeta.textContent = meta;
+              if (previewMetaTurn) previewMetaTurn.textContent = meta;
+              renderTurnInstructionsPreview(pr);
+              renderPreviewSections(pr);
+              previewBlocks.className = "";
+              if (x.body.orchestration) {
+                renderOrchestration(x.body.orchestration);
+              }
+            })
+            .catch(function (e) {
+              var msg = String(e && e.message ? e.message : e);
+              if (previewMeta) previewMeta.textContent = "Error";
+              if (previewMetaTurn) previewMetaTurn.textContent = "Error";
+              clearTurnInstructionsPreview();
+              previewBlocks.className = "err";
+              previewBlocks.textContent = msg;
+            });
+        }
+
+        function markDirtyAndPreview() {
+          scenarioDirty = true;
+          schedulePreview();
+          scheduleApply();
+        }
+
+        [
+          "hasDossier",
+          "dossierBaselineAge",
+          "baselineCompleted",
+          "attachePhase",
+          "timeAwayBin",
+          "msSinceLastVisit",
+          "activeAgent",
+          "existentialTherapyPhase",
+          "narrativePhase",
+          "attacheTurnCount",
+          "detectiveTurnCount",
+          "maxUserExchanges",
+          "potentialNextPhase",
+          "questionIndex",
+        ].forEach(function (id) {
+          var el = val(id);
+          if (!el) return;
+          el.addEventListener("change", function () {
+            syncTotalTurnCounts();
+            if (id === "hasDossier" || id === "dossierBaselineAge") syncDossierBaselineRows();
+            markDirtyAndPreview();
+          });
+          if (el.type === "number") {
+            el.addEventListener("input", function () {
+              syncTotalTurnCounts();
+              markDirtyAndPreview();
+            });
+          }
+        });
+        var offMsEl = val("dossierLastBaselineOffsetMs");
+        if (offMsEl) {
+          offMsEl.addEventListener("change", markDirtyAndPreview);
+          offMsEl.addEventListener("input", markDirtyAndPreview);
+        }
+
+        var FALLBACK_LAB_OPTS = {
+          existentialTherapyPhaseOptions: ["", "initial", "middle", "final"],
+          narrativePhaseOptions: [
+            "Exposition",
+            "Rising Action",
+            "Climax",
+            "Falling Action",
+            "Denouement",
+            "Coda",
+          ],
+        };
+
+        function bootLabOptions() {
+          return fetch("/api/dev/chat-scenario-lab-options", { credentials: "same-origin" })
+            .then(function (r) {
+              if (!r.ok) throw new Error("lab-options");
+              return r.json();
+            })
+            .catch(function () {
+              return FALLBACK_LAB_OPTS;
+            })
+            .then(function (o) {
+              fillSelect(val("existentialTherapyPhase"), o.existentialTherapyPhaseOptions, true);
+              fillSelect(val("narrativePhase"), o.narrativePhaseOptions, false);
+              val("narrativePhase").value = "Exposition";
+              syncTotalTurnCounts();
+              syncAgentFromBaseline();
+              syncDossierBaselineRows();
+              schedulePreview();
+            });
+        }
+
+        bootLabOptions();
+
+        apply.addEventListener("click", function () {
+          scenarioDirty = true;
+          if (applyTimer) clearTimeout(applyTimer);
+          runApply();
+        });
+
+        function postOrchestrationStep(body) {
+          fetch("/api/dev/orchestration-step", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          })
+            .then(function (r) {
+              return r.json().then(function (j) {
+                return { ok: r.ok, body: j };
+              });
+            })
+            .then(function (x) {
+              if (x.ok && x.body && x.body.orchestration) {
+                renderOrchestration(x.body.orchestration);
+              } else {
+                renderOrchestration(x.body || { error: "step failed" });
+              }
+              runPreview();
+            })
+            .catch(function (e) {
+              renderOrchestration({ error: String(e && e.message ? e.message : e) });
+            });
+        }
+
+        var stepPol = document.getElementById("stepDetectivePolicy");
+        var stepPh = document.getElementById("stepDetectivePhase");
+        var stepN = document.getElementById("stepPhilNarrative");
+        if (stepPol) {
+          stepPol.addEventListener("click", function () {
+            postOrchestrationStep({
+              type: "DETECTIVE_POLICY_TURN",
+              payload: {
+                visit_bin: val("timeAwayBin").value,
+                temporal_greeting_mode: "none",
+                dossier_stale_by_age: false,
+                returnCategory: "",
+              },
+            });
+          });
+        }
+        if (stepPh) {
+          stepPh.addEventListener("click", function () {
+            postOrchestrationStep({ type: "DETECTIVE_PHASE_ADVANCE" });
+          });
+        }
+        if (stepN) {
+          stepN.addEventListener("click", function () {
+            postOrchestrationStep({ type: "PHILOSOPHER_NARRATIVE_TURN" });
+          });
+        }
+
+        var stepAttacheAdvanceQ = document.getElementById("stepAttacheAdvanceQ");
+        var stepAttacheBaselineFull = document.getElementById("stepAttacheBaselineFull");
+        var stepAttacheExplore = document.getElementById("stepAttacheExplore");
+        var stepAttacheClose = document.getElementById("stepAttacheClose");
+        if (stepAttacheAdvanceQ) {
+          stepAttacheAdvanceQ.addEventListener("click", function () {
+            postOrchestrationStep({ type: "ATTACHE_ADVANCE_QUESTION_INDEX" });
+          });
+        }
+        if (stepAttacheBaselineFull) {
+          stepAttacheBaselineFull.addEventListener("click", function () {
+            postOrchestrationStep({
+              type: "ATTACHE_TURN_BASELINE",
+              payload: { askedBaselineQuestion: true },
+            });
+          });
+        }
+        if (stepAttacheExplore) {
+          stepAttacheExplore.addEventListener("click", function () {
+            postOrchestrationStep({ type: "ATTACHE_TURN_EXPLORE" });
+          });
+        }
+        if (stepAttacheClose) {
+          stepAttacheClose.addEventListener("click", function () {
+            postOrchestrationStep({ type: "ATTACHE_TURN_CLOSE" });
+          });
+        }
+      })();
+    </script>
+  </body>
+</html>

@@ -1,3 +1,7 @@
+/**
+ * Main chat send/receive. API response shapes: `/contracts/chat-http.contract.json`
+ * (repo: `frontend/contracts/chat-http.contract.json`).
+ */
 (function (global) {
   "use strict";
   var uiLog = global.EDALogger || {
@@ -8,8 +12,58 @@
 
   var NOTE_DELAY_MS = 40;
 
-  var leftPhilosopherHistory = [];
-  var rightPhilosopherHistory = [];
+  /**
+   * Abort /api/chat and /api/chat-stream if the server never responds (e.g. hung upstream).
+   * Slightly longer than default server OPENAI_TIMEOUT_MS so the server can return an error body first.
+   */
+  var CHAT_FETCH_TIMEOUT_MS = 150000;
+
+  /**
+   * @param {string} url
+   * @param {RequestInit} [init]
+   * @returns {Promise<Response>}
+   */
+  function fetchChatWithTimeout(url, init) {
+    init = init || {};
+    var controller = new AbortController();
+    var tid = setTimeout(function () {
+      controller.abort();
+    }, CHAT_FETCH_TIMEOUT_MS);
+    var merged = Object.assign({}, init, { signal: controller.signal });
+    return fetch(url, merged).finally(function () {
+      clearTimeout(tid);
+    });
+  }
+
+  function chatFetchErrorMessage(err) {
+    if (err && err.name === "AbortError") {
+      return "Request timed out. Try again.";
+    }
+    return err && err.message ? String(err.message) : String(err);
+  }
+
+  /**
+   * Log real LLM refusal text in the browser console (operators). User-visible `reply` stays enigmatic.
+   * @param {object} [data]
+   */
+  function logLlmRefusalFromChatSuccess(data) {
+    if (!data || typeof data !== "object" || !data.llmRefusal) return;
+    var r = data.llmRefusal;
+    var list = Array.isArray(r) ? r : [r];
+    for (var i = 0; i < list.length; i++) {
+      var item = list[i];
+      if (!item || typeof item !== "object") continue;
+      var agent = item.agentKey != null ? String(item.agentKey) : "";
+      var text = item.refusalText != null ? String(item.refusalText) : "";
+      var model = item.model != null ? String(item.model) : "";
+      var rid = item.responseId != null ? String(item.responseId) : "";
+      console.warn("[EDA LLM refusal]", { agentKey: agent, refusalText: text, model: model, responseId: rid });
+    }
+  }
+
+  /** Panel history keyed by DOM side (lumen → left, umbra → right). */
+  var lumenPanelHistory = [];
+  var umbraPanelHistory = [];
 
   // Tracks which agent the next assistant placeholder should be labeled as
   // ("detective" or "attache"). Defaults to detective until the first
@@ -28,6 +82,28 @@
   /** Last user message text sent (for applying AI callouts when response arrives). */
   var lastSentUserMessage = "";
 
+  /** Last server-provided row label (`envelope.agent_label`); used for the next outgoing placeholder. */
+  var lastAgentLabelFromServer = "";
+
+  /**
+   * Visible assistant label: prefer backend `envelope.agent_label`, else EDAChatConfig by `active_agent`.
+   * @param {object} [env]
+   * @returns {string}
+   */
+  function assistantLabelFromEnvelope(env) {
+    if (!env || typeof env !== "object") {
+      env = {};
+    }
+    if (env.agent_label != null && String(env.agent_label).trim() !== "") {
+      return String(env.agent_label).trim();
+    }
+    var cfg = global.EDAChatConfig || {};
+    if (env.active_agent === "attache") {
+      return cfg.AGENT_LABEL_ATTACHE || "ATTACHÉ";
+    }
+    return cfg.AGENT_LABEL_DETECTIVE || cfg.AGENT_CHAT_LABEL || "DETECTIVE";
+  }
+
   /** Returns display string for chat error response (data.reply absent, data.error present). */
   function chatErrorToMessage(data) {
     var kind = data.errorKind || "bad_request";
@@ -40,82 +116,103 @@
           : (data.error || "Something went wrong. Please try again.");
   }
 
+  /**
+   * Prefer camelCase lumen/umbra wire keys; fall back to legacy leftPhilosopher* / rightPhilosopher* for one release.
+   * @param {object} data
+   * @param {string} primary
+   * @param {string} [legacy]
+   */
+  function pickPhilosopherStr(data, primary, legacy) {
+    if (!data || typeof data !== "object") return "";
+    if (data[primary] != null) return String(data[primary]);
+    if (legacy && data[legacy] != null) return String(data[legacy]);
+    return "";
+  }
+
+  /**
+   * @param {object} data
+   * @param {string} primary
+   * @param {string} [legacy]
+   * @returns {string[]}
+   */
+  function pickPhilosopherNotes(data, primary, legacy) {
+    if (!data || typeof data !== "object") return [];
+    if (Array.isArray(data[primary])) return data[primary];
+    if (legacy && Array.isArray(data[legacy])) return data[legacy];
+    return [];
+  }
+
   /** True if any philosopher response/notes field is present. */
   function hasPhilosopherContent(data) {
     return !!(
-      data.leftPhilosopherUserResponse ||
-      data.leftPhilosopherOtherResponse ||
-      (Array.isArray(data.leftPhilosopherNotes) && data.leftPhilosopherNotes.length > 0) ||
-      data.rightPhilosopherUserResponse ||
-      data.rightPhilosopherOtherResponse ||
-      (Array.isArray(data.rightPhilosopherNotes) && data.rightPhilosopherNotes.length > 0)
+      data.lumenUserResponse ||
+      data.lumenOtherResponse ||
+      (Array.isArray(data.lumenNotes) && data.lumenNotes.length > 0) ||
+      data.umbraUserResponse ||
+      data.umbraOtherResponse ||
+      (Array.isArray(data.umbraNotes) && data.umbraNotes.length > 0)
     );
   }
 
-  /** True if the given side has philosopher response or notes. */
+  /** True if the given side has philosopher response or notes (left = lumen, right = umbra). */
   function hasPhilosopherContentForSide(data, side) {
-    var s = (side === "right" ? "right" : "left");
+    var s = side === "right" ? "right" : "left";
     if (s === "left") {
       return !!(
-        data.leftPhilosopherUserResponse ||
-        data.leftPhilosopherOtherResponse ||
-        (Array.isArray(data.leftPhilosopherNotes) && data.leftPhilosopherNotes.length)
+        data.lumenUserResponse ||
+        data.lumenOtherResponse ||
+        (Array.isArray(data.lumenNotes) && data.lumenNotes.length)
       );
     }
     return !!(
-      data.rightPhilosopherUserResponse ||
-      data.rightPhilosopherOtherResponse ||
-      (Array.isArray(data.rightPhilosopherNotes) && data.rightPhilosopherNotes.length)
+      data.umbraUserResponse ||
+      data.umbraOtherResponse ||
+      (Array.isArray(data.umbraNotes) && data.umbraNotes.length)
     );
   }
 
   /**
-   * Normalize either API response shape (main chat: 7 philosopher fields; philosopher-dialog: 2 other_response fields)
-   * into a single full shape so toPhilosopherPayload and hasPhilosopherContent work unchanged.
+   * Normalize API philosopher fields to lumen* / umbra* (with legacy left/right aliases).
    * Missing keys become "" or [].
    */
   function normalizePhilosopherResponse(data) {
     if (!data || typeof data !== "object") {
       return {
-        leftPhilosopherUserResponse: "",
-        rightPhilosopherUserResponse: "",
-        leftPhilosopherOtherResponse: "",
-        rightPhilosopherOtherResponse: "",
-        leftPhilosopherNotes: [],
-        rightPhilosopherNotes: [],
+        lumenUserResponse: "",
+        umbraUserResponse: "",
+        lumenOtherResponse: "",
+        umbraOtherResponse: "",
+        lumenNotes: [],
+        umbraNotes: [],
       };
     }
     return {
-      leftPhilosopherUserResponse: data.leftPhilosopherUserResponse != null ? String(data.leftPhilosopherUserResponse) : "",
-      rightPhilosopherUserResponse: data.rightPhilosopherUserResponse != null ? String(data.rightPhilosopherUserResponse) : "",
-      leftPhilosopherOtherResponse: data.leftPhilosopherOtherResponse != null ? String(data.leftPhilosopherOtherResponse) : "",
-      rightPhilosopherOtherResponse: data.rightPhilosopherOtherResponse != null ? String(data.rightPhilosopherOtherResponse) : "",
-      leftPhilosopherNotes: Array.isArray(data.leftPhilosopherNotes) ? data.leftPhilosopherNotes : [],
-      rightPhilosopherNotes: Array.isArray(data.rightPhilosopherNotes) ? data.rightPhilosopherNotes : [],
+      lumenUserResponse: pickPhilosopherStr(data, "lumenUserResponse", "leftPhilosopherUserResponse"),
+      umbraUserResponse: pickPhilosopherStr(data, "umbraUserResponse", "rightPhilosopherUserResponse"),
+      lumenOtherResponse: pickPhilosopherStr(data, "lumenOtherResponse", "leftPhilosopherOtherResponse"),
+      umbraOtherResponse: pickPhilosopherStr(data, "umbraOtherResponse", "rightPhilosopherOtherResponse"),
+      lumenNotes: pickPhilosopherNotes(data, "lumenNotes", "leftPhilosopherNotes"),
+      umbraNotes: pickPhilosopherNotes(data, "umbraNotes", "rightPhilosopherNotes"),
     };
   }
 
-  /** Normalize API response to structured payload { left: { userResponse, otherResponse, notes }, right: { ... } }.
-   *  Line breaks and segment styling (font/color) are applied when appending; see notes.philosopherRules and philosopherDisplay.config.js.
-   */
+  /** Normalize to { left, right } for panel append (lumen → left, umbra → right). */
   function toPhilosopherPayload(data) {
-    function buildSidePayload(userKey, otherKey, notesKey) {
-      var userResponse = (data[userKey] != null ? String(data[userKey]) : "").trim();
-      var otherResponse = (data[otherKey] != null ? String(data[otherKey]) : "").trim();
-      var notes = Array.isArray(data[notesKey]) ? data[notesKey] : [];
-      return { userResponse: userResponse, otherResponse: otherResponse, notes: notes };
+    var d = normalizePhilosopherResponse(data);
+    function trimStr(s) {
+      return typeof s === "string" ? s.trim() : "";
     }
     return {
-      left: buildSidePayload(
-        "leftPhilosopherUserResponse",
-        "leftPhilosopherOtherResponse",
-        "leftPhilosopherNotes"
-      ),
-      right: buildSidePayload(
-        "rightPhilosopherUserResponse",
-        "rightPhilosopherOtherResponse",
-        "rightPhilosopherNotes"
-      ),
+      left: {
+        userResponse: trimStr(d.lumenUserResponse),
+        otherResponse: trimStr(d.lumenOtherResponse),
+        notes: Array.isArray(d.lumenNotes) ? d.lumenNotes : [],
+      },
+      right: {
+        userResponse: trimStr(d.umbraUserResponse),
+        otherResponse: trimStr(d.umbraOtherResponse),
+        notes: Array.isArray(d.umbraNotes) ? d.umbraNotes : [],
+      },
     };
   }
 
@@ -132,8 +229,8 @@
     var appendLeft = opts.appendLeft !== false;
     var appendRight = opts.appendRight !== false;
 
-    if (pushLeft) leftPhilosopherHistory.push(payload.left);
-    if (pushRight) rightPhilosopherHistory.push(payload.right);
+    if (pushLeft) lumenPanelHistory.push(payload.left);
+    if (pushRight) umbraPanelHistory.push(payload.right);
 
     var promises = [];
     if (appendLeft && (payload.left.userResponse || payload.left.otherResponse || payload.left.notes.length)) {
@@ -233,21 +330,19 @@
   /**
    * Apply API callouts to the last user message content.
    * Only mutates the DOM by adding new spans and rough notation; does not replace or reflow existing content.
-   * @param data - API response with leftPhilosopherCallouts / rightPhilosopherCallouts (or snake_case)
+   * @param data - API response with lumenCallouts / umbraCallouts (legacy: leftPhilosopherCallouts / rightPhilosopherCallouts or snake_case)
    * @param lastSentText - text of the last sent user message (used to verify we're annotating the right node)
    */
   function applyCalloutsToLastUserMessage(data, lastSentText) {
     if (!data || typeof data !== "object") return;
-    var leftCallouts = Array.isArray(data.leftPhilosopherCallouts)
-      ? data.leftPhilosopherCallouts
-      : Array.isArray(data.left_philosopher_callouts)
-        ? data.left_philosopher_callouts
-        : [];
-    var rightCallouts = Array.isArray(data.rightPhilosopherCallouts)
-      ? data.rightPhilosopherCallouts
-      : Array.isArray(data.right_philosopher_callouts)
-        ? data.right_philosopher_callouts
-        : [];
+    function pickCallouts(primary, legacy, snake) {
+      if (Array.isArray(data[primary])) return data[primary];
+      if (legacy && Array.isArray(data[legacy])) return data[legacy];
+      if (snake && Array.isArray(data[snake])) return data[snake];
+      return [];
+    }
+    var leftCallouts = pickCallouts("lumenCallouts", "leftPhilosopherCallouts", "lumen_philosopher_callouts");
+    var rightCallouts = pickCallouts("umbraCallouts", "rightPhilosopherCallouts", "umbra_philosopher_callouts");
     if (!leftCallouts.length && !rightCallouts.length) return;
     if (!lastSentText || typeof lastSentText !== "string" || !lastSentText.trim()) return;
     if (typeof EDAAnnotation === "undefined" || !EDAAnnotation.addInPlaceAnnotationSpans) return;
@@ -323,16 +418,27 @@
     if (envelope && envelope.active_agent) {
       lastActiveAgent = envelope.active_agent;
     }
+    if (envelope) {
+      lastAgentLabelFromServer = assistantLabelFromEnvelope(envelope);
+    }
 
     /** Keep visible row label in sync with server (fixes streaming + stale lastActiveAgent). */
     function applyAssistantLabelFromEnvelope() {
       var env = data && data.envelope;
-      var agent = env && env.active_agent === "attache" ? "attache" : "detective";
-      var cfg = global.EDAChatConfig || {};
+      var hasFollowup =
+        data &&
+        data.detective_followup_reply &&
+        String(data.detective_followup_reply).trim();
+      // Chained handoff: first bubble is still Attaché; detective follows in a second bubble.
+      var agent = hasFollowup
+        ? "attache"
+        : env && env.active_agent === "attache"
+          ? "attache"
+          : "detective";
       var label =
-        agent === "attache"
-          ? cfg.AGENT_LABEL_ATTACHE || "ATTACHÉ"
-          : cfg.AGENT_LABEL_DETECTIVE || cfg.AGENT_CHAT_LABEL || "DETECTIVE";
+        env && env.agent_label != null && String(env.agent_label).trim() !== ""
+          ? String(env.agent_label).trim()
+          : assistantLabelFromEnvelope({ active_agent: agent });
       if (placeholderOpts && placeholderOpts.placeholderLabelEl) {
         var el = placeholderOpts.placeholderLabelEl;
         el.className =
@@ -368,6 +474,7 @@
       return;
     }
     EDAMessageUI.setStatus("");
+    logLlmRefusalFromChatSuccess(data);
     if (data.debug) {
       uiLog.debug(
         "UI",
@@ -384,7 +491,10 @@
     uiLog.debug("UI", "Main chat response philosopher fields present", hasPhilosopherContent(philNormalized));
 
     var atLimit = data.debug && typeof data.debug.userExchanges === "number" && typeof data.debug.maxUserExchanges === "number" && data.debug.userExchanges >= data.debug.maxUserExchanges;
-    var stampOpts = { limitReached: !!data.limitReached, debug: !!(document.body && document.body.dataset.devMode === "true") && atLimit };
+    var stampOpts = {
+      limitReached: !!(data && (data.closureUltimate || data.limitReached)),
+      debug: !!(document.body && document.body.dataset.devMode === "true") && atLimit,
+    };
     var leftHasContent = hasPhilosopherContentForSide(philNormalized, "left");
     var rightHasContent = hasPhilosopherContentForSide(philNormalized, "right");
     var marginItemSideHint = (leftHasContent && !rightHasContent) ? "left" : (rightHasContent && !leftHasContent) ? "right" : null;
@@ -411,7 +521,7 @@
 
       EDAMessageUI.setStatus("Thinking…");
 
-      fetch("/api/chat", {
+      fetchChatWithTimeout("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
@@ -430,6 +540,7 @@
         })
         .then(function (data2) {
           if (!data2) return;
+          logLlmRefusalFromChatSuccess(data2);
           if (!data2.reply && data2.error) {
             var msg = chatErrorToMessage(data2);
             EDAMessageUI.setStatus(msg, true);
@@ -446,13 +557,7 @@
           // automatic intro turn, then set both the label and the
           // active-agent state based on envelope.active_agent.
           var agent2 = (data2.envelope && data2.envelope.active_agent) ? data2.envelope.active_agent : "detective";
-          var cfg = global.EDAChatConfig || {};
-          var label2;
-          if (agent2 === "attache") {
-            label2 = cfg.AGENT_LABEL_ATTACHE || "ATTACHÉ";
-          } else {
-            label2 = cfg.AGENT_LABEL_DETECTIVE || cfg.AGENT_CHAT_LABEL || "DETECTIVE";
-          }
+          var label2 = assistantLabelFromEnvelope(data2.envelope || { active_agent: agent2 });
           if (placeholder && placeholder.labelEl) {
             if (global.EDAUtils && global.EDAUtils.typeLabelIntoElement) {
               global.EDAUtils.typeLabelIntoElement(placeholder.labelEl, label2, { delayMs: 60 });
@@ -473,7 +578,7 @@
           }
         })
         .catch(function (err) {
-          var msg = "Network error: " + (err && err.message ? err.message : err);
+          var msg = "Network error: " + chatFetchErrorMessage(err);
           EDAMessageUI.setStatus(msg, true);
           if (placeholder && placeholder.contentEl) {
             placeholder.contentEl.textContent = msg;
@@ -489,6 +594,26 @@
         if (stampOpts.limitReached) global.EDAClosingStamps.maybeShowStamps({ limitReached: true });
         else if (stampOpts.debug) global.EDAClosingStamps.maybeShowStamps({ debug: true });
       }
+      var followup =
+        data && data.detective_followup_reply && String(data.detective_followup_reply).trim();
+      if (followup) {
+        detectiveIntroStarted = true;
+        lastActiveAgent = "detective";
+        if (global.EDAChatSend && typeof global.EDAChatSend.setActiveAgent === "function") {
+          global.EDAChatSend.setActiveAgent("detective");
+        }
+        var editorRefFollow = EDAMessageUI.getEditorNode && EDAMessageUI.getEditorNode();
+        EDAMessageUI.addMessage("assistant", followup, editorRefFollow, {
+          assistantAgent: "detective",
+          assistantLabel: assistantLabelFromEnvelope({ active_agent: "detective" }),
+          onAssistantDone: function () {
+            if (EDAMessageUI.runReadyForNextInput) {
+              EDAMessageUI.runReadyForNextInput();
+            }
+          },
+        });
+        return;
+      }
       if (shouldStartDetectiveIntroAfterThis) {
         startDetectiveIntro();
       } else if (EDAMessageUI.runReadyForNextInput) {
@@ -498,8 +623,12 @@
     if (placeholderOpts && placeholderOpts.placeholderContent) {
       var contentEl = placeholderOpts.placeholderContent;
       if (placeholderOpts.skipAssistantContent) {
-        // Streaming path: content was already appended chunk-by-chunk; just
-        // run completion hooks.
+        // Streaming path: deltas append chunk-by-chunk. If the server sent no
+        // delta events (only a final JSON body), the placeholder is still empty — fill from reply.
+        var streamedLen = (contentEl.textContent || "").trim().length;
+        if (!streamedLen && data.reply) {
+          contentEl.textContent = data.reply;
+        }
         onAssistantDone();
       } else if (EDAUtils && EDAUtils.animateAssistantText) {
         EDAUtils.animateAssistantText(contentEl, data.reply || "(No reply)", { onDone: onAssistantDone });
@@ -508,11 +637,17 @@
         onAssistantDone();
       }
     } else {
-      var agFromEnv =
-        envelope && envelope.active_agent === "attache" ? "attache" : "detective";
+      var hasFollowupBubble =
+        data && data.detective_followup_reply && String(data.detective_followup_reply).trim();
+      var agFromEnv = hasFollowupBubble
+        ? "attache"
+        : envelope && envelope.active_agent === "attache"
+          ? "attache"
+          : "detective";
       EDAMessageUI.addMessage("assistant", data.reply || "(No reply)", editorRef, {
         onAssistantDone: onAssistantDone,
         assistantAgent: agFromEnv,
+        assistantLabel: assistantLabelFromEnvelope(envelope || { active_agent: agFromEnv }),
       });
     }
     handlePhilosopherContent(data);
@@ -620,15 +755,15 @@
     var wrapper = editorRef && editorRef.parentNode;
     if (wrapper) wrapper.classList.add("chat-editor-wrapper--hidden");
 
-    var cfg = global.EDAChatConfig || {};
-    var agentLabel;
-    if (lastActiveAgent === "attache") {
-      agentLabel = cfg.AGENT_LABEL_ATTACHE || "ATTACHÉ";
-    } else {
-      agentLabel = cfg.AGENT_LABEL_DETECTIVE || cfg.AGENT_CHAT_LABEL || "DETECTIVE";
-    }
+    var agentLabel =
+      (lastAgentLabelFromServer && String(lastAgentLabelFromServer).trim()) ||
+      assistantLabelFromEnvelope({ active_agent: lastActiveAgent });
     var placeholder = EDAMessageUI.addAssistantPlaceholder && EDAMessageUI.addAssistantPlaceholder(editorRef);
     if (placeholder) {
+      if (placeholder.labelEl) {
+        placeholder.labelEl.className =
+          lastActiveAgent === "attache" ? "label label--attache" : "label label--detective";
+      }
       if (EDAUtils && EDAUtils.typeLabelIntoElement) {
         EDAUtils.typeLabelIntoElement(placeholder.labelEl, agentLabel, { delayMs: 60 });
       } else {
@@ -648,7 +783,7 @@
       // if streaming is unavailable (404 or missing ReadableStream).
 
       function runJsonFallback() {
-        return fetch("/api/chat", {
+        return fetchChatWithTimeout("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
@@ -696,7 +831,7 @@
       }
 
       function runStreaming() {
-        return fetch("/api/chat-stream", {
+        return fetchChatWithTimeout("/api/chat-stream", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
@@ -805,9 +940,10 @@
           if (err && err.__streamFallback) {
             return runJsonFallback();
           }
-          EDAMessageUI.setStatus("Network error: " + err.message, true);
+          var netMsg = "Network error: " + chatFetchErrorMessage(err);
+          EDAMessageUI.setStatus(netMsg, true);
           if (placeholder && placeholder.contentEl) {
-            placeholder.contentEl.textContent = "Network error: " + err.message;
+            placeholder.contentEl.textContent = netMsg;
           }
           if (EDAMessageUI.runReadyForNextInput) {
             EDAMessageUI.runReadyForNextInput();
@@ -822,6 +958,9 @@
   global.EDAChatSend = {
     doSendMessage: doSendMessage,
     animateRewriteInInput: animateRewriteInInput,
+    getAssistantDisplayLabel: assistantLabelFromEnvelope,
+    /** @public — used by chat.route bootstrap POST /api/chat */
+    logLlmRefusalFromChatSuccess: logLlmRefusalFromChatSuccess,
     setActiveAgent: function (agent) {
       if (agent === "attache" || agent === "detective") {
         lastActiveAgent = agent;
@@ -834,6 +973,9 @@
       if (opts.detectiveIntroStarted != null) detectiveIntroStarted = !!opts.detectiveIntroStarted;
       if (opts.activeAgent === "attache" || opts.activeAgent === "detective") {
         lastActiveAgent = opts.activeAgent;
+      }
+      if (opts.agentLabel != null && String(opts.agentLabel).trim()) {
+        lastAgentLabelFromServer = String(opts.agentLabel).trim();
       }
     },
   };

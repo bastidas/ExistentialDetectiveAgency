@@ -111,6 +111,7 @@ test("computeAttacheCatalogInstructionIds: return tier precedes phase tier", () 
     returnCategory: "",
   });
   assert.equal(ids[0], "ATTACHE_RETURN_DAY_OR_SO");
+  assert.equal(ids[1], "ATTACHE_RETURN_APPEND_NO_DOSSIER");
   assert.ok(ids.includes("ATTACHE_BASELINE_DELIVERY_START"));
 });
 
@@ -125,6 +126,6 @@ test("computeAttacheCatalogInstructionIds: omits ATTACHE_RETURN_* when attache_t
     returnCategory: "",
   });
   assert.ok(!ids.includes("ATTACHE_RETURN_DAY_OR_SO"));
-  assert.ok(!ids.includes("ATTACHE_STALE_DOSSIER_REBASELINE"));
+  assert.ok(!ids.some((id) => String(id).startsWith("ATTACHE_RETURN_APPEND_")));
   assert.deepEqual(ids, ["ATTACHE_START_ORIENTATION", "ATTACHE_BASELINE_DELIVERY_START"]);
 });

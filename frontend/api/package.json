@@ -5,7 +5,7 @@
   "main": "src/index.js",
   "type": "commonjs",
   "scripts": {
-    "test": "node --test src/session/returnClassification.test.js src/storage/threadEvents.rehydrate.test.js src/detective/detectiveMachine.test.js src/orchestration/buildLlmConversationState.test.js src/orchestration/mainStateMachine.test.js src/prompts/instructionSelection.test.js src/prompts/returnPromptFacts.test.js src/prompts/promptComposer.test.js"
+    "test": "node --test src/logger.debugPrompts.test.js src/prompts/promptComposer.smoke.test.js src/prompts/turnBuilderRegistry.attache.test.js src/prompts/turnInstructionsExtract.test.js src/prompts/instructionSelection.attache.test.js src/attache/attachePromptContext.test.js src/attache/attachePromptPolicy.test.js src/attache/attacheDomainTransitions.test.js src/orchestration/chatMachine.persist-invoke.test.js src/orchestration/orchestrationLabSnapshot.test.js src/chatTestSeed.test.js src/chatScenarioPreview.test.js src/dossier_and_summarize/dossier.therapistSafe.test.js src/dossier_and_summarize/dossierLabPreset.test.js src/narrativePhases.test.js src/agents/buildChatCompletionMessages.test.js src/agents/llmPayloadPreview.test.js src/detective/existentialTherapyPhase.test.js"
   },
   "engines": {
     "node": ">=18"

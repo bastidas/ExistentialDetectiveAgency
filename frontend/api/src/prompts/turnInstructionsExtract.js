@@ -36,6 +36,30 @@ function extractTurnInstructionsFromSystemPrompt(content) {
   return out.join("\n").trim();
 }
 
+/**
+ * From the real `# TURN INSTRUCTIONS` heading through the **end** of the composed system prompt.
+ * Use for debug logging so anything appended after the turn block (e.g. `# Response format`, schema copy)
+ * stays visible. The bounded {@link extractTurnInstructionsFromSystemPrompt} stops at the next H1 and
+ * remains the default for lab `turnInstructionsPreview` slices.
+ *
+ * @param {string|null|undefined} content
+ * @returns {string}
+ */
+function extractFromTurnInstructionsHeadingThroughEnd(content) {
+  const s = String(content == null ? "" : content);
+  const lines = s.split(/\r?\n/);
+  let startLine = -1;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (lines[i].trim() === "# TURN INSTRUCTIONS") {
+      startLine = i;
+      break;
+    }
+  }
+  if (startLine < 0) return "";
+  return lines.slice(startLine).join("\n").trim();
+}
+
 module.exports = {
   extractTurnInstructionsFromSystemPrompt,
+  extractFromTurnInstructionsHeadingThroughEnd,
 };

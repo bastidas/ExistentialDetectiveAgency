@@ -3,19 +3,16 @@
   "properties": {
     "user_response": {
       "type": "string",
-      "description": "The attaché's reply to the user (what the user sees)."
+      "description": "User-visible reply for this turn."
     },
     "user_intends_explore": {
-      "type": "boolean",
-      "description": "User is asking about the system or wants to explore; orchestrator will not advance question index and will keep same phase and question_at_hand on next turn."
+      "type": "boolean"
     },
     "user_intends_close": {
-      "type": "boolean",
-      "description": "User wants to end the baseline/session; orchestrator will move to close (possibly after confirmation)."
+      "type": "boolean"
     },
     "asked_baseline_question": {
-      "type": "boolean",
-      "description": "True if this turn the attaché asked or posed the current baseline question to the user in any form (preamble, extra copy, then the question, etc.). False only if that question was not asked this turn. Server advances only when true."
+      "type": "boolean"
     }
   },
   "required": ["user_response", "user_intends_explore", "user_intends_close", "asked_baseline_question"],

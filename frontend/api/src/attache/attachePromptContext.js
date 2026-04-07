@@ -68,6 +68,50 @@ function getPromptPattern(state) {
 }
 
 /**
+ * Which baseline (1–3) applies for `{baselineN_instructions}` / `{baselineN_questionQ}`.
+ * For `phase === "explore"`, `getBaselineNumberFromPhase(phase)` is null and some snapshots omit
+ * `baseline_number`—then derive from `previous_phase` or `potential_next_phase` (interrupted baseline).
+ *
+ * @param {import("./attacheMachine").AttacheState|null|undefined} state
+ * @param {number|null|undefined} baselineNumberHint — from `getPromptPattern` when phase is baseline*
+ * @param {number|null|undefined} patternBaselineNumber
+ * @returns {1|2|3|null}
+ */
+function resolveBaselineNumberForTemplates(state, baselineNumberHint, patternBaselineNumber) {
+  if (!state || typeof state !== "object") return null;
+
+  const ok = (n) => {
+    if (typeof n !== "number" || !Number.isFinite(n)) return null;
+    const t = Math.trunc(n);
+    return t >= 1 && t <= 3 ? /** @type {1|2|3} */ (t) : null;
+  };
+
+  let n = ok(baselineNumberHint != null ? Number(baselineNumberHint) : NaN);
+  if (n != null) return n;
+
+  n = ok(state.baseline_number != null ? Number(state.baseline_number) : NaN);
+  if (n != null) return n;
+
+  n = ok(patternBaselineNumber != null ? Number(patternBaselineNumber) : NaN);
+  if (n != null) return n;
+
+  if (state.phase === "explore") {
+    const prev = state.previous_phase != null ? String(state.previous_phase) : "";
+    if (prev.startsWith("baseline")) {
+      n = getBaselineNumberFromPhase(prev);
+      if (n != null) return n;
+    }
+    const pot = state.potential_next_phase != null ? String(state.potential_next_phase) : "";
+    if (pot.startsWith("baseline")) {
+      n = getBaselineNumberFromPhase(pot);
+      if (n != null) return n;
+    }
+  }
+
+  return null;
+}
+
+/**
  * Build the prompt context object for catalog templates from the current AttacheState
  * plus optional session-level info (baseline shuffle order).
  *
@@ -81,22 +125,19 @@ function buildPromptContextFromState(state, sessionState, baselineNumberHint) {
 
   const pattern = getPromptPattern(state);
 
-  const baselineNumber =
-    typeof baselineNumberHint === "number" && baselineNumberHint
-      ? baselineNumberHint
-      : state.baseline_number != null
-        ? state.baseline_number
-        : pattern.baselineNumber;
+  const baselineNumber = resolveBaselineNumberForTemplates(
+    state,
+    baselineNumberHint,
+    pattern.baselineNumber
+  );
 
   const qIndex =
     typeof state.question_index === "number" && state.question_index >= 0
       ? state.question_index
       : 0;
 
-  if (!baselineNumber && baselineNumber !== 0) return {};
-  const entry = getBaselineQuestionPoolEntry(
-    /** @type {1|2|3} */ (baselineNumber)
-  );
+  if (baselineNumber == null) return {};
+  const entry = getBaselineQuestionPoolEntry(baselineNumber);
   if (!entry || !Array.isArray(entry.questions)) return {};
 
   let effectiveIndex = qIndex;
@@ -128,5 +169,6 @@ module.exports = {
   BASELINE3_INSTRUCTIONS,
   getBaselineQuestionPoolEntry,
   getPromptPattern,
+  resolveBaselineNumberForTemplates,
   buildPromptContextFromState,
 };

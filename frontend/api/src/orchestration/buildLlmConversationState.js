@@ -14,6 +14,10 @@
  *
  * Allowlisted keys should stay a subset of fields produced here for each agent.
  *
+ * Attaché: this function still returns routing fields for the attaché branch, but `promptComposer`
+ * `SAFE_VIEW_KEYS.attache` + `pickAllowedKeys` narrow `llmSafeState` to narrative fields only
+ * (`dossier_summary`, `preceding_conversation_summary`). Dev lab exposes routing via `labOrchestrationMeta`.
+ *
  * @param {string} agentKey
  * @param {{ session?: object, internalState?: object }} input
  * @returns {Record<string, unknown>}

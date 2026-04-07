@@ -1,4 +1,22 @@
 const config = require("../config");
+const logger = require("../logger");
+
+/**
+ * Dossier model (Existential Detective Agency)
+ *
+ * **Knowledge classes**
+ * - **explicit** — Identity/consent: name, pronouns, languages.
+ * - **inferred** — LLM-merged traits (demographics, psychographics, Big Five, worldviews). Merge logic in
+ *   `updateTraitArray` / `user_dossier_updater`; treat changes cautiously and test.
+ * - **meta** — Agency protocol: `baselineQuestionsAnswered`, `baselineQuestionStats`, `lastBaselineCompletedAt`
+ *   (used by `isDossierStaleByAge` vs `longMs`), `createdAt`, `lastUpdated`, `updateHistory`, optional `lastUserMessageAt`.
+ * - **meta.environment** — Technical/session: `firstSeenAt`, `lastSeenAt`, UA, device, browser (not shown in therapist-safe LLM view).
+ *
+ * **Three clocks** (distinct): `meta.createdAt` (row lifetime), `meta.environment.lastSeenAt` / client `msSinceLastVisit`
+ * (visit activity for routing tiers), `meta.lastBaselineCompletedAt` (baseline freshness for attaché/detective policy).
+ *
+ * **LLM-facing summary:** `buildTherapistSafeDossierSummary` for detective/philosophers; full `buildDossierSnippet` for internal/analyzer context where needed.
+ */
 
 // High-level, easily editable summary for the dossier analyzer prompt.
 // Edit these strings to change how the analyzer behaves.
@@ -134,6 +152,8 @@ function createEmptyDossier(userId) {
 			baselineQuestionsAnswered: 0,
 			/** Unix ms when baseline prelude last completed (handoff to detective). */
 			lastBaselineCompletedAt: null,
+			/** Optional: last time a user message was merged into the dossier (e.g. detective refresh). */
+			lastUserMessageAt: null,
 			// Optional, richer stats about baseline questions asked vs answered
 			baselineQuestionStats: {
 				askedTotal: 0,
@@ -206,6 +226,58 @@ const SINGLE_VALUE_TRAITS = new Set([
 	"deviceTypePreference",
 	"browserPreference",
 ]);
+
+/** Inferred hypotheses at or above this confidence are included in therapist-facing summaries. */
+const THERAPIST_SAFE_MIN_CONFIDENCE = 0.5;
+const THERAPIST_EXCLUDED_INFERRED_KEYS = new Set(["deviceTypePreference", "browserPreference"]);
+
+/**
+ * @param {unknown[]} entries
+ * @returns {unknown[]}
+ */
+function filterTraitEntriesByConfidence(entries) {
+	if (!Array.isArray(entries)) return [];
+	return entries.filter((e) => {
+		if (!e || typeof e !== "object") return false;
+		const c = typeof /** @type {{ confidence?: number }} */ (e).confidence === "number"
+			? /** @type {{ confidence?: number }} */ (e).confidence
+			: 0;
+		return c >= THERAPIST_SAFE_MIN_CONFIDENCE;
+	});
+}
+
+/**
+ * Compact JSON for detective/philosophers prompts: humanistic profile only (no web telemetry in inferred).
+ * Omits `meta` and environment timestamps.
+ *
+ * @param {object|null|undefined} dossier
+ * @returns {string}
+ */
+function buildTherapistSafeDossierSummary(dossier) {
+	if (!dossier) return "{}";
+	try {
+		const inf =
+			dossier.inferred && typeof dossier.inferred === "object" ? dossier.inferred : {};
+		/** @type {Record<string, unknown[]>} */
+		const inferred = {};
+		for (const key of Object.keys(inf)) {
+			if (THERAPIST_EXCLUDED_INFERRED_KEYS.has(key)) continue;
+			inferred[key] = filterTraitEntriesByConfidence(inf[key]);
+		}
+		const ex = dossier.explicit && typeof dossier.explicit === "object" ? dossier.explicit : {};
+		const minimal = {
+			explicit: {
+				name: ex.name != null ? ex.name : null,
+				preferredPronouns: ex.preferredPronouns != null ? ex.preferredPronouns : null,
+				languages: Array.isArray(ex.languages) ? ex.languages : [],
+			},
+			inferred,
+		};
+		return JSON.stringify(minimal);
+	} catch {
+		return "{}";
+	}
+}
 
 // Weighted confidence merge for trait hypotheses
 
@@ -351,6 +423,14 @@ function user_dossier_updater(dossier, analyzerOutput, options) {
 			normalized.meta.lastBaselineCompletedAt = options.lastBaselineCompletedAt;
 		}
 
+		if (
+			options &&
+			typeof options.lastUserMessageAt === "number" &&
+			Number.isFinite(options.lastUserMessageAt)
+		) {
+			normalized.meta.lastUserMessageAt = options.lastUserMessageAt;
+		}
+
 		// Optional richer baseline stats: total asked/answered and by-baseline
 		if (options && options.baselineQuestionStats && typeof options.baselineQuestionStats === "object") {
 			normalized.meta.baselineQuestionStats = {
@@ -444,7 +524,7 @@ async function runDossierAnalyzerDemographics({
 		.map((m) => `${m.role || "user"}: ${m.content}`)
 		.join("\n");
 
-	const dossierSnippet = buildDossierSnippet(currentDossier);
+	const dossierSnippet = buildTherapistSafeDossierSummary(currentDossier);
 
 	const userContent = [
 		"Here are recent user-facing messages (mostly the user's own words):",
@@ -457,15 +537,27 @@ async function runDossierAnalyzerDemographics({
 		"Infer only demographic-type traits and output JSON only.",
 	].join("\n");
 
-	const response = await openaiClient.chat.completions.create({
+	const messages = [
+		{ role: "system", content: DOSSIER_DEMOGRAPHIC_SYSTEM_PROMPT },
+		{ role: "user", content: userContent },
+	];
+	logger.logLLMCall("dossierAnalyzer", {
+		label: "runDossierAnalyzerDemographics",
+		messages,
+		params: { model: config.MODEL },
+	});
+	const createPayloadDemo = {
 		model: config.MODEL,
-		messages: [
-			{ role: "system", content: DOSSIER_DEMOGRAPHIC_SYSTEM_PROMPT },
-			{ role: "user", content: userContent },
-		],
+		messages,
 		temperature: 0.2,
 		response_format: { type: "json_object" },
-	});
+	};
+	logger.logOpenAiChatCompletionCreatePayload(
+		"runDossierAnalyzerDemographics",
+		"dossierAnalyzer",
+		createPayloadDemo
+	);
+	const response = await openaiClient.chat.completions.create(createPayloadDemo);
 
 	const content = response.choices?.[0]?.message?.content;
 	if (!content) {
@@ -501,7 +593,7 @@ async function runDossierAnalyzerPsych({
 		.map((m) => `${m.role || "user"}: ${m.content}`)
 		.join("\n");
 
-	const dossierSnippet = buildDossierSnippet(currentDossier);
+	const dossierSnippet = buildTherapistSafeDossierSummary(currentDossier);
 
 	const userContent = [
 		"Here are recent user-facing messages (mostly the user's own words):",
@@ -514,15 +606,27 @@ async function runDossierAnalyzerPsych({
 		"Infer only psychographic, worldview, and Big Five traits and output JSON only.",
 	].join("\n");
 
-	const response = await openaiClient.chat.completions.create({
+	const messages = [
+		{ role: "system", content: DOSSIER_PSYCH_SYSTEM_PROMPT },
+		{ role: "user", content: userContent },
+	];
+	logger.logLLMCall("dossierAnalyzer", {
+		label: "runDossierAnalyzerPsych",
+		messages,
+		params: { model: config.MODEL },
+	});
+	const createPayloadPsych = {
 		model: config.MODEL,
-		messages: [
-			{ role: "system", content: DOSSIER_PSYCH_SYSTEM_PROMPT },
-			{ role: "user", content: userContent },
-		],
+		messages,
 		temperature: 0.2,
 		response_format: { type: "json_object" },
-	});
+	};
+	logger.logOpenAiChatCompletionCreatePayload(
+		"runDossierAnalyzerPsych",
+		"dossierAnalyzer",
+		createPayloadPsych
+	);
+	const response = await openaiClient.chat.completions.create(createPayloadPsych);
 
 	const content = response.choices?.[0]?.message?.content;
 	if (!content) {
@@ -612,6 +716,7 @@ module.exports = {
 	runDossierAnalyzerDemographics,
 	runDossierAnalyzerPsych,
 	buildDossierSnippet,
+	buildTherapistSafeDossierSummary,
 	applyRecentMessageLimit,
 };
 

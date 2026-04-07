@@ -143,13 +143,14 @@ function createPhilosopherCall(openaiClient, opts) {
     logger.logLLMCall("philosopherCall", {
       agentKey,
       model: config.MODEL,
+      messages,
       messageCount: messages.length,
       historyTurns: Array.isArray(input?.chat_history) ? input.chat_history.length : 0,
       userMessageLength: userMessage.length,
       systemPromptLength: systemContent.length,
     });
 
-    logger.logFullLlmMessages("philosopherCall", agentKey, messages);
+    logger.logOpenAiChatCompletionCreatePayload("philosopherCall", agentKey, createPayload);
 
     try {
       const response = await openaiClient.chat.completions.create(createPayload);

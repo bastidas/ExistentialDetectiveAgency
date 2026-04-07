@@ -14,16 +14,27 @@ const {
   composeAttacheSystemPromptForSession,
 } = require("./attache/attacheRuntime");
 const { createAttacheState, computeCurrentPhaseId } = require("./attache/attacheMachine");
-const { createEmptyDossier, normalizeDossier } = require("./dossier_and_summarize/dossier");
-const { buildDossierSnippet } = require("./dossier_and_summarize/dossier");
+const {
+  createEmptyDossier,
+  normalizeDossier,
+  buildTherapistSafeDossierSummary,
+} = require("./dossier_and_summarize/dossier");
 const {
   pickExistentialTherapyPhase,
   pickNarrativePhase,
 } = require("./chatScenarioLabPhases");
-const { classifyTimeAway, getTimeAwayThresholds } = require("./orchestration/timeAwayClassification");
+const {
+  classifyTimeAway,
+  getTimeAwayThresholds,
+} = require("./orchestration/timeAwayClassification");
 const { runChatTurn } = require("./orchestration/chatMachine");
 const { classifyFromSessionAndDossier } = require("./session/returnClassification");
 const { isDossierStaleByAge } = require("./dossier_and_summarize/dossierRecency");
+const {
+  resolveLabLastBaselineCompletedAt,
+  validateLabDossierBaselinePreset,
+} = require("./dossier_and_summarize/dossierLabPreset");
+const { buildAttacheSessionForTurnInstructions } = require("./prompts/promptCatalogUtils");
 
 /**
  * Same ms derivation as `chatTestSeed.deriveMs` (avoid importing `chatTestSeed` — circular with this module).
@@ -152,6 +163,8 @@ function validateAttachePresetOverrides(preset) {
       return { error: "Invalid question_index." };
     }
   }
+  const dossierErr = validateLabDossierBaselinePreset(p);
+  if (dossierErr) return dossierErr;
   return null;
 }
 
@@ -183,9 +196,14 @@ function buildPhilosopherSessionForLabPreview(hasDossier, preset) {
     narrative_phase: pickNarrativePhase(p),
   };
   if (hasDossier) {
+    const nowMs = Date.now();
     const base = createEmptyDossier("preview");
-    base.meta.lastBaselineCompletedAt = Date.now();
-    session.dossier_summary = buildDossierSnippet(normalizeDossier(base, "preview"));
+    const lb = resolveLabLastBaselineCompletedAt(
+      { ...p, hasDossier: true, baselineCompleted: true },
+      nowMs
+    );
+    if (lb != null) base.meta.lastBaselineCompletedAt = lb;
+    session.dossier_summary = buildTherapistSafeDossierSummary(normalizeDossier(base, "preview"));
   }
   return session;
 }
@@ -289,7 +307,8 @@ function buildPromptPreviewFromPreset(preset) {
     let dossierStale = false;
     if (hasDossier) {
       const base = createEmptyDossier("preview");
-      base.meta.lastBaselineCompletedAt = Date.now();
+      const lb = resolveLabLastBaselineCompletedAt(p, nowMs);
+      if (lb != null) base.meta.lastBaselineCompletedAt = lb;
       dossierForClassification = normalizeDossier(base, "preview");
       dossierStale = isDossierStaleByAge(dossierForClassification, nowMs);
     }
@@ -322,7 +341,7 @@ function buildPromptPreviewFromPreset(preset) {
       lastReturnClassification: { returnCategory: classification.returnCategory },
     };
     if (hasDossier && dossierForClassification) {
-      sessionPayload.dossier_summary = buildDossierSnippet(dossierForClassification);
+      sessionPayload.dossier_summary = buildTherapistSafeDossierSummary(dossierForClassification);
     }
     sessionPayload.detective_prompt_instruction_ids = computeDetectiveCatalogInstructionIds({
       visit_bin: visitTier.bin,
@@ -409,7 +428,8 @@ function buildPromptPreviewFromPreset(preset) {
   let dossierStale = false;
   if (hasDossier) {
     const base = createEmptyDossier("preview");
-    base.meta.lastBaselineCompletedAt = Date.now();
+    const lb = resolveLabLastBaselineCompletedAt(p, nowMs);
+    if (lb != null) base.meta.lastBaselineCompletedAt = lb;
     dossierForClassification = normalizeDossier(base, "preview");
     dossierStale = isDossierStaleByAge(dossierForClassification, nowMs);
   }
@@ -426,14 +446,34 @@ function buildPromptPreviewFromPreset(preset) {
     visit_bin: visitTier.bin,
     ms_since_last_visit: ms,
     time_away_context_line: visitTier.description,
+    baseline_return_greeting_pending: p.baseline_return_greeting_pending === true,
+    stale_dossier_rebaseline: p.stale_dossier_rebaseline === true,
   });
   sessionState.dossier_stale_by_age = dossierStale;
   sessionState.lastReturnClassification = { returnCategory: classification.returnCategory };
   if (hasDossier && dossierForClassification) {
-    sessionState.dossier_summary = buildDossierSnippet(dossierForClassification);
+    sessionState.dossier_summary = buildTherapistSafeDossierSummary(dossierForClassification);
   }
 
   const composed = composeAttacheSystemPromptForSession(sessionState);
+  const mergedForLab = buildAttacheSessionForTurnInstructions(sessionState, {});
+  /** Routing / policy fields for the dev lab only — not part of attaché `llmSafeState` (narrative-only). */
+  const labOrchestrationMeta = {
+    attache_prompt_instruction_ids: Array.isArray(mergedForLab.attache_prompt_instruction_ids)
+      ? mergedForLab.attache_prompt_instruction_ids
+      : [],
+    visit_bin: mergedForLab.visit_bin != null ? String(mergedForLab.visit_bin) : "",
+    ms_since_last_visit:
+      typeof mergedForLab.ms_since_last_visit === "number" &&
+      Number.isFinite(mergedForLab.ms_since_last_visit)
+        ? mergedForLab.ms_since_last_visit
+        : null,
+    time_away_context_line:
+      mergedForLab.time_away_context_line != null ? String(mergedForLab.time_away_context_line) : "",
+    dossier_stale_by_age: mergedForLab.dossier_stale_by_age === true,
+    temporal_greeting_mode:
+      mergedForLab.temporal_greeting_mode != null ? String(mergedForLab.temporal_greeting_mode) : "",
+  };
   return {
     ...buildComposedPromptPreviewPayload({
       activeAgent: "attache",
@@ -443,6 +483,7 @@ function buildPromptPreviewFromPreset(preset) {
     }),
     labTurnCounts,
     labMaxUserExchanges: maxEx,
+    labOrchestrationMeta,
   };
 }
 
@@ -462,7 +503,8 @@ function previewChatMachineRouting(sessionId, preset) {
   let dossier = null;
   if (hasDossier) {
     const base = createEmptyDossier(sid);
-    base.meta.lastBaselineCompletedAt = Date.now();
+    const lb = resolveLabLastBaselineCompletedAt(p, Date.now());
+    if (lb != null) base.meta.lastBaselineCompletedAt = lb;
     dossier = normalizeDossier(base, sid);
   }
   const tier = classifyTimeAway(ms);
@@ -488,4 +530,6 @@ module.exports = {
   labNoAssistantLlmDueToExchangeCap,
   buildPromptPreviewFromPreset,
   previewChatMachineRouting,
+  resolveLabLastBaselineCompletedAt,
+  validateLabDossierBaselinePreset,
 };

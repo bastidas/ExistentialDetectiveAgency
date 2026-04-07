@@ -295,7 +295,7 @@ function createInitialAttacheSessionState(options) {
         : null,
     baseline_return_greeting_pending:
       options && options.baseline_return_greeting_pending === true,
-    /** When true, attaché prompt includes `ATTACHE_STALE_DOSSIER_REBASELINE` (chatService re-baseline path). */
+    /** Legacy flag: when true with no other primary return row, policy maps to `ATTACHE_RETURN_STALE_VISIT` + dossier append. */
     stale_dossier_rebaseline: options && options.stale_dossier_rebaseline === true,
     /** Mirrors `classifyTimeAway` for this request (attaché catalog + LLM-safe state). */
     visit_bin: options && options.visit_bin != null ? String(options.visit_bin) : null,

@@ -1,8 +1,6 @@
-- Welcome to the Existential Detective Agency. Did you have an appointment? No matter. You’ve arrived. The Detective is preparing to receive you, but protocol requires the Baseline first. It is not punitive; merely… clarifying.
+- Welcome to the Existential Detective Agency. Did you have an appointment? No matter. You’ve arrived. The Detective is preparing to receive you, but protocol requires the Baseline first. It is not punitive; merely... clarifying.
 
-- We were expecting you yesterday. Would you like to make an appointment for yesterday? Although, it appears your dossier is not in order...
-
-We could actually pencil you in for yesterday and see you now, does this make sense? If so we could just begin the baseline now if you are ready?
+- We were expecting you yesterday. Would you like to make an appointment for yesterday? Although, it appears your dossier is not in order... We could actually pencil you in for yesterday and see you now, does this make sense? If so we could just begin the baseline now if you are ready?
 
 - This is the Agency; I think you are meant to be here, no? Before the Detective entertains your questions, you must first entertain ours. This Baseline test will help us determine how best to assist you—if you would indulge us.
 
@@ -18,10 +16,9 @@ We could actually pencil you in for yesterday and see you now, does this make se
 
 - This is the Existential Detective Agency. I assume you're here for intake, unless you've wandered in by accident? The Detective has questions for you, but before that, we have questions for you. The Baseline is designed to make sense of your intentions—such as they are, ready?
 
-- We anticipated someone like you. Thank you for presenting yourself. The Detective will see you eventually, assuming the Baseline does not disqualify you. Baseline, exploration, or closure—state your preference.
+- We anticipated someone like you. Thank you for presenting yourself. The Detective will see you eventually, assuming the Baseline does not disqualify you. We could begin with the baseline dossier compilation, you could expore the hallways, or we could try to see if the detective would see you immeadiately. state your preference.
 
-- You've entered the administrative wing. I can begin your Baseline immediately, unless you'd prefer to delay the inevitable.
-Your file is... incomplete. The Baseline dossier will correct that. Shall we begin?
+- You've entered the administrative wing. I can begin your Baseline immediately, unless you'd prefer to delay the inevitable. Though your file is... incomplete. The Baseline dossier will correct that. Shall we begin?
 
 - You’ve entered the administrative wing. The Detective is reviewing other matters, but your Baseline will ensure they can address yours with precision. If you're unsure why you're here, the Baseline will clarify matters, so lets begin?
 
@@ -31,6 +28,6 @@ Your file is... incomplete. The Baseline dossier will correct that. Shall we beg
 
 - This is the Agency. We investigate what troubles you. Please prepare for the Baseline. You are now within the jurisdiction of the Existential Detective. The Agency requires a Baseline before any deeper inquiry may proceed, may we proceed?
 
--You're here for existential assistance. I'll administer the intake. The Detective is available, but not that available. Let’s complete the Baseline so we can justify interrupting them?
+- You're here for existential assistance. I'll administer the intake. The Detective is available, but not that available. Let’s complete the Baseline so we can justify interrupting them?
 
 - This is the Agency. The Detective is preparing for you, or preparing because of you—it’s unclear. Let’s begin the Baseline and make something clearer. We can begin any time you're ready.

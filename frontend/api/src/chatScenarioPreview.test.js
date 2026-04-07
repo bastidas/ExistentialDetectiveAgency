@@ -43,6 +43,23 @@ test("buildPromptPreviewFromPreset: attaché path has no parallelPhilosophers", 
   assert.equal(pr.parallelPhilosophers, undefined);
 });
 
+test("buildPromptPreviewFromPreset: attaché labLlmSafeState excludes routing; labOrchestrationMeta has ids", () => {
+  const pr = buildPromptPreviewFromPreset({
+    baselineCompleted: false,
+    hasDossier: false,
+    attachePhase: "baseline1",
+    question_index: 1,
+    attacheTurnCount: 0,
+    timeAwayBin: "brief",
+  });
+  const safe = pr.labLlmSafeState && typeof pr.labLlmSafeState === "object" ? pr.labLlmSafeState : {};
+  assert.equal(Object.prototype.hasOwnProperty.call(safe, "attache_prompt_instruction_ids"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(safe, "visit_bin"), false);
+  const om = pr.labOrchestrationMeta;
+  assert.ok(om && Array.isArray(om.attache_prompt_instruction_ids));
+  assert.ok(String(om.visit_bin || "").length > 0);
+});
+
 test("buildPromptPreviewFromPreset: attaché turnInstructionsPreview is exact slice of system prompt", () => {
   const pr = buildPromptPreviewFromPreset({
     baselineCompleted: false,
@@ -89,8 +106,8 @@ test("buildPromptPreviewFromPreset: attaché lab wires attacheTurnCount + phase 
     attacheTurnCount: 0,
     timeAwayBin: "brief",
   });
-  const ids = pr.labLlmSafeState && pr.labLlmSafeState.attache_prompt_instruction_ids;
-  assert.ok(Array.isArray(ids), "preview exposes attache_prompt_instruction_ids");
+  const ids = pr.labOrchestrationMeta && pr.labOrchestrationMeta.attache_prompt_instruction_ids;
+  assert.ok(Array.isArray(ids), "preview exposes labOrchestrationMeta.attache_prompt_instruction_ids");
   assert.ok(
     ids.includes("ATTACHE_BASELINE_MID_QUESTION"),
     `expected ATTACHE_BASELINE_MID_QUESTION in ${JSON.stringify(ids)}`
@@ -105,7 +122,7 @@ test("buildPromptPreviewFromPreset: attaché lab attacheTurnCount>=1 adds baseli
     attacheTurnCount: 1,
     timeAwayBin: "brief",
   });
-  const ids = pr.labLlmSafeState && pr.labLlmSafeState.attache_prompt_instruction_ids;
+  const ids = pr.labOrchestrationMeta && pr.labOrchestrationMeta.attache_prompt_instruction_ids;
   assert.ok(Array.isArray(ids));
   assert.ok(
     ids.includes("ATTACHE_BASELINE_DELIVERY_START"),
@@ -195,4 +212,61 @@ test("buildPromptPreviewFromPreset: no assistant LLM when att+det >= maxEx+1 (ma
   assert.equal(pr.labMaxUserExchanges, 3);
   assert.equal(pr.systemRoleExact, undefined);
   assert.equal(pr.systemPrompt, undefined);
+});
+
+test("buildPromptPreviewFromPreset: attaché pending stale + no dossier includes return append (no dossier)", () => {
+  const pr = buildPromptPreviewFromPreset({
+    baselineCompleted: false,
+    hasDossier: false,
+    attachePhase: "start",
+    attacheTurnCount: 0,
+    timeAwayBin: "stale",
+    baseline_return_greeting_pending: true,
+  });
+  const ids = pr.labOrchestrationMeta && pr.labOrchestrationMeta.attache_prompt_instruction_ids;
+  assert.ok(Array.isArray(ids));
+  assert.ok(ids.includes("ATTACHE_RETURN_STALE_VISIT"));
+  assert.ok(ids.includes("ATTACHE_RETURN_APPEND_NO_DOSSIER"));
+});
+
+test("buildPromptPreviewFromPreset: attaché pending stale + fixture dossier includes stale dossier append", () => {
+  const pr = buildPromptPreviewFromPreset({
+    baselineCompleted: false,
+    hasDossier: true,
+    attachePhase: "start",
+    attacheTurnCount: 0,
+    timeAwayBin: "stale",
+    baseline_return_greeting_pending: true,
+  });
+  const ids = pr.labOrchestrationMeta && pr.labOrchestrationMeta.attache_prompt_instruction_ids;
+  assert.ok(Array.isArray(ids));
+  assert.ok(ids.includes("ATTACHE_RETURN_STALE_VISIT"));
+  assert.ok(ids.includes("ATTACHE_RETURN_APPEND_STALE_DOSSIER"));
+});
+
+test("buildPromptPreviewFromPreset: attaché dossierBaselineAge fresh uses fresh dossier append", () => {
+  const pr = buildPromptPreviewFromPreset({
+    baselineCompleted: false,
+    hasDossier: true,
+    dossierBaselineAge: "fresh",
+    attachePhase: "start",
+    attacheTurnCount: 0,
+    timeAwayBin: "stale",
+    baseline_return_greeting_pending: true,
+  });
+  const ids = pr.labOrchestrationMeta && pr.labOrchestrationMeta.attache_prompt_instruction_ids;
+  assert.ok(Array.isArray(ids));
+  assert.ok(ids.includes("ATTACHE_RETURN_APPEND_FRESH_DOSSIER"));
+});
+
+test("buildPromptPreviewFromPreset: labOrchestrationMeta dossier_stale_by_age false when baseline age fresh", () => {
+  const pr = buildPromptPreviewFromPreset({
+    baselineCompleted: false,
+    hasDossier: true,
+    dossierBaselineAge: "fresh",
+    attachePhase: "start",
+    attacheTurnCount: 0,
+    timeAwayBin: "moderate",
+  });
+  assert.equal(pr.labOrchestrationMeta && pr.labOrchestrationMeta.dossier_stale_by_age, false);
 });

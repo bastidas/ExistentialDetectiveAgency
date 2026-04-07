@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "chat-http",
+  "title": "Chat HTTP API — UI ↔ backend",
+  "version": 1,
+  "description": "Unified contract for the static browser client (public/js/chat.*) and the Node API (api/src). Routing fields inside envelope are produced at runtime by orchestration/chatMachine.js (XState); this document only describes the wire shape.",
+
+  "endpoints": {
+    "POST /api/chat": {
+      "requestBody": {
+        "type": "object",
+        "required": ["message"],
+        "properties": {
+          "message": { "type": "string" }
+        }
+      },
+      "responses": {
+        "200": { "$ref": "#/definitions/ChatPostSuccessBody" },
+        "204": { "description": "No assistant content (optional policy)" },
+        "400": { "$ref": "#/definitions/ChatPostErrorBody" }
+      }
+    },
+    "GET /api/chat-state": {
+      "responses": {
+        "200": { "$ref": "#/definitions/ChatStateSnapshotBody" }
+      }
+    }
+  },
+
+  "definitions": {
+    "ActiveAgent": {
+      "type": "string",
+      "enum": ["attache", "detective"]
+    },
+
+    "ChatEnvelope": {
+      "type": "object",
+      "description": "Serialized from XState. active_agent selects UI styling; agent_label is the exact row label text the client must show (authoritative display name).",
+      "required": ["active_agent", "baseline_completed", "agent_label", "has_dossier"],
+      "properties": {
+        "active_agent": { "$ref": "#/definitions/ActiveAgent" },
+        "baseline_completed": { "type": "boolean" },
+        "agent_label": {
+          "type": "string",
+          "description": "Human-visible speaker label for this turn (e.g. ATTACHÉ / DETECTIVE). Client must display this string."
+        },
+        "has_dossier": {
+          "type": "boolean",
+          "description": "True when a persisted user dossier is loaded into the orchestrator (parallel dossier region is present)."
+        }
+      }
+    },
+
+    "ChatDebugCounters": {
+      "type": "object",
+      "description": "Present only when the API runs with debug logging enabled.",
+      "required": ["userExchanges", "maxUserExchanges", "dailyUsage", "maxDailyUsage"],
+      "properties": {
+        "userExchanges": { "type": "number" },
+        "maxUserExchanges": { "type": "number" },
+        "dailyUsage": { "type": "number" },
+        "maxDailyUsage": { "type": "number" }
+      }
+    },
+
+    "PhilosopherCalloutEntry": {
+      "description": "Either { userText, mode } or [ userText, mode ]; mode is keyword | highlight | strike",
+      "anyOf": [
+        {
+          "type": "object",
+          "required": ["userText", "mode"],
+          "properties": {
+            "userText": { "type": "string" },
+            "mode": { "type": "string", "enum": ["keyword", "highlight", "strike"] }
+          }
+        },
+        {
+          "type": "array",
+          "minItems": 2,
+          "items": [{ "type": "string" }, { "type": "string" }]
+        }
+      ]
+    },
+
+    "ChatPostSuccessBody": {
+      "type": "object",
+      "required": ["reply", "envelope"],
+      "properties": {
+        "reply": { "type": "string" },
+        "envelope": { "$ref": "#/definitions/ChatEnvelope" },
+        "debug": { "$ref": "#/definitions/ChatDebugCounters" },
+        "lumenUserResponse": { "type": "string" },
+        "lumenOtherResponse": { "type": "string" },
+        "lumenNotes": { "type": "array", "items": { "type": "string" } },
+        "lumenCallouts": { "type": "array", "items": { "$ref": "#/definitions/PhilosopherCalloutEntry" } },
+        "umbraUserResponse": { "type": "string" },
+        "umbraOtherResponse": { "type": "string" },
+        "umbraNotes": { "type": "array", "items": { "type": "string" } },
+        "umbraCallouts": { "type": "array", "items": { "$ref": "#/definitions/PhilosopherCalloutEntry" } },
+        "philosopherNotes": { "type": "array", "items": { "type": "string" } },
+        "closureUltimate": {
+          "type": "boolean",
+          "description": "True when this response used detective closure ultimate (final scripted reply); client may show the closing stamp."
+        }
+      }
+    },
+
+    "ChatPostErrorBody": {
+      "type": "object",
+      "required": ["error"],
+      "properties": {
+        "error": { "type": "string" },
+        "errorKind": {
+          "type": "string",
+          "enum": ["bad_request", "rate_limit", "flex_busy", "server_error"]
+        }
+      }
+    },
+
+    "ChatStateMessage": {
+      "type": "object",
+      "required": ["role", "text"],
+      "properties": {
+        "role": { "type": "string", "enum": ["user", "assistant"] },
+        "text": { "type": "string" },
+        "agent": {
+          "type": "string",
+          "enum": ["attache", "detective", "lumen", "umbra"]
+        },
+        "kind": { "type": "string" }
+      }
+    },
+
+    "ChatStateUserProgress": {
+      "type": "object",
+      "properties": {
+        "baselineCompleted": { "type": "boolean" },
+        "pendingBaselineRefresh": { "type": "boolean" },
+        "returningPersisted": { "type": "boolean" }
+      }
+    },
+
+    "ChatStateResumeUi": {
+      "type": "object",
+      "description": "transcriptMode: full = show prior thread when messages are replayed; hidden = long/stale visit — empty UI while server retains LLM history.",
+      "properties": {
+        "skipEmptyChatBootstrap": { "type": "boolean" },
+        "transcriptMode": { "type": "string", "enum": ["full", "hidden"] },
+        "serverRetainsHistory": { "type": "boolean" }
+      }
+    },
+
+    "ChatOrchestrationCounters": {
+      "type": "object",
+      "description": "Turn counts: orchestration_user_turn_count increments on each USER_MESSAGE in the chat XState machine (since session / rehydration). detective_turn_count is how many completed detective LLM turns the server has counted for this session.",
+      "properties": {
+        "orchestration_user_turn_count": { "type": "number" },
+        "detective_turn_count": { "type": "number" },
+        "attache_exchange_count": { "type": "number" }
+      }
+    },
+
+    "ChatStateSnapshotBody": {
+      "type": "object",
+      "required": ["messages", "envelope", "userProgress"],
+      "properties": {
+        "messages": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/ChatStateMessage" }
+        },
+        "envelope": { "$ref": "#/definitions/ChatEnvelope" },
+        "userProgress": { "$ref": "#/definitions/ChatStateUserProgress" },
+        "detectiveIntroSent": { "type": "boolean" },
+        "orchestration": { "$ref": "#/definitions/ChatOrchestrationCounters" },
+        "resumeUi": {
+          "anyOf": [{ "$ref": "#/definitions/ChatStateResumeUi" }, { "type": "null" }]
+        }
+      }
+    }
+  }
+}

@@ -1,7 +1,7 @@
 "use strict";
 
 const config = require("../config");
-const logger = require("./logger");
+const logger = require("../logger");
 
 // ---------------------------------------------------------------------------
 // Configuration knobs for memory & dossier triggers
@@ -55,15 +55,21 @@ Summary:
 
 	try {
 		const messages = [{ role: "user", content: prompt }];
+		const createPayload = {
+			model: config.MODEL,
+			messages,
+		};
 		logger.logLLMCall("summarization", {
 			label: "summarizeHistory",
 			messages,
 			params: { model: config.MODEL },
 		});
-		const response = await openai.chat.completions.create({
-			model: config.MODEL,
-			messages,
-		});
+		logger.logOpenAiChatCompletionCreatePayload(
+			"summarizeHistory",
+			"summarization",
+			createPayload
+		);
+		const response = await openai.chat.completions.create(createPayload);
 
 		const content = response.choices?.[0]?.message?.content || "";
 		return String(content || "").trim();

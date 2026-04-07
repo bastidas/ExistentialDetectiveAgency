@@ -1,5 +1,15 @@
 "use strict";
 
+// Load frontend/.env when this entry runs without frontend/server.js (e.g. Azure Functions local).
+try {
+  const path = require("path");
+  require("dotenv").config({
+    path: path.join(__dirname, "..", "..", ".env"),
+  });
+} catch (_) {
+  /* optional dev dependency path */
+}
+
 const { app } = require("@azure/functions");
 const OpenAI = require("openai");
 const config = require("./config");

@@ -100,13 +100,14 @@ function createDetectiveCall(openaiClient, opts) {
 
     logger.logLLMCall("detectiveCall", {
       model: config.MODEL,
+      messages,
       messageCount: messages.length,
       historyTurns: Array.isArray(input?.chat_history) ? input.chat_history.length : 0,
       userMessageLength: userMessage.length,
       systemPromptLength: systemContent.length,
     });
 
-    logger.logFullLlmMessages("detectiveCall", "detective", messages);
+    logger.logOpenAiChatCompletionCreatePayload("detectiveCall", "detective", createPayload);
 
     try {
       const response = await openaiClient.chat.completions.create(createPayload);

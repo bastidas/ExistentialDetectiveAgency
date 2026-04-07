@@ -47,6 +47,7 @@ function resolveSpecialInstructionEntries(catalogJson, instructionIds) {
     const entry = map[key];
     if (!entry || typeof entry !== "object") continue;
     const body = entry.body == null ? "" : String(entry.body).trim();
+    // Intentionally blank catalog rows (tags include `allow_empty_body`) omit a `###` block—same as skipping here.
     if (!body) continue;
     const title = entry.title == null ? "" : String(entry.title).trim();
     out.push({ id: key, title, body });
@@ -136,6 +137,8 @@ function buildAttacheSessionForTurnInstructions(session, internalState) {
       baseline_return_greeting_pending: facts.baseline_return_greeting_pending === true,
       stale_dossier_rebaseline: facts.stale_dossier_rebaseline === true,
       returnCategory: facts.returnCategory != null ? String(facts.returnCategory) : "",
+      has_dossier: facts.has_dossier === true,
+      dossier_stale_by_age: facts.dossier_stale_by_age === true,
     });
   }
 

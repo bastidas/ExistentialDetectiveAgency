@@ -91,7 +91,7 @@ function buildComposedPromptPreviewPayload({ activeAgent, title, composed, phase
     phaseId: phaseId != null && phaseId !== "" ? phaseId : undefined,
     /** @deprecated use systemRoleExact */
     systemPrompt: content,
-    /** Dev lab: `composeAgentPrompt` conversation slice (existential_therapy_phase, narrative_phase, …). */
+    /** Dev lab: allowlisted `llmSafeState` (attaché: dossier + prior summary only; routing → `labOrchestrationMeta`). */
     labLlmSafeState,
   };
 }
