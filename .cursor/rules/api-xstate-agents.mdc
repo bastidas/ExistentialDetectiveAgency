@@ -1,0 +1,22 @@
+---
+description: XState for attache, detective, and philosophers agent state
+globs: api/agents/**/*.js, api/orchestration/**/*.js
+alwaysApply: false
+---
+
+# Agent state — XState (attache, detective, philosophers)
+
+- **Internal agent state** (phases, turn flow, counters, prompt-instruction selection) belongs in **XState machines**, not ad-hoc module-level flags or parallel state objects.
+- Prefer extending the existing machines: `agents/attache/attacheMachine.js`, `agents/detective/detectiveMachine.js`, `agents/philosophers/philosophersMachine.js`, and wiring through `orchestration/chatMachine.js` rather than bolting state onto unrelated services.
+- Use **XState v5** APIs already in the repo: `setup`, `assign`, `createActor` / `createMachine` as appropriate. Keep **events**, **context**, and **state `meta` / `description` / tags** consistent with neighboring states.
+- When adding transitions, preserve **inspectability**: state `description`, `meta`, and `@xstate-layout` comments where the file already uses them (Stately Studio / tooling).
+- Add or extend **actor-based tests** (see `orchestration/*.test.js`) for non-trivial machine changes.
+
+```javascript
+// ❌ BAD — scattered imperative phase tracking
+let detectivePhase = "intro";
+
+// ✅ GOOD — state lives in the machine; services send events and read snapshot/context
+actor.send({ type: "SOME_EVENT" });
+const phase = actor.getSnapshot().value;
+```

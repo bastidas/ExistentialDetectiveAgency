@@ -1,0 +1,15 @@
+---
+description: Repository folder map for web, API, and prompts
+alwaysApply: true
+---
+
+# Project layout
+
+Full map: `AGENTS.md`.
+
+- `web/` — static site (SWA `app_location`). Scripts under `web/js/{shared,chat,notes,philosophers,poem}/`; lab pages in `web/lab/`.
+- `api/` — Azure Functions + backend (SWA `api_location`). Keep `host.json` and anything `require()`d here.
+- `api/prompts/` — model markdown/JSON. `api/prompting/` — composer/registry code.
+- `api/agents/shared/` — LLM helpers. Characters: `api/agents/{attache,detective,philosophers}/`.
+- `server-dev.js` — local Express only. Production HTTP is `api/index.js`.
+- Do not add a `frontend/` folder. Do not put API requires outside `api/`.
