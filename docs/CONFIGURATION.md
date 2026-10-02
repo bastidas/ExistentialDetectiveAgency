@@ -4,6 +4,7 @@ How to change prompts, data files, note styles, annotation (chat markup) styles,
 
 Related:
 
+- Concept, philosophy, and where state belongs: [`concept.md`](concept.md)
 - Prompt assembly (composer, catalogs, turn tails): [`agent-prompt-construction.md`](agent-prompt-construction.md)
 - Durable storage schema and `/api/chat-state`: [`durable-user-state.md`](durable-user-state.md)
 - Env var list: [`.env.example`](../.env.example)

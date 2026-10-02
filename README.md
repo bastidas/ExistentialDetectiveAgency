@@ -1,11 +1,16 @@
 # Existential Detective Agency
 
-Unified landing, querent chat, and poem experiences served from `web/` and powered by an Azure Functions API in `api/`. Local development uses Express (`server-dev.js`).
+The Existential Detective Agency is a place for self inquiry, ontological discovery, poetry, philosophy, and of course existential questioning.
+
+High-level concept, philosophy, and how prompt state is meant to be split: [`docs/concept.md`](docs/concept.md).
+
 
 ## Live site
 - https://www.existentialdetectiveagency.com
 
 ## Project layout
+Unified landing, querent chat, and poem experiences served from `web/` and powered by an Azure Functions API in `api/`. Local development uses Express (`server-dev.js`).
+
 - `web/` — static site (SWA `app_location`): landing, chat, poem, assets, styles, and `web/lab/` tools.
 - `api/` — Azure Functions + orchestration, agents, prompts (SWA `api_location`).
 - `server-dev.js` — local Express server only (serves `web/`, requires `api/`).
