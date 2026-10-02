@@ -1,0 +1,4 @@
+{
+  "name": "Existential Detective Agency",
+  "install": "cd frontend && npm ci"
+}
