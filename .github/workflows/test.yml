@@ -1,0 +1,29 @@
+name: API tests
+
+on:
+  push:
+    branches:
+      - main
+      - xstate
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend/api
+    strategy:
+      matrix:
+        node-version: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: frontend/api/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - name: API loads when deployed alone (Azure SWA api_location)
+        run: npm run test:isolated
