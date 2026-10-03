@@ -96,7 +96,7 @@ function formatMockQueryLine(agentKey, custom) {
  * @param {string} input.agentKey
  * @param {string} [input.userMessage]
  * @param {unknown} [input.machineStateSummary]
- * @param {{ persona?: string, instructions?: string, outputSchema?: string, prompts?: string }} [input.promptPaths]
+ * @param {{ persona?: string, instructions?: string, outputSchema?: string }} [input.promptPaths]
  * @param {Record<string, unknown>} [input.llmSafeState]
  * @param {string} [input.custom] Same custom tail as `composeAgentPrompt` (for mock query line when `mockQueryBody` omitted).
  * @param {string} [input.mockQueryBody] Full mock-query stack string (e.g. from `formatAttacheMockQueryBody`); not truncated.
@@ -169,7 +169,6 @@ function buildMockReplyFromRegistry(agentKey, userMessage, machineStateSummary, 
           persona: reg.personaPath,
           instructions: reg.instructionsPath,
           outputSchema: reg.outputSchemaPath,
-          prompts: reg.promptsPath,
         }
       : {},
     llmSafeState: composed.llmSafeState,

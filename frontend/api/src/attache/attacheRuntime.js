@@ -341,7 +341,6 @@ function buildAttacheDiagnosticMockReply({
           persona: reg.personaPath,
           instructions: reg.instructionsPath,
           outputSchema: reg.outputSchemaPath,
-          prompts: reg.promptsPath,
         }
       : {},
     llmSafeState: composedPrompt.llmSafeState,

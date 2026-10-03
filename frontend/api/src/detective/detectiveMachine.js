@@ -113,7 +113,6 @@ const detectiveMachine = setup({
               persona: reg.personaPath,
               instructions: reg.instructionsPath,
               outputSchema: reg.outputSchemaPath,
-              prompts: reg.promptsPath,
             }
           : {},
         llmSafeState: composed.llmSafeState,

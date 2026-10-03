@@ -11,7 +11,6 @@ const config = require("../config");
  * @property {string} instructionsPath
  * @property {string} outputSchemaPath
  * @property {string} catalogPath
- * @property {string} [promptsPath]
  */
 
 const PROMPT_REGISTRY = Object.freeze({
@@ -20,21 +19,18 @@ const PROMPT_REGISTRY = Object.freeze({
     instructionsPath: config.ATTACHE_INSTRUCTIONS_FILE,
     outputSchemaPath: config.ATTACHE_TURN_SCHEMA_FILE,
     catalogPath: config.ATTACHE_PROMPT_CATALOG_FILE,
-    promptsPath: config.ATTACHE_PROMPTS_FILE,
   },
   detective: {
     personaPath: config.DETECTIVE_PERSONA_FILE,
     instructionsPath: config.DETECTIVE_INSTRUCTIONS_FILE,
     outputSchemaPath: config.DETECTIVE_TURN_SCHEMA_FILE,
     catalogPath: config.DETECTIVE_PROMPT_CATALOG_FILE,
-    promptsPath: config.DETECTIVE_PROMPTS_FILE,
   },
   lumen: {
     personaPath: config.LUMEN_PERSONA_FILE,
     instructionsPath: config.LUMEN_INSTRUCTIONS_FILE,
     outputSchemaPath: config.LUMEN_TURN_SCHEMA_FILE,
     catalogPath: config.LUMEN_PROMPT_CATALOG_FILE,
-    promptsPath: config.LUMEN_PROMPTS_FILE,
     renderMode: "plain",
   },
   umbra: {
@@ -42,7 +38,6 @@ const PROMPT_REGISTRY = Object.freeze({
     instructionsPath: config.UMBRA_INSTRUCTIONS_FILE,
     outputSchemaPath: config.UMBRA_TURN_SCHEMA_FILE,
     catalogPath: config.UMBRA_PROMPT_CATALOG_FILE,
-    promptsPath: config.UMBRA_PROMPTS_FILE,
   },
 });
 
@@ -76,18 +71,48 @@ function loadJson(filePath) {
   return null;
 }
 
+const MIN_PERSONA_CHARS = 500;
+const MIN_INSTRUCTIONS_CHARS = 100;
+const UNFINISHED_PROMPT_MARKERS = Object.freeze([/\[mock\b/i, /\bplaceholder\b/i]);
+
+/**
+ * Persona and instruction files must be real prompt text: loadText() returns "" for a missing file,
+ * so a deleted or stub file would otherwise ship a near-empty system prompt without any error.
+ *
+ * @param {string} key
+ * @param {string} label
+ * @param {string} filePath
+ * @param {number} minChars
+ * @returns {string[]}
+ */
+function promptTextProblems(key, label, filePath, minChars) {
+  if (!filePath || !fs.existsSync(filePath)) return [];
+  const text = loadText(filePath);
+  const problems = [];
+  if (text.length < minChars) {
+    problems.push(`registry[${key}].${label}: only ${text.length} chars (expected at least ${minChars}): ${filePath}`);
+  }
+  for (const marker of UNFINISHED_PROMPT_MARKERS) {
+    if (marker.test(text)) {
+      problems.push(`registry[${key}].${label}: contains unfinished-prompt marker ${marker}: ${filePath}`);
+    }
+  }
+  return problems;
+}
+
 /**
  * Catalog entries normally require a non-empty `body`. Entries may set `tags` to include `allow_empty_body`
  * when intentionally blank (e.g. `DETECTIVE_RETURN_BRIEF`: under the brief time-away threshold — no return-instruction block;
  * `ATTACHE_RETURN_APPEND_FRESH_DOSSIER`: no extra dossier append line when the file is already current).
  *
- * @param {{ strict?: boolean }} [opts]
+ * @param {{ strict?: boolean, registry?: Record<string, PromptRegistryEntry> }} [opts] `registry` overrides the default (tests)
  * @returns {{ ok: boolean, errors: string[] }}
  */
 function validatePromptRegistry(opts = {}) {
   const strict = !!opts.strict;
+  const registry = opts.registry || PROMPT_REGISTRY;
   const errors = [];
-  for (const [key, entry] of Object.entries(PROMPT_REGISTRY)) {
+  for (const [key, entry] of Object.entries(registry)) {
     const paths = [
       ["personaPath", entry.personaPath],
       ["instructionsPath", entry.instructionsPath],
@@ -99,6 +124,10 @@ function validatePromptRegistry(opts = {}) {
         errors.push(`registry[${key}].${label}: missing or unreadable: ${p || "(empty)"}`);
       }
     }
+    errors.push(...promptTextProblems(key, "personaPath", entry.personaPath, MIN_PERSONA_CHARS));
+    errors.push(
+      ...promptTextProblems(key, "instructionsPath", entry.instructionsPath, MIN_INSTRUCTIONS_CHARS)
+    );
     const catPath = entry.catalogPath;
     if (catPath && fs.existsSync(catPath)) {
       try {
@@ -135,6 +164,8 @@ module.exports = {
   PROMPT_REGISTRY,
   getPromptRegistryEntry,
   validatePromptRegistry,
+  MIN_PERSONA_CHARS,
+  MIN_INSTRUCTIONS_CHARS,
   loadText,
   loadJson,
 };

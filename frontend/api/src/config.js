@@ -60,10 +60,6 @@ const UMBRA_TURN_SCHEMA_FILE = path.join(
   "umbra_philosopher_turn.schema.json"
 );
 
-const DETECTIVE_PROMPTS_FILE = path.join(PROMPTS_DIR, "detective", "detective_prompts.md");
-const ATTACHE_PROMPTS_FILE = path.join(PROMPTS_DIR, "attache", "attache_prompts.md");
-const LUMEN_PROMPTS_FILE = path.join(PROMPTS_DIR, "lumen", "lumen_prompts.md");
-const UMBRA_PROMPTS_FILE = path.join(PROMPTS_DIR, "umbra", "umbra_prompts.md");
 
 /** @deprecated Prefer per-agent `*_PROMPT_CATALOG_FILE`; kept for scripts or external refs */
 const SPECIAL_INSTRUCTIONS_CATALOG_FILE = path.join(
@@ -114,10 +110,6 @@ module.exports = {
   ATTACHE_TURN_SCHEMA_FILE,
   LUMEN_TURN_SCHEMA_FILE,
   UMBRA_TURN_SCHEMA_FILE,
-  DETECTIVE_PROMPTS_FILE,
-  ATTACHE_PROMPTS_FILE,
-  LUMEN_PROMPTS_FILE,
-  UMBRA_PROMPTS_FILE,
   SPECIAL_INSTRUCTIONS_CATALOG_FILE,
   DETECTIVE_PROMPT_CATALOG_FILE,
   ATTACHE_PROMPT_CATALOG_FILE,

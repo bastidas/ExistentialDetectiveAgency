@@ -28,10 +28,6 @@ const philosophersNarrativeMachine = setup({
   },
 });
 
-/** @deprecated Use `philosophersNarrativeMachine`; kept for require() compatibility. */
-const philosophersMachine = philosophersNarrativeMachine;
-
 module.exports = {
   philosophersNarrativeMachine,
-  philosophersMachine,
 };

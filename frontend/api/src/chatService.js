@@ -20,7 +20,6 @@ const { buildMockReplyFromRegistry } = require("./agents/mockAgentTurn");
 const { composeAgentPrompt } = require("./prompts/promptComposer");
 const { createDetectiveCall } = require("./detective/detectiveCall");
 const { philosophersNarrativeMachine } = require("./philosophers/philosophersMachine");
-const { buildPhilosophersCustomPrompt } = require("./philosophers/philosophersCustomPrompt");
 const { createPhilosopherCall } = require("./philosophers/philosophersCall");
 const config = require("./config");
 const logger = require("./logger");
@@ -654,38 +653,16 @@ async function composeChatResponse(sessionId, message, options = {}) {
 
       const philSession = buildPhilosopherComposeSession(sessionId, dossier);
       const internalState = {};
-      let lumenCustom = "";
-      let umbraCustom = "";
-      try {
-        lumenCustom = buildPhilosophersCustomPrompt({
-          agentKey: "lumen",
-          activeVoice: "lumen",
-          session: philSession,
-        });
-      } catch (_) {
-        lumenCustom = "";
-      }
-      try {
-        umbraCustom = buildPhilosophersCustomPrompt({
-          agentKey: "umbra",
-          activeVoice: "umbra",
-          session: philSession,
-        });
-      } catch (_) {
-        umbraCustom = "";
-      }
       const composedLumen = composeAgentPrompt({
         agentKey: "lumen",
         session: philSession,
         internalState,
-        custom: lumenCustom || undefined,
         debugContext: { activeAgent: "philosophers" },
       });
       const composedUmbra = composeAgentPrompt({
         agentKey: "umbra",
         session: philSession,
         internalState,
-        custom: umbraCustom || undefined,
         debugContext: { activeAgent: "philosophers" },
       });
 
