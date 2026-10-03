@@ -14,7 +14,7 @@ const { logChatMachineState, getDebugStateLevel } = require("../logger");
 
 /**
  * Domain routing for the chat orchestrator. Serialized to HTTP as `envelope`
- * (see `frontend/contracts/chat-http.contract.json` → definitions.ChatEnvelope).
+ * (see `frontend/api/contracts/chat-http.contract.json` → definitions.ChatEnvelope).
  */
 const initialChatContext = {
   replyText: "",

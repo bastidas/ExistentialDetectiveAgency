@@ -1,6 +1,6 @@
 /**
  * Chat route bootstrap. `/api/chat-state` payload: `/contracts/chat-http.contract.json`
- * (repo: `frontend/contracts/chat-http.contract.json`).
+ * (repo: `frontend/api/contracts/chat-http.contract.json`).
  */
 (function () {
   "use strict";

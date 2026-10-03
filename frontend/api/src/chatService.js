@@ -6,7 +6,7 @@ const {
   notifyAttachePreludeComplete,
   getChatEnvelopeForSession,
 } = require("./orchestration/chatMachine");
-const { createChatPostSuccessBody } = require("../../contracts/chatApiContract");
+const { createChatPostSuccessBody } = require("../contracts/chatApiContract");
 const { runAttacheTurn } = require("./attache/attacheRuntime");
 const {
   attacheOrchestratorMachine,

@@ -1,6 +1,6 @@
 /**
  * Main chat send/receive. API response shapes: `/contracts/chat-http.contract.json`
- * (repo: `frontend/contracts/chat-http.contract.json`).
+ * (repo: `frontend/api/contracts/chat-http.contract.json`).
  */
 (function (global) {
   "use strict";

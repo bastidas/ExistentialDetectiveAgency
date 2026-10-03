@@ -50,7 +50,7 @@ app.use(cookieParser());
 app.use(express.static(path.join(__dirname, "public")));
 app.get("/contracts/chat-http.contract.json", (req, res) => {
   res.type("application/json");
-  res.sendFile(path.join(__dirname, "contracts", "chat-http.contract.json"));
+  res.sendFile(path.join(__dirname, "api", "contracts", "chat-http.contract.json"));
 });
 
 function getOrCreateSessionId(req, res) {

@@ -12,7 +12,7 @@ const {
 } = require("./orchestration/chatMachine");
 const { classifyTimeAway } = require("./orchestration/timeAwayClassification");
 const apiConfig = require("./config");
-const { createChatStateSnapshotBody } = require("../../contracts/chatApiContract");
+const { createChatStateSnapshotBody } = require("../contracts/chatApiContract");
 const { getDebugStateLevel } = require("./logger");
 
 const DEV = /^(1|true|yes)$/i.test(process.env.DEV || "");
