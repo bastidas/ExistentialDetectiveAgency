@@ -36,8 +36,8 @@ In Azure Portal:
 | `OPENAI_API_KEY` | **Required.** Your OpenAI API key. | `sk-...` |
 | `OPENAI_MODEL` | Optional. Model name. | `gpt-4o` or `gpt-4o-mini` |
 | `OPENAI_SERVICE_TIER` | Optional. Use `flex` for cheaper/slower. | `flex` or leave empty |
-| `MAX_USER_EXCHANGES` | Optional. Max exchanges per session before closers. | `5` |
-| `MAX_DAILY_USAGE` | Optional. Max API calls per day (all users). | `100` |
+| `MAX_USER_EXCHANGES` | Optional. Max attaché + detective exchanges per session before the closure sequence. Default `40`. | `40` |
+| `MAX_DAILY_USAGE` | Optional. Max chat turns reaching the LLM per UTC day (all users, per instance; one turn can make several LLM calls). Over the cap, `/api/chat` returns 429. Default `300`. | `300` |
 | `DEBUG` | Optional. Enable debug endpoint and logs. | `true` or `1` |
 
 Save the configuration.
