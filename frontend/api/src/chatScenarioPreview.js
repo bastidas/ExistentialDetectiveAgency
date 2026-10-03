@@ -9,6 +9,7 @@ const { composeAgentPrompt } = require("./prompts/promptComposer");
 const { computeDetectiveCatalogInstructionIds } = require("./detective/detectivePromptPolicy");
 const { buildPhilosophersCustomPrompt } = require("./philosophers/philosophersCustomPrompt");
 const { buildComposedPromptPreviewPayload } = require("./agents/llmPayloadPreview");
+const { resolveMaxUserExchanges: resolveEnvMaxUserExchanges } = require("./usageLimits");
 const {
   createInitialAttacheSessionState,
   composeAttacheSystemPromptForSession,
@@ -234,7 +235,6 @@ function labTurnCountsFromPreset(p) {
   };
 }
 
-const DEFAULT_MAX_USER_EXCHANGES = 1_000_000;
 
 /**
  * Same cap as production `chatService` / `MAX_USER_EXCHANGES`. Preset may set `maxUserExchanges`
@@ -248,9 +248,7 @@ function resolveLabMaxUserExchanges(preset) {
   if (typeof p.maxUserExchanges === "number" && Number.isFinite(p.maxUserExchanges) && p.maxUserExchanges >= 0) {
     return Math.floor(p.maxUserExchanges);
   }
-  const env = Number(process.env.MAX_USER_EXCHANGES);
-  if (typeof env === "number" && Number.isFinite(env) && env >= 0) return Math.floor(env);
-  return DEFAULT_MAX_USER_EXCHANGES;
+  return resolveEnvMaxUserExchanges();
 }
 
 /**

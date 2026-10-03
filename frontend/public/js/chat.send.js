@@ -110,7 +110,7 @@
     return kind === "flex_busy"
       ? "Service busy (Flex). Please try again in a moment."
       : kind === "rate_limit"
-        ? "Too many requests. Please try again later."
+        ? (data.error || "Too many requests. Please try again later.")
         : kind === "bad_request"
           ? (data.error || "Invalid request. Check your message and try again.")
           : (data.error || "Something went wrong. Please try again.");

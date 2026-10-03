@@ -392,6 +392,9 @@ app.post("/api/chat-stream", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Chat server running at http://localhost:${PORT}`);
   console.log(`Prompts dir: ${shared.PROMPTS_DIR}`);
+  console.log(
+    `Limits: ${shared.MAX_USER_EXCHANGES} exchanges/session, ${shared.MAX_DAILY_USAGE} LLM turns/day`
+  );
   if (shared.OFFLINE) {
     console.log("OFFLINE=1: AI backend disabled, returning generic replies.");
   } else {

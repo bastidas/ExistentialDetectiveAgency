@@ -434,6 +434,18 @@ function detectiveClosurePhaseFromExchangeSum(sumBefore, maxEx) {
   return null;
 }
 
+/**
+ * True once the ultimate (final) reply has been sent: further messages get HTTP 204 and never reach the LLM.
+ *
+ * @param {string} sessionId
+ * @param {number} [maxUserExchanges]
+ * @returns {boolean}
+ */
+function isSessionPastFinalExchange(sessionId, maxUserExchanges) {
+  const maxEx = resolveMaxUserExchanges({ maxUserExchanges });
+  return getAttacheExchangeCount(sessionId) + getDetectiveTurnCount(sessionId) >= maxEx + 1;
+}
+
 async function composeChatResponse(sessionId, message, options = {}) {
   /** @type {unknown[]} */
   const llmRefusalMetas = [];
@@ -1008,6 +1020,7 @@ module.exports = {
   syncLabDetectiveOrchestrationFromPreset,
   simulateAttacheLabStep,
   simulateAttacheLabAdvanceQuestionIndexWithinPhase,
+  isSessionPastFinalExchange,
   getDetectiveTurnCountForSession,
   getAttacheExchangeCountForSession,
 };

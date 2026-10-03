@@ -5,6 +5,7 @@ const path = require("path");
 const crypto = require("crypto");
 
 const chatService = require("./chatService");
+const usageLimits = require("./usageLimits");
 const {
   getInitialChatEnvelope,
   getChatEnvelopeForSession,
@@ -12,7 +13,10 @@ const {
 } = require("./orchestration/chatMachine");
 const { classifyTimeAway } = require("./orchestration/timeAwayClassification");
 const apiConfig = require("./config");
-const { createChatStateSnapshotBody } = require("../contracts/chatApiContract");
+const {
+  createChatStateSnapshotBody,
+  buildChatPostErrorBody,
+} = require("../contracts/chatApiContract");
 const { getDebugStateLevel } = require("./logger");
 
 const DEV = /^(1|true|yes)$/i.test(process.env.DEV || "");
@@ -25,8 +29,8 @@ const DEBUG_STATE = DEBUG_STATE_LEVEL >= 1;
 
 const MODEL = process.env.OPENAI_MODEL || "gpt-4o";
 const SERVICE_TIER = process.env.OPENAI_SERVICE_TIER || "";
-const MAX_USER_EXCHANGES = Number(process.env.MAX_USER_EXCHANGES || 1_000_000);
-const MAX_DAILY_USAGE = Number(process.env.MAX_DAILY_USAGE || 1_000_000);
+const MAX_USER_EXCHANGES = usageLimits.resolveMaxUserExchanges();
+const MAX_DAILY_USAGE = usageLimits.resolveMaxDailyUsage();
 
 const ENABLE_DURABLE_STORAGE = /^(1|true|yes)$/i.test(process.env.ENABLE_DURABLE_STORAGE || "");
 const DOSSIER_TABLE_NAME = process.env.DOSSIER_TABLE_NAME || null;
@@ -45,38 +49,6 @@ const PROMPTS_DIR = path.resolve(__dirname, "..", "prompts");
 const userExchangeCounts = new Map();
 /** @type {Map<string, number>} sessionId -> last activity epoch ms (for time-away classification) */
 const lastActivityAtBySession = new Map();
-
-function createFileDailyUsageStore(dataDir) {
-  const filePath = path.join(dataDir, "daily_usage.json");
-  return {
-    readDailyUsage() {
-      try {
-        const raw = fs.readFileSync(filePath, "utf8");
-        const j = JSON.parse(raw);
-        return typeof j.count === "number" ? j.count : 0;
-      } catch (_) {
-        return 0;
-      }
-    },
-    incrementDailyUsage() {
-      const n = this.readDailyUsage() + 1;
-      fs.mkdirSync(dataDir, { recursive: true });
-      fs.writeFileSync(filePath, JSON.stringify({ count: n }));
-    },
-  };
-}
-
-function createMemoryDailyUsageStore() {
-  let count = 0;
-  return {
-    readDailyUsage() {
-      return count;
-    },
-    incrementDailyUsage() {
-      count += 1;
-    },
-  };
-}
 
 function sessionCookieHeader(sessionId) {
   const maxAge = 7 * 24 * 60 * 60;
@@ -169,6 +141,24 @@ async function getChatStateForSession(sessionId) {
 }
 
 async function handleChatRequest(sessionId, trimmed, options) {
+  const llmEnabled = !apiConfig.OFFLINE && !!(options && options.openaiClient);
+  const sessionClosed = chatService.isSessionPastFinalExchange(sessionId, MAX_USER_EXCHANGES);
+  if (llmEnabled && !sessionClosed) {
+    const reservation = usageLimits.reserveDailyTurn(
+      options && options.dailyUsageStore,
+      MAX_DAILY_USAGE
+    );
+    if (!reservation.allowed) {
+      return {
+        status: 429,
+        body: buildChatPostErrorBody({
+          error: usageLimits.DAILY_LIMIT_MESSAGE,
+          errorKind: "rate_limit",
+        }),
+      };
+    }
+  }
+
   const prev = userExchangeCounts.get(sessionId) ?? 0;
   const exchangeCount = prev + 1;
   userExchangeCounts.set(sessionId, exchangeCount);
@@ -229,8 +219,8 @@ module.exports = {
   TIME_AWAY_LONG_MS,
   PROMPTS_DIR,
   userExchangeCounts,
-  createFileDailyUsageStore,
-  createMemoryDailyUsageStore,
+  createFileDailyUsageStore: usageLimits.createFileDailyUsageStore,
+  createMemoryDailyUsageStore: usageLimits.createMemoryDailyUsageStore,
   sessionCookieHeader,
   getOrCreateSessionId,
   getMsSinceLastVisitForSession,
