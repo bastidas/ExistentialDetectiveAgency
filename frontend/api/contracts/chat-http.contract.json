@@ -16,8 +16,9 @@
       },
       "responses": {
         "200": { "$ref": "#/definitions/ChatPostSuccessBody" },
-        "204": { "description": "No assistant content (optional policy)" },
-        "400": { "$ref": "#/definitions/ChatPostErrorBody" }
+        "204": { "description": "No assistant content: the session is past its final (closure) reply" },
+        "400": { "$ref": "#/definitions/ChatPostErrorBody" },
+        "429": { "description": "Daily usage cap reached; body has errorKind \"rate_limit\"", "$ref": "#/definitions/ChatPostErrorBody" }
       }
     },
     "GET /api/chat-state": {

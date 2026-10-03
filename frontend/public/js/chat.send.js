@@ -117,29 +117,23 @@
   }
 
   /**
-   * Prefer camelCase lumen/umbra wire keys; fall back to legacy leftPhilosopher* / rightPhilosopher* for one release.
    * @param {object} data
-   * @param {string} primary
-   * @param {string} [legacy]
+   * @param {string} key
+   * @returns {string}
    */
-  function pickPhilosopherStr(data, primary, legacy) {
-    if (!data || typeof data !== "object") return "";
-    if (data[primary] != null) return String(data[primary]);
-    if (legacy && data[legacy] != null) return String(data[legacy]);
-    return "";
+  function pickPhilosopherStr(data, key) {
+    if (!data || typeof data !== "object" || data[key] == null) return "";
+    return String(data[key]);
   }
 
   /**
    * @param {object} data
-   * @param {string} primary
-   * @param {string} [legacy]
+   * @param {string} key
    * @returns {string[]}
    */
-  function pickPhilosopherNotes(data, primary, legacy) {
-    if (!data || typeof data !== "object") return [];
-    if (Array.isArray(data[primary])) return data[primary];
-    if (legacy && Array.isArray(data[legacy])) return data[legacy];
-    return [];
+  function pickPhilosopherNotes(data, key) {
+    if (!data || typeof data !== "object" || !Array.isArray(data[key])) return [];
+    return data[key];
   }
 
   /** True if any philosopher response/notes field is present. */
@@ -172,7 +166,7 @@
   }
 
   /**
-   * Normalize API philosopher fields to lumen* / umbra* (with legacy left/right aliases).
+   * Normalize API philosopher fields to lumen* / umbra*.
    * Missing keys become "" or [].
    */
   function normalizePhilosopherResponse(data) {
@@ -187,12 +181,12 @@
       };
     }
     return {
-      lumenUserResponse: pickPhilosopherStr(data, "lumenUserResponse", "leftPhilosopherUserResponse"),
-      umbraUserResponse: pickPhilosopherStr(data, "umbraUserResponse", "rightPhilosopherUserResponse"),
-      lumenOtherResponse: pickPhilosopherStr(data, "lumenOtherResponse", "leftPhilosopherOtherResponse"),
-      umbraOtherResponse: pickPhilosopherStr(data, "umbraOtherResponse", "rightPhilosopherOtherResponse"),
-      lumenNotes: pickPhilosopherNotes(data, "lumenNotes", "leftPhilosopherNotes"),
-      umbraNotes: pickPhilosopherNotes(data, "umbraNotes", "rightPhilosopherNotes"),
+      lumenUserResponse: pickPhilosopherStr(data, "lumenUserResponse"),
+      umbraUserResponse: pickPhilosopherStr(data, "umbraUserResponse"),
+      lumenOtherResponse: pickPhilosopherStr(data, "lumenOtherResponse"),
+      umbraOtherResponse: pickPhilosopherStr(data, "umbraOtherResponse"),
+      lumenNotes: pickPhilosopherNotes(data, "lumenNotes"),
+      umbraNotes: pickPhilosopherNotes(data, "umbraNotes"),
     };
   }
 
@@ -248,22 +242,6 @@
       );
     }
     return Promise.all(promises);
-  }
-
-  function handlePhilosopherDialogResponse(dialogData, requestLeft, requestRight) {
-    uiLog.debug(
-      "UI",
-      "Philosopher dialog response content flags",
-      hasPhilosopherContentForSide(dialogData, "left"),
-      hasPhilosopherContentForSide(dialogData, "right")
-    );
-    var payload = toPhilosopherPayload(dialogData);
-    applyPhilosopherResponse(payload, {
-      pushHistoryLeft: requestLeft && hasPhilosopherContentForSide(dialogData, "left"),
-      pushHistoryRight: requestRight && hasPhilosopherContentForSide(dialogData, "right"),
-      appendLeft: requestLeft,
-      appendRight: requestRight,
-    });
   }
 
   function handlePhilosopherContent(data) {
@@ -330,19 +308,18 @@
   /**
    * Apply API callouts to the last user message content.
    * Only mutates the DOM by adding new spans and rough notation; does not replace or reflow existing content.
-   * @param data - API response with lumenCallouts / umbraCallouts (legacy: leftPhilosopherCallouts / rightPhilosopherCallouts or snake_case)
+   * @param data - API response with lumenCallouts / umbraCallouts (or snake_case lumen_philosopher_callouts / umbra_philosopher_callouts)
    * @param lastSentText - text of the last sent user message (used to verify we're annotating the right node)
    */
   function applyCalloutsToLastUserMessage(data, lastSentText) {
     if (!data || typeof data !== "object") return;
-    function pickCallouts(primary, legacy, snake) {
+    function pickCallouts(primary, snake) {
       if (Array.isArray(data[primary])) return data[primary];
-      if (legacy && Array.isArray(data[legacy])) return data[legacy];
       if (snake && Array.isArray(data[snake])) return data[snake];
       return [];
     }
-    var leftCallouts = pickCallouts("lumenCallouts", "leftPhilosopherCallouts", "lumen_philosopher_callouts");
-    var rightCallouts = pickCallouts("umbraCallouts", "rightPhilosopherCallouts", "umbra_philosopher_callouts");
+    var leftCallouts = pickCallouts("lumenCallouts", "lumen_philosopher_callouts");
+    var rightCallouts = pickCallouts("umbraCallouts", "umbra_philosopher_callouts");
     if (!leftCallouts.length && !rightCallouts.length) return;
     if (!lastSentText || typeof lastSentText !== "string" || !lastSentText.trim()) return;
     if (typeof EDAAnnotation === "undefined" || !EDAAnnotation.addInPlaceAnnotationSpans) return;

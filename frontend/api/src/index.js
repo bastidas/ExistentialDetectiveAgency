@@ -112,16 +112,3 @@ app.http("chat", {
 		};
 	},
 });
-
-app.http("philosopherDialog", {
-	route: "philosopher-dialog",
-	methods: ["POST"],
-	authLevel: "anonymous",
-	handler: async () => {
-		// Endpoint kept for backward compatibility; frontend no longer uses it.
-		return {
-			status: 410,
-			jsonBody: { error: "philosopher-dialog endpoint has been deprecated." },
-		};
-	},
-});
