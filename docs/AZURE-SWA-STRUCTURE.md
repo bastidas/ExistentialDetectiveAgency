@@ -18,12 +18,10 @@ ExistentialDetectiveAgency/
 │   │   ├── host.json
 │   │   ├── package.json
 │   │   ├── src/
-│   │   │   ├── index.js            # HTTP triggers: /api/debug, /api/chat
+│   │   │   ├── index.js            # HTTP triggers: /api/config, /api/chat-state, /api/chat
 │   │   │   └── shared.js
-│   │   └── prompts/
-│   │       ├── prompt.md
-│   │       ├── closers.md
-│   │       └── easter_egg_prompt.md
+│   │   ├── contracts/              # HTTP contract (must live inside api/)
+│   │   └── prompts/                # per-agent folders: attache/, detective/, lumen/, umbra/
 │   ├── server.js                   # Local Express dev (not deployed)
 │   ├── package.json
 │   └── DEPLOY-AZURE-SWA.md
@@ -42,7 +40,7 @@ ExistentialDetectiveAgency/
 
 - **`frontend/public/staticwebapp.config.json`** — Sets `platform.apiRuntime: "node:20"` and SPA fallback (rewrite to `/index.html`, exclude `/api/*` and static assets).
 - **`frontend/api/host.json`** — Functions host config; uses extension bundle 4.x.
-- **`frontend/api/src/index.js`** — Defines `debug` (GET) and `chat` (POST) HTTP triggers; uses `frontend/api/prompts/` for prompt/closers markdown.
+- **`frontend/api/src/index.js`** — Defines `config` (GET), `chat-state` (GET) and `chat` (POST) HTTP triggers; reads agent prompts from `frontend/api/prompts/`.
 
 ## Checklist before first deploy
 

@@ -62,7 +62,7 @@ Save the configuration.
 
 - **Durable session / dossier (Azure Table Storage)**: When `AZURE_STORAGE_CONNECTION_STRING` and `DOSSIER_TABLE_NAME` are set, session runtime (detective state, baseline runtime, **thread events** for restore, conversation summaries JSON), per-session usage, and daily usage are stored under partitions `EDA_session`, `EDA_usageSession`, `EDA_usageDaily`. The **`EDA_dossier` row is written only after a dossier analysis run** (baseline handoff or periodic detective-phase update), not on every chat message.
 - **Without table storage**: The API still keeps session state and daily usage **in memory** (and the Express dev server writes daily usage to a local file). Cold starts or multiple instances can reset counts.
-- **Prompt files**: All prompt/closer markdown lives in **`frontend/api/prompts/`** (`prompt.md`, `closers.md`, `easter_egg_prompt.md`). Both the Express server and the Azure API read from this folder. Edit them there.
+- **Prompt files**: All agent prompt files live in **`frontend/api/prompts/`** (one folder per agent: `attache/`, `detective/`, `lumen/`, `umbra/`). Both the Express server and the Azure API read from this folder. Edit them there.
 - **Local dev**: Keep using `npm run dev` in `frontend` for the Express server. The Azure Functions in `api/` mirror the same behavior for production.
 
 ## 5. GitHub secret

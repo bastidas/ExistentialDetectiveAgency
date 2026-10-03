@@ -11,7 +11,7 @@ Backend and API behavior are controlled by optional env vars. See `frontend/.env
 | Env var | Purpose |
 |--------|---------|
 | `DEV=1` | Enables dev-only UI and advanced tools (philosopher panels, note debug boxes, etc.). Does **not** disable the AI or skip the API key. |
-| `OFFLINE=1` | Disables LLM calls: no API key required, chat and philosopher-dialog return dummy responses. |
+| `OFFLINE=1` | Disables LLM calls: no API key required, chat returns mock replies built from the prompt registry. |
 | `DEBUG_LOGS=1` | Verbose logging: enables `/api/debug`, server startup logs, per-request logs (e.g. full message sent to the LLM), and debug info in chat responses. |
 
 These are independent: e.g. `DEV=1` with real LLM shows dev UI; `OFFLINE=1` without `DEV` returns dummies with normal UI.
@@ -51,35 +51,19 @@ Full layout, partition keys, and `/api/chat-state` fields are documented in **[`
 
 Path wiring for these prompt files is configured in `frontend/api/src/config.js`.
 
-| File | Purpose |
-|------|--------|
-| `prompt.md` | Main agent system prompt |
-| `closers.md` | Conversation closing lines |
-| `easter_egg_prompt.md` | Easter egg prompt |
-| `left_philosopher_user_res.md` | Left philosopher persona and instructions when addressing the user (produces `left_philosopher_user_response` and `left_philosopher_notes`) |
-| `left_philosopher_other_res.md` | Left philosopher persona and instructions when responding to the right philosopher (produces `left_philosopher_other_response`) |
-| `right_philosopher_user_res.md` | Right philosopher persona and instructions when addressing the user (produces `right_philosopher_user_response` and `right_philosopher_notes`) |
-| `right_philosopher_other_res.md` | Right philosopher persona and instructions when responding to the left philosopher (produces `right_philosopher_other_response`) |
-| `phil_annotations.json` | Rules for notes/annotations (same format as `public/data/phil_annotations.json`); used by the API when deployed so annotations load without `public/data` |
+Each agent folder holds a persona (`*_persona.md`), instructions (`*_instructions.md`), a turn output schema (`*.schema.json`) and, for detective and attaché, a `prompt_catalog.json` of per-turn instruction blocks. `backend_phil_annotations.json` holds the annotation rules the API loads (same format as `public/data/phil_annotations.json`). `npm test` fails if a persona or instructions file is missing, a stub, or still contains placeholder/mock text.
+
+**Removed in v2:** `prompt.md`, `closers.md` (replaced by the closure sequence driven by `MAX_USER_EXCHANGES`), `easter_egg_prompt.md` (not implemented; the HTTP 204 after the final reply is the only post-closure behavior), and the `left_philosopher_*` / `right_philosopher_*` prompt files (replaced by `lumen/` and `umbra/`).
 
 Edit these files to change what the agent and philosophers are told to do. The backend (Express and Azure API) reads from this directory (or from `PROMPTS_DIR` if set).
 
 ---
 
-## 1b. Philosopher–philosopher dialog (when needed)
+## 1b. Philosopher–philosopher responses
 
-**What it is:** After each main chat response, the frontend may send an optional second request (`POST /api/philosopher-dialog`) so the left and right philosophers can respond to each other’s notes. This request uses a different context (user+detective conversation plus all philosopher outputs so far) and a focused task: **other_response only** (no user-facing response, no callouts).
+Lumen and Umbra answer in the same turn as the detective: `POST /api/chat` makes three parallel LLM calls (detective, Lumen, Umbra) and returns their output together (`lumenUserResponse`, `lumenOtherResponse`, `lumenNotes`, `lumenCallouts`, and the `umbra*` equivalents). `otherResponse` is a philosopher addressing the other philosopher.
 
-**When it runs:** “When needed” is controlled by **two separate probabilities**, one for each side. Each time the main chat returns, the frontend waits a short delay then rolls the dice: should the left philosopher respond to the right? Should the right respond to the left? Left and right have different rates so you can make one side chattier than the other.
-
-**Where to change the probabilities:**
-
-| Variable | File | Meaning |
-|----------|------|---------|
-| `LEFT_PHILOSOPHER_INTERACTION_RATE` | `frontend/public/js/chatSend.js` | Probability (0–1) that the left philosopher will respond to the right in the follow-up dialog. Default 0.4. |
-| `RIGHT_PHILOSOPHER_INTERACTION_RATE` | `frontend/public/js/chatSend.js` | Probability (0–1) that the right philosopher will respond to the left in the follow-up dialog. Default 0.6. |
-
-Adjust these to make philosopher–philosopher exchanges more or less frequent, or to bias one side.
+The v1 follow-up request (`POST /api/philosopher-dialog`) and its per-side probability settings (`LEFT_PHILOSOPHER_INTERACTION_RATE`, `RIGHT_PHILOSOPHER_INTERACTION_RATE`) were removed in v2.
 
 ### Inter-dialog labels ("To Umbra" / "To Lumen")
 
