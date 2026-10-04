@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Existential Detective Agency</title>
+  <link rel="icon" type="image/webp" sizes="32x32" href="assets/imgs/other/eye32.webp">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cutive+Mono&display=swap" rel="stylesheet">
+  <!-- Philosopher note fonts loaded from philosopherDisplay.config.js (PHILOSOPHER_FONTS) when script runs -->
+  <link rel="stylesheet" href="styles/theme.css">
+  <link rel="stylesheet" href="styles/landing.css">
+  <link rel="stylesheet" href="styles/poem.css">
+  <link rel="stylesheet" href="styles/site-chrome.css">
+  <link rel="stylesheet" href="styles/style.css">
+  <link rel="stylesheet" href="styles/left-philosopher.css">
+  <link rel="stylesheet" href="styles/right-philosopher.css">
+  <link rel="stylesheet" href="styles/note-pages.css">
+  <link rel="stylesheet" href="styles/chat-paper.css">
+<body data-intro-state="splash">
+  <div id="eda-app-shell">
+    <section id="route-intro" class="route route--active" data-route="intro" aria-label="Agency landing">
+      <div class="app-container">
+        <video class="background-video" autoplay loop muted playsinline>
+          <source src="assets/vids/waning_2160p30.mp4" type="video/mp4">
+        </video>
+        <div class="video-overlay" aria-hidden="true"></div>
+        <div class="menu-bar cyan-menu-bar visible">
+          <!-- Global small header logo (always present, but behavior differs by state) -->
+          <a
+            class="eda-logo-small small-glitch-title glitch-effect"
+            href="/#"
+            data-route-link
+            data-eda-logo
+            data-text="Existential Detective Agency"
+            aria-label="Go to menu"
+          >
+            <span>Existential Detective Agency</span>
+          </a>
+          <!-- Splash-only hero title overlayed within the same bar -->
+          <h1 class="menu-title intro-hero-glitch-title glitch-effect" data-text="Existential Detective Agency">
+            <span>Existential Detective Agency</span>
+          </h1>
+        </div>
+        <main class="content">
+          <section class="landing-gallery" aria-label="Select an artifact">
+            <p class="landing-tagline"></p>
+            <div class="landing-grid">
+              <a href="/q" class="landing-card landing-card--glass" data-route-link aria-label="Enter the querent chat">
+                <div class="landing-image-wrap">
+                  <span class="glass-blur" aria-hidden="true"></span>
+                  <img src="assets/imgs/other/glass.webp" alt="Vintage magnifying glass" loading="lazy">
+                </div>
+                <!-- <p class="landing-card-caption"></p>
+              </a>
+              <a href="#/measure" class="landing-card landing-card--measure" aria-label="Measurement ritual coming soon">
+                <div class="landing-image-wrap">
+                  <img src="assets/imgs/other/measure.webp" alt="Tape measure" loading="lazy">
+                </div>
+                <p class="landing-card-caption"></p>
+              </a> -->
+              <a href="/p" class="landing-card landing-card--letters" data-route-link aria-label="Enter the poem experience">
+                <div class="landing-image-wrap">
+                  <img src="assets/imgs/other/letters.webp" alt="Stack of letters" loading="lazy">
+                </div>
+                <p class="landing-card-caption"></p>
+              </a>
+            </div>
+          </section>
+        </main>
+        <footer class="site-footer" role="contentinfo">
+          <a href="#" class="footer-link" data-poem-about>about</a>
+        </footer>
+      </div>
+    </section>
+
+    <section id="route-chat" class="route route--hidden" data-route="chat" aria-label="Querent chat">
+      <div class="menu-bar cyan-menu-bar visible">
+        <a
+          class="eda-logo-small small-glitch-title glitch-effect"
+          href="/#"
+          data-route-link
+          data-eda-logo
+          data-text="Existential Detective Agency"
+          aria-label="Go to menu"
+        >
+          <span>Existential Detective Agency</span>
+        </a>
+      </div>
+      <div class="app-layout">
+        <aside id="left-philosopher" class="philosopher-notes left-philosopher">
+          <h2 class="philosopher-notes-title">Left philosopher</h2>
+          <div id="left-philosopher-content" class="philosopher-notes-content"></div>
+        </aside>
+        <div id="notes-layer" class="notes-layer"></div>
+        <main>
+          <form id="form" class="form form--hidden">
+            <div class="messages-wrap">
+              <div id="messages" class="messages">
+                <div class="chat-editor-wrapper">
+                  <div id="input-wrap" data-chat-input="true" class="chat-editor typewriter" contenteditable="true" tabindex="0" data-placeholder="Type here…" aria-label="Message"></div>
+                </div>
+              </div>
+            </div>
+            <button type="submit" id="submit" class="visually-hidden" aria-label="Send">Send</button>
+          </form>
+          <p id="status" class="status"></p>
+        </main>
+        <aside id="right-philosopher" class="philosopher-notes right-philosopher">
+          <h2 class="philosopher-notes-title">Right philosopher</h2>
+          <div id="right-philosopher-content" class="philosopher-notes-content"></div>
+        </aside>
+      </div>
+      <div id="mobile-shared-notes" class="mobile-shared-notes" aria-live="polite">
+        <div id="mobile-shared-notes-content" class="philosopher-notes-content"></div>
+      </div>
+    </section>
+
+    <section id="route-poem" class="route route--hidden" data-route="poem" aria-label="Poem experience">
+      <div class="menu-bar cyan-menu-bar visible">
+        <a
+          class="eda-logo-small small-glitch-title glitch-effect"
+          href="/#"
+          data-route-link
+          data-eda-logo
+          data-text="Existential Detective Agency"
+          aria-label="Go to menu"
+        >
+          <span>Existential Detective Agency</span>
+        </a>
+      </div>
+      <div class="app-container">
+        <video class="background-video" muted loop playsinline preload="none" data-video-src="assets/vids/waning_2160p30.mp4"></video>
+        <div class="video-overlay" aria-hidden="true"></div>
+        <main class="content">
+            <div class="poem-container" data-poem-root>
+            <h2 class="poem-heading"> </h2>
+            <div class="sentence-display" id="poem-sentence-display">
+              <p class="sentence" id="poem-current-line">The poem will begin once initialized.</p>
+            </div>
+            <div class="poem-controls">
+              <button type="button" class="next-button poem-dev-only" data-poem-skip>Skip forward</button>
+              <button type="button" class="next-button poem-dev-only" data-poem-effects-button>Effect library</button>
+            </div>
+          </div>
+        </main>
+        <footer class="site-footer" data-poem-footer>
+          <a href="#" class="footer-link" data-poem-about>about</a>
+          <span class="footer-separator">•</span>
+          <a href="#" class="footer-link poem-dev-only" data-poem-effects-button>effect explorer</a>
+        </footer>
+      </div>
+      <div class="modal-overlay" data-poem-effect-modal hidden>
+        <div class="modal-content effect-picker-modal" role="dialog" aria-modal="true" aria-labelledby="poem-effects-title">
+          <button class="modal-close" type="button" data-poem-effect-close>&times;</button>
+          <h2 id="poem-effects-title">Effect Library</h2>
+          <div class="effect-summary">
+            <p><span data-poem-effect-count>0</span> of <span data-poem-effect-total>0</span> effects included</p>
+            <div class="bulk-actions">
+              <button class="bulk-btn" type="button" data-effect-select-all>Select All</button>
+              <button class="bulk-btn" type="button" data-effect-deselect-all">Deselect All</button>
+              <button class="bulk-btn" type="button" data-effect-reset>Reset to Defaults</button>
+            </div>
+          </div>
+          <div class="effect-categories" data-poem-effect-categories></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="route-privacy" class="route route--hidden eda-legal-route" data-route="privacy" aria-label="Privacy notice">
+      <div class="menu-bar cyan-menu-bar visible">
+        <a
+          class="eda-logo-small small-glitch-title glitch-effect"
+          href="/#"
+          data-route-link
+          data-eda-logo
+          data-text="Existential Detective Agency"
+          aria-label="Go to menu"
+        >
+          <span>Existential Detective Agency</span>
+        </a>
+      </div>
+      <div class="eda-legal-route-wrap">
+        <div class="modal-content eda-legal-panel-page">
+          <h2 id="privacy-notice-title">Privacy notice</h2>
+          <figure class="about-art">
+            <img src="assets/imgs/other/black_cat_left_gaze.webp" alt="Black cat beside a closed dossier" loading="lazy">
+            <figcaption>the archive insists on a witness.</figcaption>
+          </figure>
+          <div class="modal-body">
+            <div id="privacy-notice-md-root" aria-live="polite"></div>
+          </div>
+          <div class="modal-credits">
+            <a href="/#" class="footer-link" data-route-link>Back to the Agency</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="modal-overlay" data-poem-about-modal hidden>
+      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="poem-about-title">
+        <button class="modal-close" type="button" data-poem-about-close>&times;</button>
+        <h2 id="poem-about-title">About</h2>
+        <div class="modal-body eda-prose eda-prose--center">
+          <figure class="about-art">
+            <img src="assets/imgs/other/black_cat_left_gaze.webp" alt="Black cat gazing left in a dim detective office" loading="lazy">
+            <figcaption>resident familiar, on permanent stakeout.</figcaption>
+          </figure>
+          <p class="about-copy">
+            The Existential Detective Agency watches the thresholds where intuition, poetry, and cosmic paperwork intersect. The cat keeps score, the letters whisper, and every visitor becomes a co-conspirator.
+          </p>
+          <p class="about-copy">
+            To continue your investigation, we store a technical identifier (often in a cookie) that links your browser to your saved dialogue. It is not a verdict on who you are—only a way to find the file. If you block or delete cookies, you may appear as a stranger: same office, different dossier. For the full picture—what we keep, why, and for how long—see our <a href="/privacy" data-route-link>privacy notice</a>.
+          </p>
+        </div>
+        <div class="modal-credits">
+          <p class="credit-link">
+            <span><a href="https://svs.gsfc.nasa.gov/4655" target="_blank" rel="noreferrer noopener">Filed in the archives under "stray miracles".</a></span>
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" data-missing-route-modal hidden>
+    <div class="modal-content missing-route-modal" role="dialog" aria-modal="true" aria-labelledby="missing-route-title">
+      <button class="modal-close" type="button" data-missing-route-close aria-label="Close missing page message">&times;</button>
+      <h2 id="missing-route-title">Signal Misplaced</h2>
+      <div class="modal-body">
+        <figure class="about-art">
+          <img src="assets/imgs/other/black_cat_left_gaze.webp" alt="Black cat waiting by an unopened file drawer" loading="lazy">
+          <figcaption>the familiar swears that drawer was here a moment ago.</figcaption>
+        </figure>
+        <p class="about-copy">
+          We followed your request into a corridor the Agency has not finished building.
+          The page you expected slipped away like a wave scraping sand for eternity forming the sound of a deep endless ocean. 
+          The corridors endure. We walk the shelves, reshuffle meanings, read futures, collect thoughts, and catch the occasional mirror that reveals another creature of information.
+          While the archivists re-threads reality, return to the known rooms or keep exploring if you enjoy architectural ghosts.
+        </p>
+      </div>
+      <div class="modal-credits">
+        <a href="/" class="footer-link" data-route-link data-missing-route-home>Back to the Agency</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Load order: see js/README.md. Do not reorder without updating that file. -->
+  <script src="js/shared/utils.js"></script>
+  <script src="js/shared/typingConfig.js"></script>
+  <script src="js/shared/viewportBreakpoints.js"></script>
+  <script src="https://unpkg.com/rough-notation@0.5.1/lib/rough-notation.iife.js"></script>
+  <script src="js/notes/formatConfig.js"></script>
+  <script src="js/notes/layout.js"></script>
+  <script src="js/notes/element.js"></script>
+  <script src="js/notes/capacity.js"></script>
+  <script src="js/chat/config.js"></script>
+  <script src="js/notes/handwriter.js"></script>
+  <script src="js/notes/pages.js"></script>
+  <script src="js/notes/randomMarginItems.js"></script>
+  <script src="js/notes/queueManager.js"></script>
+  <script src="js/notes/philosopherRules.js"></script>
+  <script src="js/philosophers/displayConfig.js"></script>
+  <script src="js/philosophers/config.js"></script>
+  <script src="js/philosophers/markup.js"></script>
+  <script src="js/chat/messageUI.js"></script>
+  <script src="js/chat/closingStamps.js"></script>
+  <script src="js/chat/input.js"></script>
+  <script src="js/chat/persist.js"></script>
+  <script src="js/shared/logger.js"></script>
+  <script src="js/chat/send.js"></script>
+  <script src="js/notes/viewport.js"></script>
+  <script src="app.js"></script>
+  <script src="js/chat/route.js"></script>
+  <script src="js/poem/poem.js"></script>
+  <script src="js/site/privacyNotice.js"></script>
+  <script src="js/router.js"></script>
+</body>
+</html>

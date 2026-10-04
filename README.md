@@ -1,31 +1,35 @@
 # Existential Detective Agency
 
-Unified landing, querent chat, and poem experiences served from `frontend/public` and powered by a lightweight Express API layer.
+The Existential Detective Agency is a place for self inquiry, ontological discovery, poetry, philosophy, and of course existential questioning.
+
+High-level concept, philosophy, and how prompt state is meant to be split: [`docs/concept.md`](docs/concept.md).
+
 
 ## Live site
 - https://www.existentialdetectiveagency.com
 
 ## Project layout
-- `frontend/` – primary workspace. Contains the Express server, Azure Functions proxies, and the static document (landing/chat/poem) under `public/`.
-- `frontend/public/assets` – canonical home for all imagery/video used by every route.
-- `frontend/public/js` – router, chat bootstrap, and poem runtime (vanilla JS, no bundler).
-- `yang/` – archived Vite/React prototype kept for reference only; it is no longer part of the deploy/development path.
+Unified landing, querent chat, and poem experiences served from `web/` and powered by an Azure Functions API in `api/`. Local development uses Express (`server-dev.js`).
+
+- `web/` — static site (SWA `app_location`): landing, chat, poem, assets, styles, and `web/lab/` tools.
+- `api/` — Azure Functions + orchestration, agents, prompts (SWA `api_location`).
+- `server-dev.js` — local Express server only (serves `web/`, requires `api/`).
+- `archive/` — legacy prompts, leftover images, old Vite prototype.
+- See `AGENTS.md` for the full map.
 
 ## Local development
-1. `cd frontend`
-2. `npm install`
+1. `npm install` (repo root) and `npm install --prefix api`
+2. Copy `.env.example` to `.env` and set `OPENAI_API_KEY` (or `OFFLINE=1`)
 3. `npm run dev`
 
-`npm run dev` wraps `server.js` with `nodemon`, so edits to HTML/CSS/JS or prompt files trigger an automatic reload while serving `frontend/public`. Use `npm start` for a production-like run without live reload.
-
-### Environment variables
-- Create `frontend/.env` with `OPENAI_API_KEY` to enable live responses. Set `MODE=dev` if you want deterministic stub replies without calling OpenAI.
+`npm run dev` wraps `server-dev.js` with `nodemon`. Use `npm start` without live reload. `npm test` runs the API test suite.
 
 ### API surface
-- `GET /api/debug` – diagnostics when `DEBUG=true`.
-- `POST /api/chat` – main querent endpoint.
-- `POST /api/philosopher-dialog` – side-channel lore.
+- `GET /api/debug` — diagnostics when `DEBUG_LOGS=1`.
+- `POST /api/chat` — main querent endpoint.
+- `GET /api/chat-state` — restore session snapshot.
 
 ## Deployment notes
-- Azure Static Web Apps consumes `frontend/public/staticwebapp.config.json`, which already rewrites unknown paths to `/index.html` while excluding `/api/*` and `/assets/*`. No extra configuration is needed for the History API router.
-- The `frontend` server continues to serve `public/index.html` for any GET without an extension, so deep links like `/q` and `/p` work locally and in production.
+- Azure Static Web Apps uses `web/` as `app_location` and `api/` as `api_location`.
+- `web/staticwebapp.config.json` rewrites unknown paths to `/index.html` while excluding `/api/*` and static assets.
+- Deep links like `/q` and `/p` work locally (Express SPA fallback) and in production (SWA navigation fallback).

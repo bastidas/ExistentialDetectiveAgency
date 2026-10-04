@@ -1,0 +1,28 @@
+---
+description: JavaScript standards for the api package
+globs: api/**/*.js
+alwaysApply: false
+---
+
+# api — JavaScript
+
+- Start modules with `"use strict";` and match existing **CommonJS** style (`require` / `module.exports`).
+- Prefer `const` / `let`; avoid `var`. Keep functions focused; colocate agent-specific code under `api/agents/attache/`, `api/agents/detective/`, or `api/agents/philosophers/`.
+- Use **async/await** with explicit error handling. Do not empty `catch` blocks; log or rethrow with context.
+- Document non-obvious contracts with **JSDoc** (`@typedef`, `@param`, `@returns`) especially for public exports and machine `context`.
+- Before adding behavior, **read nearby files** and mirror naming, error patterns, and config access (e.g. `config.js`).
+
+```javascript
+// ❌ BAD
+try {
+  await runTurn();
+} catch (e) {}
+
+// ✅ GOOD
+try {
+  await runTurn();
+} catch (err) {
+  console.error("runTurn failed", { err });
+  throw err;
+}
+```
