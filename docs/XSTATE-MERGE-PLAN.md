@@ -1,445 +1,420 @@
-# xstate branch: assessment and merge plan
+# xstate and frozen packet envelope: re-evaluation and integration plan
 
-Status: proposal. Written 2026-10-02 against `origin/xstate` @ `6fd5098` and `origin/main` @ `ee4e004`.
+Status: proposal, revision 2. Supersedes the 2026-10-02 plan, which assessed `xstate` on its own and assumed `frontend/` layout work. Written 2026-10-04 against:
 
-This document records what the `xstate` branch does, every problem found while reviewing it, the recommended remediation for each, and a detailed implementation plan for landing it on `main` as a major version (`v2.0.0`).
+| Ref | Commit | Role |
+| --- | --- | --- |
+| `origin/main` | `ee4e004` | Production line. Four commits ahead of the shared ancestor (`AGENTS.md`, `.cursor/environment.json`). |
+| `origin/xstate` | `6fd5098` | Integration branch. Ten commits ahead of `main`. Contains the xstate backend rewrite. |
+| `origin/plan/frozen-packet-envelope` | `803697b` | New base. `xstate` plus three commits (restructure, "new working concept", the envelope plan). PR #4, now targeting `xstate`. |
+
+Directives from the owner that shape this revision:
+
+1. `plan/frozen-packet-envelope` is the base for all current and ongoing work. Its PR (#4) now targets `xstate`, not `main`.
+2. Every assumption in the previous plan is re-evaluated, not carried over.
+3. The hardening work in PR #3 (F-01, F-02, F-04, F-05 on the old `frontend/` layout) is scrapped for now. PR #3 is closed and its branch is kept for reference only.
 
 Contents:
 
 1. [Summary and recommendation](#1-summary-and-recommendation)
-2. [What the branch is](#2-what-the-branch-is)
-3. [Merge vs cherry-pick](#3-merge-vs-cherry-pick)
-4. [Findings and remediation](#4-findings-and-remediation)
-5. [Implementation plan](#5-implementation-plan)
-6. [Version-break checklist](#6-version-break-checklist)
-7. [Decisions needed from the owner](#7-decisions-needed-from-the-owner)
-8. [Appendix: how the evidence was gathered](#8-appendix-how-the-evidence-was-gathered)
+2. [Branch topology and PR flow](#2-branch-topology-and-pr-flow)
+3. [What the new base is](#3-what-the-new-base-is)
+4. [Status of the previous findings](#4-status-of-the-previous-findings)
+5. [New findings on the base](#5-new-findings-on-the-base)
+6. [Critical review of the envelope plan](#6-critical-review-of-the-envelope-plan)
+7. [Integration plan](#7-integration-plan)
+8. [Version-break checklist](#8-version-break-checklist)
+9. [Decisions needed from the owner](#9-decisions-needed-from-the-owner)
+10. [Appendix: evidence and how to reproduce it](#10-appendix-evidence-and-how-to-reproduce-it)
 
 ---
 
 ## 1. Summary and recommendation
 
-`xstate` is a ground-up rewrite of the chat backend (plus a frontend reorganization) that is 10 commits and 209 files ahead of `main`. `main` has not diverged in any way that matters (four commits, only `AGENTS.md` and `.cursor/environment.json`), so a merge is conflict-free.
+The frozen-packet branch is the right base. It is not a competing design: it is `xstate` plus a restructure that already fixes several of the old blockers, plus a written plan for the prompt architecture. Combining the work is a matter of sequencing, not merging two codebases.
 
-It is not safe to merge as-is. Review found 6 blockers or high-severity problems, the most serious being that the API would crash on startup when deployed through the current Azure Static Web Apps (SWA) workflow, and that all spend limits are effectively disabled.
+What the base fixes for free (verified, not assumed):
+
+- The API deploys as a self-contained folder. `api/` was copied alone to a temp directory and `require("./index.js")` loaded (old F-01).
+- One deploy workflow instead of two (old F-11). The `frontend/` tree is gone and ignored.
+- The durable storage module is complete and wired into request handling (old F-03 was "truncated and dead").
+- Personas for all four agents exist (old F-04, partly).
+
+What is still wrong, and was reproduced on the base (details in sections 4 and 5):
+
+- Spend controls do nothing. Defaults are 1,000,000. The daily counter has no writer. After 45 turns `GET /api/debug` shows `userExchangeCount 45`, `maxUserExchanges 1000000`, `dailyCount 0`.
+- Durable storage breaks on real conversation sizes. The code budgets 800,000 and 900,000 characters for single table properties; Azure Table (and Azurite) reject strings over about 32,000 characters. In an end-to-end run with durable storage on, the server process died at turn 12 with `PropertyValueTooLarge`. On Azure Functions the same throw is a 500 after the LLM calls were already paid for.
+- Lumen and Umbra still receive mock/placeholder text on every call (2 of the 3 to 4 LLM calls per turn).
+- A client can overwrite its own stored transcript through `POST /api/chat-sync`.
+- No CI. `api/package.json` lists test files by hand and omits one.
+- The privacy notice promises deletion 24 months after last visit; there is no deletion code.
 
 Recommendation:
 
-- Do not cherry-pick commit by commit. The commits are not independently applicable (see section 3).
-- Harden the branch in small PRs targeting `xstate`, then land it on `main` in one step and tag `v2.0.0`. Tag the current `main` as `v1-legacy` first, as the rollback point.
-- Keep the xstate-versus-pure-functions question out of the merge. Decide it afterwards (Phase 9), once durable persistence exists and there is evidence either way.
+1. Land PR #4 on `xstate` first, as a merge commit. It is a structural change plus a plan document; review it as such.
+2. Run two tracks into `xstate`, all PRs targeting `xstate`:
+   - Track H (hardening): CI and a shared fake-OpenAI test harness, then spend controls, then durable-storage correctness, then hygiene.
+   - Track E (envelope): the five slices from the envelope plan, philosophers first, with the amendments in section 6.
+3. Do Track H step 1 (CI and harness) before any Track E slice. The envelope's invariance tests need to run somewhere, and the harness lets them assert on the real HTTP payloads.
+4. Release as one PR from `xstate` to `main`, after tagging `main` as `v1-legacy`.
+5. XState stays. The envelope plan lists replacing it as out of scope, which closes the old "keep or replace" question.
 
-Note on the "undo plan": there is no committed plan to remove xstate or the custom prompt builders. The closest artifact is `frontend/api/src/attache/attacheOrchestrator-plan.md`, added in the same commit as xstate (`779df05`). It describes a pure `transition(state, intent)` function, which `attacheMachine.js` now wraps in an xstate machine. The custom prompt builders are already being retired in the branch itself (see F-09). If a separate undo plan exists, it is not in the repository.
+## 2. Branch topology and PR flow
 
-## 2. What the branch is
+```
+main:     0c23768 ---- 4 commits (AGENTS.md, .cursor/environment.json)
+                \
+xstate:          +-- 10 commits ---- 6fd5098
+                                       \
+plan/frozen-packet-envelope:            +-- efe3338 restructure
+                                        +-- 5ba41f3 new working concept
+                                        +-- 803697b envelope plan   (PR #4 -> xstate)
+```
 
-### 2.1 Commit history (since the branch point `0c23768`)
+In words: `plan/frozen-packet-envelope` contains all of `xstate`. Its three extra commits are the restructure (`efe3338`, about 110 renames: `frontend/api/src/*` to `api/*`, `frontend/public/*` to `web/*`), "new working concept" (`5ba41f3`, concept doc and new web pieces such as the privacy notice and lab pages) and the plan (`803697b`).
 
-| Commit | Date | Subject | Notes |
+PR flow:
+
+| PR | From | To | State |
 | --- | --- | --- | --- |
-| `e923e38` | 03-07 | improved note styling | frontend only |
-| `3d5c7a8` | 03-10 | feat: llm api refactor | prompts moved/split, 3 `api/src` files |
-| `c69e5d2` | 03-10 | new config notes | docs only |
-| `e08b35c` | 03-11 | fixes note horiz placement issues, adds baseline | frontend + prompts + server |
-| `63b3a2f` | 03-12 | new orchestrator | 17 new `api/src` files, adds xstate dependency |
-| `5454199` | 03-13 | new attache | prompts, assets |
-| `779df05` | 03-31 | xstate refactor | 114 files: frontend renames and backend rewrite together |
-| `309c352` | 04-05 | feat: new xstate approach thru | 112 files, rewrites most of the prior commit's prompt files |
-| `54c0922` | 04-07 | feat: adds chat scenario lab | dev lab, contract JSON |
-| `6fd5098` | 04-07 | feat more stateful attache | attache machine |
+| #4 | `plan/frozen-packet-envelope` | `xstate` | Open. Retargeted from `main`. Diff against `xstate` is 276 files, +2795/-1276, mostly renames. |
+| #3 | `cursor/xstate-deploy-and-spend-fixes-7b2f` | `xstate` | Closed. Branch kept. |
+| #2 | `cursor/xstate-merge-plan-7b2f` | `main` | Open. This document. |
+| future | `xstate` | `main` | The release PR. |
 
-Other branches: `new-attache` is fully contained in `xstate`. `mid-media` has one commit (`d9c802e`, "mess of a orchestrator") that is not in `xstate` and appears abandoned.
+Merge checks:
 
-### 2.2 Architecture
+- `plan/frozen-packet-envelope` into `xstate`: fast-forward-shaped (the branch contains `xstate`). No conflicts possible.
+- `plan/frozen-packet-envelope` into `main` (trial `git merge-tree --write-tree`): one conflict, `AGENTS.md` (both branches added the file). Resolution is to keep `main`'s git rules and add the plan branch's layout section.
+- PR #3 into the base: roughly 30 reported conflicts, nearly all because PR #3 edited `frontend/api/src/*` paths that the base renamed. This is why PR #3 is scrapped instead of rebased. Any idea worth keeping gets re-implemented on the new layout (see section 7).
 
-`main` today: one 954-line `frontend/api/shared/index.js`, a single system prompt (`prompts/prompt.md`), one LLM call per turn, an optional philosopher "self-dialog" side channel, closers after a fixed number of exchanges, and no tests.
+## 3. What the new base is
 
-`xstate`:
+Layout (from the base's `AGENTS.md`):
 
-- Backend is modular under `frontend/api/src/`: `agents/`, `attache/`, `detective/`, `philosophers/`, `orchestration/`, `prompts/`, `dossier_and_summarize/`, `session/`, `storage/`, plus `chatService.js`, `config.js`, `logger.js`.
-- Agents: Attaché (scripted baseline questions), Detective (the main therapist voice), Lumen and Umbra (margin philosophers).
-- Prompts are composed per turn by `prompts/promptComposer.js` from persona + instructions + JSON catalogs (`prompt_catalog.json` per agent) + a per-turn tail, with structured-output schemas per agent.
-- Orchestration:
-  - `orchestration/chatMachine.js` is a parallel xstate machine with regions `dossier`, `visit` (time-away tiers) and `agent` (attaché vs detective, each an invoked child machine).
-  - `attache/attacheMachine.js` wraps a pure `transition()` function.
-  - `detective/detectiveMachine.js` handles the detective policy.
-- Additional features: dossier and summarization of the user, time-away classification (brief, moderate, long, stale) that can force a re-baseline, a closure sequence (penultimate and ultimate replies), a shared HTTP contract (`frontend/contracts/`), and a dev scenario lab (`/dev/chat-scenario.html`, gated by `ALLOW_TEST_SEED`).
-- Frontend: all `public/js` files renamed to a `area.name.js` convention, new `chat.send.js` and `chat.route.js`, new response shape (`envelope`, `lumen*` / `umbra*` keys, `GET /api/chat-state`).
-- Tests: 131 passing under `node --test` (`cd frontend/api && npm test`). `main` has none.
+| Path | Role |
+| --- | --- |
+| `web/` | Static site (`app_location`). `js/{shared,chat,notes,philosophers,poem}`, `styles/`, `lab/`, `content/`, `data/`, `assets/`. |
+| `api/` | Functions and all backend code (`api_location`). `agents/{attache,detective,philosophers,shared}`, `prompting/` (composer code), `prompts/` (model text), `dossier/`, `orchestration/`, `session/`, `storage/`, `lab/`, `contracts/`. |
+| `server-dev.js` | Local Express. Serves `web/`, requires `api/`. |
+| `archive/` | Legacy prompts moved out of the live tree. |
 
-### 2.3 What works
+Rules the base adds: do not recreate `frontend/`; anything production requires must live inside `api/`; `api/prompts/` is model text and `api/prompting/` is code; `api/agents/shared/` is not a character.
 
-- 131 of 131 tests pass.
-- A local run with `OFFLINE=1` walks correctly through attaché phases (`start`, `baseline1_q0`, `baseline1_q1`, `baseline2_q0`) and `/api/chat-state` reports consistent counters.
-- The branch adds only about 4 MB of new git blobs (359 blobs); the asset renames are 100% similarity, so there is no repository bloat.
+Baseline behavior measured on the base (45 user turns against a fake OpenAI endpoint; full numbers in `plan-branch-audit.log`):
 
-## 3. Merge vs cherry-pick
+| Metric | Value |
+| --- | --- |
+| Upstream LLM calls for 45 turns | 153 (about 3.4 per turn) |
+| Calls per detective turn | 3 structured (detective, Lumen, Umbra), plus a summarizer or dossier call about 0.6 times per turn (28 over 45 turns) |
+| Attaché system prompt | Different on every one of 5 turns, 3.6 to 5.3 KB. This is the problem the envelope plan targets. |
+| Detective system prompt | One distinct value over 40 turns, 7.9 KB |
+| Lumen and Umbra system prompts | One distinct value each, 3.5 and 3.6 KB, both containing `[mock custom ...]` and "Placeholder ... Replace with real content" |
+| History format | One flattened "Conversation history" user message, then the raw querent text (roles: system, user, user) |
+| Tests | 131 pass via `npm test`; 133 pass via `node --test` (the hand-maintained list skips `dossierPresence.test.js`) |
+| Browser smoke test | Landing, chat route, three exchanges, reload restores the transcript, no console errors (one expected 404 on `/api/debug` when debug is off) |
 
-### 3.1 Options considered
+## 4. Status of the previous findings
 
-| | Merge as-is | Cherry-pick commits | Harden then merge (recommended) |
+| ID | Old finding | Status on the base | Evidence |
 | --- | --- | --- | --- |
-| Conflicts | none | frequent (same files rewritten across commits) | none |
-| Result is coherent | yes | no: intermediate states do not run | yes |
-| Ships the blockers in section 4 | yes | depends | no |
-| Keeps tests and history | yes | partially | yes |
-| Review burden | one 23k-line PR | many partial PRs | many small PRs into `xstate`, then one merge |
+| F-01 | Contracts outside `api_location` crash the deployed API | Resolved by layout. Needs a CI guard so it cannot regress. | `api/` copied alone loads. Contracts are in `api/contracts/`. |
+| F-02 | Spend limits disabled | Open. Now P-01. | See P-01. |
+| F-03 | Durable state truncated and dead | Reframed. The module is complete and wired, but unsafe at real sizes. Now P-02. | See P-02. |
+| F-04 | Unfinished prompts | Partly resolved. Personas exist. Mock text, placeholder files, custom prompt builders and a typo remain. Now P-03. | Lumen system prompt contains the mock block. |
+| F-05 | Undecided feature changes (`philosopher-dialog`) | Mostly decided. Azure returns 410, dev server returns 404 (drift, P-06). | `curl` against both. |
+| F-06 | No CI | Open. Now P-05. | `.github/workflows` has only the SWA deploy. |
+| F-07 | xstate complexity | Closed as a decision: keep XState (envelope plan, "Out of scope"). Machines exist in 8 production files. | Search for `require("xstate")` under `api/`. |
+| F-08 | Config and documentation drift | Open, larger. Now P-08. | See P-08. |
+| F-09 | Dead and deprecated code | Partly open. Retired by envelope slices, not before. | `philosophersCustomPrompt.js`, `attacheCustomPrompt.js`, `detectiveCustomPromptDEPRECATED.js` still present. |
+| F-10 | Stray files | Mostly resolved by the restructure. Two prompt files may be unreferenced (P-09). | `closing_instructions.md`, `narrative/stages.md`. |
+| F-11 | Two deploy workflows | Resolved in the repo (one workflow). The second Static Web App resource may still exist in Azure. | Workflow list. |
+| F-12 | Merge history not bisectable | Moot. The restructure rewrote paths; use a merge commit for PR #4 and keep history. | |
+| F-13 | Dev surfaces exposed by flags | Reframed. Seed routes are not registered in Functions, but lab pages ship under `web/lab`. Now P-07. | |
+| F-14 | LLM fan-out per turn | Still true and now measured (3.4 calls per turn). Now P-10. | Capture log. |
 
-### 3.2 Why not cherry-pick
+## 5. New findings on the base
 
-- `779df05` (114 files) mixes the frontend renames with the backend rewrite. `309c352` (112 files, 6,291 deletions) then rewrites most of the prompt files that `779df05` added. Neither can be applied alone.
-- `main`'s backend is a single file that is entirely replaced. "What we need" from `api/src` is nearly all of it, so cherry-picking is really "take everything, then delete".
-- Frontend and backend are coupled in both directions:
-  - New frontend needs `envelope`, `lumen*` / `umbra*` keys and `GET /api/chat-state`.
-  - Old frontend expects `leftPhilosopher*` keys and calls `/api/philosopher-dialog`, which now returns 410.
-- The only cleanly separable slice is the early visual commits (`e923e38`, `e08b35c`). They are small, and landing them separately has little value because they ship in the same release anyway.
+Severity scale: Blocker (do not release), High (fix before release), Medium (fix before or soon after release), Low.
 
-### 3.3 Why not merge as-is
+### P-01 (Blocker): spend and exchange caps are inert
 
-Findings F-01 to F-06 below. In short: deploy crash, no spend limits, non-durable state, unfinished prompts.
+- `MAX_USER_EXCHANGES` and `MAX_DAILY_USAGE` default to 1,000,000 in `api/shared.js`. `.env.example` documents defaults of 5 and 100, which is wrong by four to five orders of magnitude.
+- `incrementDailyUsage()` is defined in both stores and has no caller. `dailyCount` stayed at 0 after 45 turns.
+- Counters are in-memory per process (`userExchangeCounts` is a `Map`). On Azure Functions a restart or a second instance resets them. They are not persisted by the durable checkpoint.
+- Nothing bounds the number of sessions: an anonymous client can mint a new cookie per request.
 
-## 4. Findings and remediation
+Remediation (requirements; the design is to be done fresh, not ported from PR #3):
 
-Severity: **Blocker** (must fix before merge), **High** (fix before merge unless explicitly waived), **Medium** (fix before release or schedule right after), **Low** (cleanup).
+- Real defaults, enforced before any LLM call, with an HTTP 429 and `errorKind: "rate_limit"` that the UI renders.
+- A daily budget that survives restarts and works across instances, or an explicit statement that the OpenAI-side hard budget is the real backstop and the in-app cap is best effort.
+- A per-IP or per-cookie-minting limit, or an accepted risk written down.
+- Tests that fail on the current code (cap reached means 429 and zero upstream calls).
 
-### F-01 (Blocker): API crashes on startup when deployed through SWA
+### P-02 (Blocker): durable checkpoint exceeds Azure Table limits and failure is fatal
 
-Evidence:
+Reproduced on Azurite:
 
-- Both workflows (`.github/workflows/azure-static-web-apps.yml` and `...-green-desert-063e5891e.yml`) deploy with `api_location: "frontend/api"`, so only that folder reaches the Functions host.
-- `frontend/api/src/chatService.js:9` and `frontend/api/src/shared.js:15` require `../../contracts/chatApiContract`, which resolves to `frontend/contracts/`, outside the deployed folder.
-- Reproduced: copying only `frontend/api` to a temp directory and running `require("./src/index.js")` fails with `Cannot find module '../../contracts/chatApiContract'`.
+| Payload (characters) | Result |
+| --- | --- |
+| 1,000 and 20,000 | saved and hydrated |
+| 40,000 and 100,000 | `400 PropertyValueTooLarge` ("32K characters or less") |
+| 700,000 | `400 EntityTooLarge` |
 
-Remediation:
-
-- Move `frontend/contracts/` to `frontend/api/contracts/` and update the two requires, the `contracts` path in `frontend/server.js` (route `/contracts/chat-http.contract.json`), and the comment references in `chatMachine.js`, `chat.route.js` and the contract file itself.
-- Add an isolation check (`npm run test:isolated`) that copies `frontend/api` alone to a temp directory, runs `npm ci --omit=dev`, and requires `src/index.js` with `OFFLINE=1`. Run it in CI so this class of bug cannot return.
-
-### F-02 (Blocker): spend limits are effectively disabled
-
-Evidence:
-
-- `frontend/api/src/shared.js:28-29`: `MAX_USER_EXCHANGES` and `MAX_DAILY_USAGE` default to `1_000_000` (on `main` they are 5 and 100). `docs/DEPLOY-AZURE-SWA.md` and `frontend/.env.example` still document 5 and 100, so docs and code disagree.
-- `dailyUsageStore.incrementDailyUsage()` is never called, and `dailyUsage` is never compared against `maxDailyUsage` anywhere in the chat path. It is only echoed in the debug body. The daily cap does nothing.
-- Cost per turn is higher than on `main`. Each detective turn fires 3 parallel LLM calls (detective, Lumen, Umbra), plus a dossier refresh every `DOSSIER_REFRESH_EVERY_N_DETECTIVE_TURNS` (default 3) turns, plus summarization. `main` makes 1 call per turn.
-
-Remediation:
-
-- Choose real defaults (see decision D-1) and apply them in `shared.js`, `.env.example` and the docs.
-- Enforce the daily cap in `shared.handleChatRequest` before any LLM work: if `dailyUsage >= MAX_DAILY_USAGE`, return HTTP 429 with the existing "Daily system limit reached" message. Increment the counter once per turn that reaches the LLM. Make the unit explicit (per turn or per LLM call; recommended per turn, with the per-turn LLM fan-out documented).
-- In Azure the in-memory store is per instance, so a real daily cap needs the shared store from F-03. Until then, document it as best-effort.
-- Add tests: cap reached returns 429 without calling the LLM client; counter increments exactly once per turn; exchange cap triggers the penultimate and ultimate closure replies and then 204.
-- Optional cost reduction, tracked separately (F-14).
-
-### F-03 (Blocker): session state is in-memory only, and the durable path is broken
-
-Evidence:
-
-- All session state is module-level `Map`s: `persistedSnapshotBySessionId` in `chatMachine.js`, eight maps in `chatService.js` (attaché session, dossier, detective/Lumen/Umbra histories, narrative snapshots, turn counts), two in `shared.js`, and two in `detectiveExistentialSession.js`. On Azure Functions (serverless, scale to zero, multiple instances) this state is lost on cold start or when requests hit another instance. Users would be re-baselined mid-conversation.
-- `frontend/api/src/storage/durableTableStorage.js` is truncated: it ends mid-function after `await ensureTable(client);` and fails with `SyntaxError: Unexpected end of input`. It is not required by anything, and it references an undefined `isUsableMainStateSnapshot` and a nonexistent `require("../dossier")`.
-- `frontend/server.js:104` calls `shared.reloadSessionFromDurable`, which does not exist. `ENABLE_DURABLE_STORAGE` and `AZURE_STORAGE_CONNECTION_STRING` are documented but do nothing.
-
-Remediation (recommended: implement it, rather than documenting the limitation):
-
-- Introduce a `SessionStore` interface (`load(sessionId)`, `save(sessionId, state)`, `reset(sessionId)`) with two implementations: in-memory (default, used by tests and local dev) and Azure Table Storage.
-- Gather the per-session state behind one serializable `SessionState` object. The xstate snapshots are already JSON-serializable through `getPersistedSnapshot()`.
-- In `chatService.composeChatResponse`, load at the start of the turn and save at the end. Replace the module-level Maps by reads and writes on that object.
-- Table Storage limits: 64 KiB per string property and about 1 MB per entity. Store large fields (histories, dossier) chunked across properties or move them to Blob Storage. The existing truncation constants (`MAX_DETECTIVE_HISTORY_CHARS`, `MAX_THREAD_JSON_CHARS`) in config and `.env.example` give a starting point.
-- Move the daily usage counter to the same store (see F-02).
-- Delete the broken `durableTableStorage.js` and write the new module with tests against a fake table client. Optionally run an Azurite integration test in CI.
-- Gate with `ENABLE_DURABLE_STORAGE`. Fix the `server.js` hook so local dev and Azure use the same code path.
-- If this is waived for the first release, then at minimum: document the limitation prominently in `DEPLOY-AZURE-SWA.md`, remove the dead flag and code, and keep a tracked follow-up. This is not recommended for a public site.
-
-### F-04 (High): prompts are unfinished
-
-Evidence:
-
-- The live detective persona, `prompts/detective/detective_persona.md`, is a 2-sentence stub (275 bytes). The full persona is in `prompts/detective/detective_persona copy.md` (4.4 KB) and the root-level `prompts/detective_persona.md`. `config.js` loads only the stub.
-- `prompts/lumen/lumen_prompts.md` and `umbra/umbra_prompts.md` (and the attaché and detective equivalents) are placeholders ("Replace with real content when LLM integration is enabled").
-- `philosophers/philosophersCustomPrompt.js` prepends a literal `[mock custom lumen] voice=lumen` plus the placeholder file to the `custom` segment of the real system prompt. In `chatService.js` the result goes into `composeAgentPrompt`, so the mock text reaches the model.
+- The code budgets `MAX_THREAD_JSON_CHARS=800000` and `ORCHESTRATION_RUNTIME_JSON_MAX_CHARS=900000` for single properties. Both are unreachable on real Azure Tables.
+- End to end (durable on, checkpoint every turn, replies of about 1.5 KB): turns 1 to 11 returned 200, then the dev server process exited with an unhandled `RestError`. `saveSessionCheckpointToDurable` is awaited inside `handleChatRequest` with no try/catch, so any storage error fails the user's request after the model calls were made.
+- When the orchestration blob is too large the writer stores `{truncated: true}`; the reader then silently skips restoring it, so the session resets without any signal.
+- Checkpoints happen every 5 dirty turns or 5 minutes. With more than one instance, a turn handled by instance A and not yet checkpointed is invisible to instance B. `hydratedDurableSessions` means each instance hydrates a session once and never refreshes.
+- Connection-string note: an `http://` Azurite string with explicit endpoints fails with "allowInsecureConnection is false". Only `UseDevelopmentStorage=true` worked.
 
 Remediation:
 
-- Restore the intended detective persona into `detective/detective_persona.md` (compare against `main`'s `prompt.md` and the `copy` files to pick the final text), and make the registry the only source.
-- Decide whether `promptsPath` files are part of the design. If yes, write real content. If no, remove `promptsPath` from the registry and `buildPhilosophersCustomPrompt`, and pass no `custom` for Lumen and Umbra until the philosophers machine produces a real tail (the code comment already states this as the target).
-- Add a registry validation test (extend `validatePromptRegistry`, strict under `NODE_ENV=test`): fail if any persona is under a minimum length, or if any loaded prompt text contains "Placeholder" or "[mock".
+- Split large values across numbered properties of at most 30,000 characters (or move bodies to Blob Storage and keep pointers in the table). Enforce a total per-entity budget below 1 MB, counting UTF-16.
+- Make checkpointing non-fatal: catch, log, surface in telemetry, never fail the turn. Retry on the next turn.
+- Replace the silent `truncated` path with an explicit, logged degraded mode.
+- Decide the multi-instance contract: either checkpoint every turn (more writes, simpler) or accept and document the loss window.
+- Persist the exchange counter alongside the session so P-01's per-session cap survives restarts.
+- Run Azurite in CI and add a cold-restart test: run N turns, drop in-memory state, rehydrate, assert the next turn sees prior history.
 
-### F-05 (High): default behaviors and features changed without a decision
+### P-03 (High): the model still receives mock and placeholder text
 
-Evidence:
+- `philosophersCustomPrompt.js` emits `[mock custom lumen] voice=lumen` followed by the `*_prompts.md` file ("Placeholder for reusable prompt sections ... Replace with real content when LLM integration is enabled") on every Lumen and Umbra call.
+- `attache_prompts.md` and `detective_prompts.md` are the same placeholder; they are not in the captured attaché and detective prompts, but they are still registered.
+- `lumen_instructions.md` has the typo `lumnen_philosopher_notes` in the field list.
 
-- `POST /api/philosopher-dialog` returns 410 and the frontend no longer calls it, but the README still lists it ("side-channel lore").
-- `easter_egg_prompt.md` was deleted. A comment in `chatService.js` says the post-ultimate easter egg line is "not implemented yet".
-- Closers (`closers.md`, fixed number of exchanges) were replaced by the closure phase mechanism.
-- `main` capped sessions at 5 exchanges before closers. With the attaché baseline in front, the right number needs a new choice (decision D-1).
+Remediation: stop sending the mock block in envelope slice 1 (philosophers) instead of leaving it for the final delete step. Add a registry test that fails on `[mock`, `Placeholder`, and stub-sized files. Fix the typo in the same slice. Delete the placeholder files when their registry fields are removed.
 
-Remediation: record an explicit keep, drop or reimplement decision for each (decision D-2), then update the README, API docs and contract accordingly. Remove dead code paths for anything dropped (route, contract fields, frontend remnants).
+### P-04 (High): `POST /api/chat-sync` lets a client overwrite its transcript
 
-### F-06 (High): no CI runs the tests
+With an ordinary session cookie, a request with `clientSeq: 9999` and one forged assistant message replaced the stored thread; the next `GET /api/chat-state` returned only `FORGED` with `serverSeq 9999`, and the result is checkpointed to durable storage.
 
-Evidence: the only workflows are the two SWA deploy workflows. Tests exist only on `xstate` and are never run automatically. The `test` script in `frontend/api/package.json` lists test files by name, so new tests are silently skipped.
+The forged data feeds the restored UI and the persisted thread events, not the LLM history (that lives in `chat_history` maps), so this is an integrity problem, not a prompt-injection path. It still lets a client plant arbitrary text in "assistant" turns that the user later sees as authentic, and it defeats the session sequence number.
 
-Remediation:
+Remediation: either remove the endpoint (the server already retains history, `serverRetainsHistory: true`) or restrict it: cap message count and text length, only accept user-role content, never accept a sequence number more than one ahead, and never replace server-held assistant text.
 
-- Add `.github/workflows/test.yml`: on pull requests and pushes, run `npm ci` and `npm test` in `frontend/api`, plus the isolation check from F-01.
-- Change the test script to a glob (`node --test "src/**/*.test.js"`) so new tests are always picked up.
-- Make the check required before merge to `main`.
+### P-05 (High): no CI, and the test script drifts
 
-### F-07 (Medium): in-memory orchestration plus xstate adds complexity without durability benefit
+- No workflow runs tests. The only workflow deploys.
+- `api/package.json` lists 19 test files by hand. `dossier/dossierPresence.test.js` (2 tests) is not run by `npm test`.
+- The Azurite round-trip test skips silently without env.
+- Nothing asserts that `api/` is deployable on its own.
 
-Evidence:
+Remediation: a test workflow on pull requests to `xstate` and `main` (Node 20 and 22, `npm ci`, `node --test` with a glob, Azurite service for storage tests, an isolated-deploy check, a contract test). Keep deploy and test workflows separate.
 
-- xstate is imported in 9 files, about 2k lines (`chatMachine`, `attacheMachine`, `detectiveMachine`, `philosophersMachine`, `attacheOrchestratorAdvance`, `detectiveExistentialSession`, `orchestrationLabSnapshot`, `detectivePromptPolicyMachine`, `chatService`).
-- The real logic is already pure: `transition()` in `attacheMachine.js`, plus the policy functions in `attachePromptPolicy.js` and `detectivePromptPolicy.js`. Persistence is a `Map`, so xstate's persisted-snapshot benefit is unused until F-03 lands.
-- There is migration code for old snapshots (`migrateAttacheOrchestratorMachineSnapshot`, `migratePersistedChatSnapshotAttacheOrchestrator`) and large `@xstate-layout` blobs in the machine files. Both are maintenance cost with no users yet, since nothing is persisted across deploys.
-- Benefits that are real: the Stately visualizer and tags and meta, parallel regions that model dossier x visit x agent routing, and 131 tests, including `chatMachine.persist-invoke.test.js`.
+### P-06 (Medium): dev server and Azure entry points drift
 
-Remediation: do not change this as part of the merge. Evaluate in Phase 9 (keep versus replace with pure functions, as `attacheOrchestrator-plan.md` proposes). Drop the snapshot migration shims before release if no persisted snapshots from older builds can exist (they cannot today).
+- `philosopher-dialog`: 404 on `server-dev.js`, 410 on `api/index.js`.
+- `/api/debug` and the dev seed/lab endpoints exist only in `server-dev.js`; the client probes `/api/debug` and gets a 404 in production when debug is off (harmless, but noisy).
+- `/api/config` is implemented twice, `createFileDailyUsageStore` and `createMemoryDailyUsageStore` behave differently (file store persists; memory store does not).
 
-### F-08 (Medium): configuration and documentation drift
+Remediation: move shared route bodies into `api/` handlers that both entry points call, and add a parity test that lists the routes of each.
 
-Evidence:
+### P-07 (Low): lab and notedebug pages ship to production
 
-- `frontend/.env.example`, `docs/CONFIGURATION.md`, `docs/AZURE-SWA-STRUCTURE.md` and `frontend/DEPLOY-AZURE-SWA.md` still reference `prompt.md`, `closers.md`, `easter_egg_prompt.md`, `AGENT_PROMPT_FILE` and `PHILOSOPHER_NOTES_FILE`, none of which the new code reads.
-- `frontend/package.json` `dev` script watches `api/prompts/prompt.md` and `closers.md`, which no longer exist, so prompt edits do not trigger reloads.
-- Defaults documented as 5 and 100 are 1,000,000 in code (F-02).
-- `.gitignore` gained `.env*`, which also matches `.env.example` (already tracked, but any new example env file would be silently ignored). It also lists a stray `frontend/api/src/.env_the_wrongone`.
-- `frontend/api/.gitignore` was deleted.
-- README describes `main`'s architecture and API surface.
+`web/lab/*.html` (including a 1,756-line scenario lab) are under `app_location`, so they deploy. The API routes they call are not registered in Functions, and `ALLOW_TEST_SEED` is only honored in `server-dev.js`, so the exposure is cosmetic, but it publishes internal tooling and prompt structure.
 
-Remediation: rewrite these to match the code (see Phase 6). Use `.env*` plus an explicit `!.env.example`. Update the `dev` script to watch `api/prompts` and `api/src`.
+Remediation: exclude `web/lab` from the SWA artifact, or move it out of `web/`, or add an explicit decision to keep it.
 
-### F-09 (Medium): deprecated and dead code
+### P-08 (Medium): configuration and documentation drift
 
-Evidence:
+- `.env.example` says `MAX_USER_EXCHANGES` defaults to 5 and `MAX_DAILY_USAGE` to 100 (code: 1,000,000), points at `api/src/logger.js` (path no longer exists), names `TIME_AWAY_MODERATE_*` while `docs/durable-user-state.md` names `TIME_AWAY_LONG_*` and `TIME_AWAY_STALE_*` with different defaults.
+- `PROMPTS_DIR`, `AGENT_PROMPT_FILE` and `PHILOSOPHER_NOTES_FILE` are documented in `.env.example`; the first points at a folder layout that has changed and the others are not read.
+- `docs/agent-prompt-construction.md` describes the system-string recipe that the envelope plan replaces.
 
-- `attache/attacheCustomPrompt.js` ("Legacy helper") and `detective/detectiveCustomPromptDEPRECATED.js` are thin wrappers over `turnBuilderRegistry.buildAgentTurn` and are not used by the main flow (`detective` one has no callers).
-- `philosophers/philosophersMachine.js` exports a `@deprecated` alias `philosophersMachine`.
-- `philosophers/philosophersCustomPrompt.js` is a mock (F-04).
-- `index.js` keeps a 410 route for a removed endpoint (F-05).
+Remediation: generate the variable table from `api/config.js`, and add a test that every key in `.env.example` is read somewhere in `api/` or `server-dev.js`.
 
-Remediation: delete the dead shims and aliases after confirming no callers (`rg` plus tests), and fold the live pieces into `prompts/turnBuilderRegistry.js` (extend `TURN_BUILDERS` with `lumen` and `umbra`).
+### P-09 (Low): possibly unreferenced prompt files
 
-### F-10 (Low): stray files
+`api/prompts/closing_instructions.md` and `api/prompts/narrative/stages.md` have no references in `api/` or `web/`. Confirm with the owner, then move to `archive/` or delete.
 
-Evidence: `prompts/detective_persona copy.md`, `prompts/detective/detective_persona copy.md`, `prompts/detective/detective_instructions copy.md`, `public/data/object-config copy.json`, duplicate root-level `prompts/detective_persona.md` and `prompts/lumen_persona.md`, and `attache/attache_instructions_alt.md` (6 KB, unreferenced; verify).
+### P-10 (Medium): LLM fan-out per turn
 
-Remediation: after F-04 settles the canonical text, delete the copies and duplicates. Keep anything still referenced by the registry or lab.
+153 calls for 45 turns. Lumen and Umbra are 80 of them and run on every detective turn. The envelope plan does not change the call count. If cost matters, options are: run the chorus on a subset of turns, combine Lumen and Umbra into one structured call, or use a cheaper model for them. This is a product decision (D-7) and does not block anything else.
 
-### F-11 (Medium): two deploy workflows target two Static Web Apps
+### P-11 (High for slice 3): bank questions carry bracket tags
 
-Evidence: both workflows run on push and pull request to `main` with different deploy tokens (`AZURE_STATIC_WEB_APPS_API_TOKEN` and `AZURE_STATIC_WEB_APPS_API_TOKEN_GREEN_DESERT_063E5891E`). One uses `skip_app_build: true` and the other `output_location: "."`.
+All 20 baseline-1 questions end with a bracket tag, for example `Do you dream about being interlinked? [interlinked]`. No code strips them. The envelope plan has the server stamp the question text verbatim into the reply, so the tag would be shown to the querent. Decide whether the tag is part of the liturgy or metadata (D-6). Baseline 1 also contains one duplicate string; the plan already says IDs must be index-stable.
 
-Remediation: confirm which Static Web App is the live site and whether the second is a leftover. Keep one workflow. This matters because the merge triggers a production deploy on every configured target, and because pull requests create preview environments that Phase 7 uses.
+### P-12 (High): the privacy notice promises deletion that does not exist
 
-### F-12 (Medium): the merge history is not bisectable
+`web/content/privacy-notice.md` says conversation and session records are deleted 24 months after the last visit and logs are kept about 90 days. The durable store writes session rows (full thread events, orchestration state with chat histories) and dossiers (derived traits) and nothing ever deletes them (`rg deleteEntity` finds no match). Dossiers are keyed by user cookie for up to 400 days.
 
-Evidence: the two mega-commits (`779df05`, `309c352`) mix unrelated work, and the second rewrites the first.
+Remediation: a retention job (timer-triggered Function or table TTL strategy) matching the notice, a way to delete one user's rows by `edaUserId`, and a check that the notice and the code say the same thing. Also confirm the notice's processor list covers Azure.
 
-Remediation: land with a squash merge (or a merge commit), and write a thorough PR description plus a `CHANGELOG`/release note, since the history will not explain the change.
+## 6. Critical review of the envelope plan
 
-### F-13 (Low): dev surfaces exposed by flags
+The plan (`.cursor/plans/frozen_packet_envelope_16a5398b.plan.md`) is sound in direction and grounded in the code. Every existing path it names exists; the only missing paths are the new files it proposes. All six todos are `pending`, so this is a design, not an implementation.
 
-Evidence: `/api/dev/*` routes in `server.js` are gated by `ALLOW_TEST_SEED`, and `DEBUG_LOGS` echoes debug info and full prompts into logs and responses. Both are off by default.
+What it gets right:
 
-Remediation: keep them off by default. Add a startup guard that refuses to start with `ALLOW_TEST_SEED=1` when `NODE_ENV=production`, and document that Azure app settings must not set it.
+- It targets the measured problem: the attaché system prompt changes every turn; history is flattened into one user message; catalog bodies are 20 KB of JSON (attaché 10.9 KB, detective 9.5 KB) feeding turn tails.
+- It keeps XState and keeps law in code (server-owned shuffle, server stamp, mercy flag), not in prompts.
+- It sets the right tests (equality of composed system strings across states, not file hashes; envelope shape; "current utterance is not in history").
+- It phases the delete behind retargeted lab and tests.
+- Its authoring rule (every turn, room, visit, person, or code) is a usable review checklist.
 
-### F-14 (Optional): LLM fan-out per turn
+Amendments recommended:
 
-Evidence: 3 parallel calls per detective turn (F-02).
+| ID | Amendment | Why |
+| --- | --- | --- |
+| A-1 | Define verbatim matching as a pure function with normalization (curly versus straight quotes, whitespace, bracket tags) and unit-test it with the real bank. | "user_response missing the line" is the trigger for the server stamp. A naive substring check will stamp duplicates or miss near matches. |
+| A-2 | Add an opt-in eval set for `suspend_script`: scripted querent lines (distress, fatigue, done, frustration, mild reluctance, jokes) with expected true or false, run against a real model on demand, results saved. | Unit tests with fixtures prove the plumbing, not the judgment. The plan itself says the rarity lives in the instructions. |
+| A-3 | Delimiter hygiene tests: querent text containing `---QUERENT---`, JSON, or instruction-like text must not change the packet. Packet fields come only from server state, never from request bodies. | The envelope puts model-facing state in the same message as raw user text. |
+| A-4 | Bump the stored runtime version and drop old stored histories on deploy. | Stored `chat_history` entries from the flattened format would otherwise be replayed as native turns. `ORCHESTRATION_RUNTIME_V` exists for this. Combined with the greenfield-table note in `docs/durable-user-state.md`. |
+| A-5 | Record `usage.prompt_tokens` and `prompt_tokens_details.cached_tokens` per call in the capture harness and compare before and after each slice. | The plan declares caching out of scope but relies on a stable prefix; the harness can show whether the prefix is actually reused. The baseline numbers in section 3 are the "before". |
+| A-6 | Add "stop sending mock text" and "fix typo" to slice 1's acceptance criteria (P-03). | Otherwise slice 1 ships a frozen mock. |
+| A-7 | Schedule the lab retarget as its own slice with its own tests, before deletion. | 18 files reference `TURN INSTRUCTIONS`, including the logger, two `*Prompts.js`, `llmPayloadPreview`, `chatScenarioPreview` and the 1,756-line `chat-scenario.html`. The plan calls it a rollout step but sizes it as one line. |
+| A-8 | Keep the HTTP wire contract frozen across all slices and test it. | The plan does not touch `web/`; a contract test makes that a checked property. |
+| A-9 | State the precedence between `summary` and `dossier_summary` in the packet. | Both appear in the detective and chorus packets; unclear which wins on conflict. |
+| A-10 | Cap the history tail by characters as well as turns. | `HISTORY_TAIL_TURNS` is a name in the plan; it does not exist in code yet (`rg HISTORY_TAIL_TURNS` returns nothing), and a turn can be arbitrarily long. |
 
-Remediation options, to be decided after cost measurement in Phase 7:
+Risks to track:
 
-- Merge Lumen and Umbra into one structured call with two output sections.
-- Call the philosophers only on a fraction of turns (a server-side rate, like the client-side interaction rates on `main`).
-- Use a smaller model for the philosophers via a per-agent model setting.
+- Large single PRs. The slices touch `promptComposer`, `buildChatCompletionMessages`, three `*Call.js` files, `chatService.js` (1,178 lines), and several tests. Keep each slice behind its own PR and keep `main`-bound behavior stable until the slice is complete.
+- The attaché slice changes the structured output schema (`suspend_script`). Strict Structured Outputs need every key required; mock outputs and normalizers must change together.
+- Model behavior change is the real risk of the whole plan. A frozen prompt with a pointer is a different task for the model than a rewritten prompt. Budget real-model trials per slice, not only unit tests.
 
-## 5. Implementation plan
+## 7. Integration plan
 
-Working rules:
+Principles:
 
-- All work happens on branches named `cursor/<descriptive-name>`. Hardening PRs target `xstate`, not `main`. Only the final PR targets `main`.
-- One commit per logical change, one PR per phase (or finer where noted).
-- Each phase has an exit check. Do not start dependent phases before the exit check passes.
-- Nothing is pushed, merged, tagged or deployed without the owner's go-ahead (see `AGENTS.md`).
+- All PRs target `xstate` until the release PR.
+- Each PR is small enough to review alone and leaves `npm test` green.
+- Harness and CI first, so every later PR is checked.
+- No slice is merged without an updated baseline table (calls per turn, distinct system prompts, token counts).
+- Sizes are described by what has to change, not by time.
 
-Dependency order: Phase 0, then 1 and 2 (in parallel with 6), then 3, then 4 and 5, then 7, then 8. Phase 9 comes after the release.
+### Phase 0: land the base
 
-### Phase 0: safeguards and decisions
+1. Review PR #4 as a structural change. Merge as a merge commit.
+2. Resolve `AGENTS.md` once, in a follow-up: keep `main`'s git rules and add the base's layout section. Add the `.cursor/environment.json` and cloud setup that exist only on `main` to the release PR's checklist.
+3. Record decisions D-1 and D-2 below.
 
-1. Resolve the decisions in section 7 that gate later phases (D-1, D-2, D-3 minimum).
-2. Tag current `main` (`ee4e004` or later) as `v1-legacy`. This is the rollback point; record the Azure app settings currently in production.
-3. Confirm which Static Web App is live (F-11) and what its app settings are. Note any that the new code ignores or needs.
-4. Create the integration branch policy: branch protection on `xstate` is optional, but all hardening PRs target it.
+Exit: `xstate` equals the base, PR #2 (this document) is in review.
 
-Exit check: tag exists, decisions recorded in this document (update section 7), live SWA identified.
+### Phase 1: safety net (H1)
 
-### Phase 1: make the API deployable (F-01, F-06)
+Scope: `.github/workflows/test.yml`, `api/package.json` test script, a fake OpenAI test harness, an isolated-deploy check, a contract test.
 
-1. Move `frontend/contracts/` to `frontend/api/contracts/` (use `git mv`).
-2. Update requires in `chatService.js` and `shared.js`; update `server.js` `/contracts/...` route; update comments and docs that mention the old path.
-3. Add `frontend/api/scripts/check-isolated.js` and `npm run test:isolated`: copy `frontend/api` (excluding `node_modules`) to a temp directory, install production dependencies, set `OFFLINE=1`, require `src/index.js`, and exit non-zero on any error.
-4. Switch the `test` script to `node --test "src/**/*.test.js"` and confirm the count is at least 131.
-5. Add `.github/workflows/test.yml` (Node 20 or 22): `npm ci`, `npm test`, `npm run test:isolated`, triggered on `pull_request` and `push`.
-6. Update the contract test, if one exists, or add one that loads the JSON from its new location.
+- Replace the hand-maintained list with `node --test` over a glob; assert the count in CI so a file cannot disappear.
+- Add the harness: a small fake OpenAI-compatible HTTP server under `api/test-support/` that generates schema-valid output from the request's `json_schema`, records every request, and lets tests set reply size. The probes used for this document are the starting point.
+- Add the isolated-deploy check (copy `api/` alone, `require("./index.js")` with `OFFLINE=1`).
+- Add a contract test: routes registered in `api/index.js`, response keys, 204 and 429 documented.
+- Add Azurite as a service for storage tests and fail (not skip) in CI when it is unavailable.
 
-Exit check: CI is green, and the isolation check fails if the contract is moved back out (verify by temporarily reverting).
+Exit: CI green on PRs to `xstate`. The harness can print the baseline table from section 3.
 
-### Phase 2: spend controls (F-02, F-13)
+### Phase 2: spend and abuse controls (H2; P-01, P-04)
 
-1. Apply decision D-1 (defaults for `MAX_USER_EXCHANGES`, `MAX_DAILY_USAGE`) in `shared.js`; make the parsing consistent (`parseInt` with a fallback, not `Number(x || 1_000_000)`).
-2. In `shared.handleChatRequest`: read the daily count; if at or above the cap, return 429 before calling `composeChatResponse`; after a turn that used the LLM, increment the daily count. Remove the dead `readDailyUsage`-only plumbing or make it real.
-3. Return the 429 body in the shape the contract (`ChatPostErrorBody`) defines and make the frontend show it (check `chat.send.js` handling of non-200 responses).
-4. Verify the exchange cap path end to end: penultimate reply, ultimate reply (`closureUltimate: true`), then 204.
-5. Add the production guard for `ALLOW_TEST_SEED` and a one-line startup log of the effective caps and model.
-6. Tests: cap reached returns 429 with no LLM call (stub client asserts zero calls); counter increments once per turn; closure sequence; guard throws under `NODE_ENV=production`.
-7. Correct `.env.example` and `docs/DEPLOY-AZURE-SWA.md` defaults.
+- Requirements in P-01 and P-04. Decide D-3 and D-5 first.
+- Tests: cap reached gives 429 with zero upstream calls; chat-sync cannot replace server-held assistant text.
+- Update `.env.example` and the config docs in the same PR so the defaults can never drift again.
 
-Exit check: new tests pass; with a stub LLM client, a scripted session of N+3 messages produces the expected statuses and exactly the expected number of LLM calls.
+Exit: a 45-turn run against the harness stops at the configured cap.
 
-### Phase 3: durable session state (F-03)
+### Phase 3: durable state correctness (H3; P-02, P-12 first half)
 
-This is the largest phase. Split it into reviewable PRs.
+- Chunked or blob-backed values, non-fatal checkpoint, explicit degraded mode, persisted exchange counter, documented multi-instance contract, version bump (A-4).
+- Cold-restart test against Azurite.
+- Run the crash scenario from the audit as a regression test (long replies, checkpoint every turn).
+- Retention: a deletion path and a scheduled purge matching the notice (D-4).
 
-3a. Inventory and interface
+Exit: the end-to-end run with long replies completes 40 turns with durable storage on; restart then resume restores history.
 
-1. List every per-session Map and the functions that read and write it (start with the `new Map()` hits in `chatMachine.js`, `chatService.js`, `shared.js`, `detectiveExistentialSession.js`).
-2. Define `SessionState` (plain JSON) and a `SessionStore` interface. Provide `createMemorySessionStore()`.
-3. Refactor the code to read and write one `SessionState` per turn (load at start, save at end, with the machine snapshots stored inside it). Behavior must not change: the 131 existing tests must still pass without edits other than setup helpers.
+### Phase 4: envelope slice 1, core and philosophers (E1)
 
-3b. Table Storage implementation
+Per the plan: `composeStaticSystemPrompt`, field registry (`packetRegistry.js`), `formatUserChannelMessage`, new `buildChatCompletionMessages` (system, native history, this-turn message), invariance tests. Applied to Lumen and Umbra first, with amendments A-3, A-5, A-6, A-8, A-10.
 
-4. Delete `storage/durableTableStorage.js`. Write `storage/tableSessionStore.js` on `@azure/data-tables` (already a dependency).
-5. Entity design: `PartitionKey = "EDA_session"`, `RowKey = sessionId`; scalar fields as properties; large fields (`histories`, `dossier`, snapshots) chunked into numbered string properties under the 64 KiB limit, or moved to Blob if the 1 MB entity limit is a risk. Add optimistic concurrency with ETags to avoid lost updates from concurrent requests on one session.
-6. Daily usage counter: `PartitionKey = "EDA_usageDaily"`, `RowKey = YYYY-MM-DD`, updated with ETag retry.
-7. Wire `ENABLE_DURABLE_STORAGE` plus `AZURE_STORAGE_CONNECTION_STRING` and `DOSSIER_TABLE_NAME` to select the store. Fix `server.js` to use the same factory (remove the `reloadSessionFromDurable` reference).
-8. Failure handling: if the store is unavailable, fail the turn with a clear 503 rather than silently falling back to memory (silent fallback causes the re-baseline bug).
-9. Add session expiry or cleanup (TTL by last activity, or a documented manual purge).
+Exit: harness shows one distinct system prompt per chorus agent, no mock text, roles `system, user/assistant..., user`, wire contract unchanged, calls per turn unchanged.
 
-3c. Tests
+### Phase 5: envelope slice 2, detective (E2)
 
-10. Unit tests with a fake table client: round trip, chunking, ETag conflict retry, oversize handling.
-11. Contract test: the same suite of turn-level tests runs against the memory store and the fake table store.
-12. Optional CI job with Azurite for an integration run.
+Stage handbooks (`initial`, `middle`, `final`, return, close), packet flags, drop the live `# TURN INSTRUCTIONS` tail for the detective. Real-model trial of a full scripted session before merge.
 
-Exit check: a two-process test (or a test that clears all in-memory module state between turns) continues a session correctly across turns; the isolation check and all tests pass.
+### Phase 6: envelope slice 3, attaché (E3)
 
-### Phase 4: prompts and agents (F-04, F-09, F-10)
+Needs D-6. Numbered bank with stable IDs, `ask_question_id`, `deliver_baseline_preamble`, `greeting_mode`, server stamp gated by `suspend_script`, schema and mock updates, amendments A-1 and A-2. This slice carries the most model-behavior risk; run the eval set before merge.
 
-1. Choose canonical persona text for the detective (and confirm the attaché, Lumen and Umbra personas) by diffing the stub, the `copy` files, the root-level files and `main`'s `prompt.md`. Write the result into the registry paths.
-2. Remove `buildPhilosophersCustomPrompt` and its mock text, or give it real content, per D-4. Add `lumen` and `umbra` to `TURN_BUILDERS`.
-3. Delete the deprecated shims (`attacheCustomPrompt.js`, `detectiveCustomPromptDEPRECATED.js`, the deprecated alias in `philosophersMachine.js`) after checking callers.
-4. Delete the `* copy.*` files and duplicate root-level prompts; keep or delete `attache_instructions_alt.md` after confirming it is unused.
-5. Extend `validatePromptRegistry` and add a test that fails on stub-length personas and on placeholder or mock markers in any composed system prompt (use `composeAgentPrompt` for each agent and assert on the output).
-6. Re-run the dev scenario lab and `llmPayloadPreview` for each agent and read the composed prompts end to end.
+### Phase 7: envelope slice 4, helpers (E4)
 
-Exit check: composed prompts for all four agents contain no placeholder or mock text; tests pass.
+Summarizer and dossier packets and prompts under `api/prompts/{summarizer,dossier}/`.
 
-### Phase 5: feature parity decisions (F-05)
+### Phase 8: lab, docs, deletion (E5)
 
-For each of philosopher self-dialog, easter egg, and closers (D-2):
+Retarget `llmPayloadPreview`, `chatScenarioPreview`, `logger`, `chat-scenario.html` (A-7); rewrite `docs/agent-prompt-construction.md` with the ethos, nomos, mneme, kairos map; only then delete turn-tail assembly, custom prompt builders, catalogs, `SAFE_VIEW_KEYS` as a model payload. Remove the two shim files and the placeholder prompts.
 
-1. If dropped: remove the route (or keep a documented 410 for one release), contract fields, frontend code paths, README entries and prompt files.
-2. If kept or reimplemented: write the design (endpoint or in-turn behavior, state it needs in `SessionState`, cost impact) and add it to this plan before implementing.
-3. Update `frontend/api/contracts/chat-http.contract.json` and `README.md` API surface to match.
+### Phase 9: hygiene (H4; P-06 to P-09)
 
-Exit check: README, contract and code agree on the endpoint list and response fields.
+Shared route handlers and parity test; generated config table and `.env.example` test; exclude or relocate `web/lab`; resolve the two unreferenced prompt files; retire the second Static Web App resource if it still exists (D-8).
 
-### Phase 6: configuration, docs, hygiene (F-08, F-10, F-13)
+### Phase 10: pre-release verification
 
-1. Rewrite `frontend/.env.example` to list only variables the code reads (generate the list with `rg "process.env\." frontend`), with correct defaults.
-2. Update `docs/CONFIGURATION.md`, `docs/AZURE-SWA-STRUCTURE.md`, `docs/DEPLOY-AZURE-SWA.md`, `frontend/DEPLOY-AZURE-SWA.md` (consolidate the duplicate under `frontend/`) and the README (architecture, API surface, local dev, tests).
-3. Fix the `dev` script to watch `api/prompts` and `api/src`.
-4. `.gitignore`: add `!.env.example` after `.env*`, remove the `.env_the_wrongone` line, restore a `frontend/api/.gitignore` if the Functions tooling needs it.
-5. Add `docs/ARCHITECTURE.md` (agents, state, prompt composition, request lifecycle) or fold it into the README. Keep `attacheOrchestrator-plan.md` only if it still matches the code; otherwise update or remove it.
-6. Add `CHANGELOG.md` with the `v2.0.0` entry (section 6).
+- Real OpenAI run, full scripted session per agent, token and cost per session compared with the baseline.
+- Real Azure Tables: cold start, two instances, retention job.
+- Browser check on desktop and mobile widths (the lab pages and note layout changed a lot in the base).
+- Staging deployment of the SWA preview environment from the release PR.
 
-Exit check: a fresh clone can follow the README to run `OFFLINE=1` locally and run the tests; no document references a missing file (check with a script that greps for paths in docs).
+### Phase 11: release
 
-### Phase 7: verification
+1. Tag current `main` as `v1-legacy`.
+2. Open the `xstate` to `main` PR. The only trial-merge conflict is `AGENTS.md`, which Phase 0 already resolves on `xstate`.
+3. Squash or merge commit per D-9. Tag `v2.0.0` and publish the version-break checklist.
 
-Automated:
+### What can run in parallel
 
-1. `npm test` (all tests), `npm run test:isolated`, CI green on the final PR.
-2. An end-to-end offline script: walk through attaché baselines, handoff to detective, time-away re-baseline (use the mock-return dev hook), and closure, asserting envelopes, counters and statuses.
+After Phase 1, Phases 2, 3 and 4 touch mostly different files (`shared.js` and `api/index.js`; `api/storage/*` and `chatService.js` export/restore; `api/prompting/*` and the philosopher agent files). `chatService.js` is the shared hot spot: land Phase 3's change to export/restore before Phase 4's history-format change, since A-4 depends on both.
 
-Staging (the PR to `main` creates an SWA preview environment through the existing workflow):
+## 8. Version-break checklist
 
-3. Configure the preview environment's app settings with a real `OPENAI_API_KEY`, low caps, and durable storage pointed at a test table.
-4. Manually exercise the full flow in the browser: first visit, baseline, handoff, philosopher margin notes, closure, return after a gap, reload mid-conversation (state must survive), and a second browser profile.
-5. Record token usage and latency per turn (use `DEBUG_PROMPTS_LEVEL=3` locally, or log usage from responses) to quantify F-02/F-14, then decide whether to apply a cost reduction before release.
-6. Watch the Functions logs for cold-start errors; restart the Functions host mid-session to confirm durability.
-7. Capture screenshots and a short screen recording of the browser run for the PR.
-
-Exit check: staging run completes with no errors; measured cost per session fits the chosen caps; durability confirmed across a host restart.
-
-### Phase 8: merge and release
-
-1. Pre-merge: set production Azure app settings (cap values, `ENABLE_DURABLE_STORAGE=1`, storage connection string, table name, model) before the deploy, because new code reads them at startup. Ensure `ALLOW_TEST_SEED` and `DEBUG_LOGS` are unset.
-2. Open the final PR `xstate` to `main` with: summary, link to this plan, the version-break checklist, verification evidence, and the rollback steps.
-3. Squash merge (F-12). Tag `v2.0.0` on the resulting commit.
-4. Monitor the production deploy: first requests, error rate, spend, and storage writes, for the first day.
-5. Rollback: revert the merge commit on `main` (or redeploy `v1-legacy`) and restore the previous app settings. Sessions created under v2 are not compatible with v1, which is acceptable because v1 sessions are in-memory only.
-6. Close out stale branches: `new-attache` (contained), `mid-media` (confirm abandoned, then archive via tag and delete), and the `xstate` branch after merge.
-
-Exit check: production healthy for the monitoring window; branches cleaned up.
-
-### Phase 9: follow-up, xstate decision (not blocking)
-
-After release and with durable state in place, decide between keeping xstate and replacing it with plain functions.
-
-Criteria:
-
-- Does anyone use the Stately visualizer or the machine tags and meta?
-- Does durable persistence of snapshots give real value (resume across deploys), or is it only used within a session?
-- How much of the 2k lines of machine code is wiring versus logic? (`transition()` and the policy modules are already pure.)
-- Are test and debugging costs lower with the machines?
-
-If replacing:
-
-1. Introduce `routeTurn(state, event)` as a pure function equivalent to `chatMachine` (regions become fields of a plain state object; tiers and guards become small functions). Keep `transition()` and policy functions as they are.
-2. Keep both implementations side by side behind a test that runs the same scripted sessions through each and asserts identical envelopes and state projections.
-3. Switch `chatService` to the pure implementation, remove snapshot migration code and `@xstate-layout` blobs, update the dev lab snapshot (`orchestrationLabSnapshot.js`), and remove the `xstate` dependency.
-4. Update `docs/ARCHITECTURE.md` and the plan doc.
-
-If keeping: remove the unused migration shims, keep the persist-invoke tests, and add the Stately export to the docs.
-
-## 6. Version-break checklist
-
-Include this in the `v2.0.0` release notes.
+For the `v2.0.0` notes. Items that changed from revision 1 are marked (new).
 
 - HTTP API:
-  - `POST /api/chat` success body now includes `envelope` and uses `lumen*` / `umbra*` keys (the frontend still accepts the old `leftPhilosopher*` keys, but the server no longer sends them).
-  - New `GET /api/chat-state`.
-  - `POST /api/philosopher-dialog` is removed or returns 410 (D-2).
-  - Errors follow the contract's `errorKind` field.
-- Environment variables: `AGENT_PROMPT_FILE` and `PHILOSOPHER_NOTES_FILE` are gone. New or changed: `ENABLE_DURABLE_STORAGE`, `AZURE_STORAGE_CONNECTION_STRING`, `DOSSIER_TABLE_NAME`, `ENABLE_RETURN_POLICY`, the `TIME_AWAY_*` settings, `DEBUG_STATE_LEVEL`, `DEBUG_PROMPTS_LEVEL`, `ALLOW_TEST_SEED`, `OPENAI_TIMEOUT_MS`, `DOSSIER_REFRESH_EVERY_N_DETECTIVE_TURNS`. Defaults for `MAX_USER_EXCHANGES` and `MAX_DAILY_USAGE` are set by D-1.
-- Prompt files: `prompts/prompt.md`, `closers.md`, `easter_egg_prompt.md` and the philosopher response prompts are replaced by per-agent folders with persona, instructions, catalog and schema files.
-- Product behavior: new visitors go through the attaché baseline before the detective; returning visitors are classified by time away and may be re-baselined; sessions end through the closure sequence instead of closers.
-- Cost: up to 3 LLM calls per detective turn plus periodic dossier and summarization calls.
-- Deploy layout: `contracts/` lives inside `frontend/api`; a storage account and table are required for durable state.
-- Frontend file layout: all `public/js` files renamed (`area.name.js`); any external references to the old names break.
-- Storage: sessions created under v1 do not carry over.
+  - `POST /api/chat` returns `envelope` and `lumen*`/`umbra*` keys; the legacy `leftPhilosopher*`/`rightPhilosopher*` keys are not sent.
+  - `GET /api/chat-state` is new. `POST /api/chat-sync` is new and is restricted or removed by D-5. (new)
+  - `POST /api/philosopher-dialog` returns 410 on Azure (and 404 on the dev server until P-06 is fixed).
+  - 204 means the session is past its final reply; 429 means a cap was hit. Both must be in the contract file.
+- Layout (new): `frontend/` is gone. `web/` is the static app and `api/` is the whole backend. Any external link, script or doc pointing at `frontend/` breaks.
+- Environment variables: removed `AGENT_PROMPT_FILE`, `PHILOSOPHER_NOTES_FILE`; changed meaning or default for `MAX_USER_EXCHANGES`, `MAX_DAILY_USAGE`; added `DURABLE_STORAGE_MODE`, `AZURE_STORAGE_CONNECTION_STRING`, `DOSSIER_TABLE_NAME`, the `TIME_AWAY_*` family, `ENABLE_RETURN_POLICY`, `ALLOW_TEST_SEED`, `DEBUG_STATE_LEVEL`, `DEBUG_PROMPTS_LEVEL`, `OPENAI_TIMEOUT_MS`.
+- Prompts: model text lives in `api/prompts/<agent>/`; composer code in `api/prompting/`. After the envelope slices the system prompt is the same on every turn and per-turn state is a JSON packet after which the querent text follows `---QUERENT---` (new).
+- Model-visible history is native `user` and `assistant` messages instead of one flattened block (new).
+- Storage (new): schema is greenfield. Recreate the table; sessions and dossiers from v1 and from any pre-release build do not carry over. Retention follows the privacy notice.
+- Cost: still several LLM calls per detective turn (3.4 measured) unless D-7 changes it. Caps are real after Phase 2.
+- Frontend: files renamed under `web/js/<area>/`; deploy uses `app_location: web`, `api_location: api`.
 
-## 7. Decisions needed from the owner
+## 9. Decisions needed from the owner
+
+Already decided by the directives: the frozen-packet branch is the base (D-0); PR #4 targets `xstate`; PR #3 is closed; XState stays (the envelope plan scopes its replacement out).
 
 | ID | Decision | Recommendation |
 | --- | --- | --- |
-| D-1 | Default `MAX_USER_EXCHANGES` and `MAX_DAILY_USAGE`, and the unit for the daily cap | Exchange cap high enough to cover the baseline plus a real conversation (for example 30 to 40), daily cap per turn, both overridable via app settings. Re-tune after the cost measurement in Phase 7. |
-| D-2 | Keep, drop or reimplement: philosopher self-dialog, easter egg, closers | Drop the self-dialog endpoint (frontend already stopped using it) and fix the docs; keep the closure sequence in place of closers; defer the easter egg to a later release. |
-| D-3 | Durable state now or documented limitation | Implement it (Phase 3). It is the only way a serverless deployment behaves correctly. |
-| D-4 | Lumen and Umbra prompt tails: write real content or remove the mock | Remove the mock now, add real tails later if the design calls for them. |
-| D-5 | Which Static Web App and workflow is production | Confirm, then delete the other workflow (F-11). |
-| D-6 | Squash merge or merge commit | Squash, plus a detailed PR description and changelog. |
-| D-7 | Keep xstate or replace it | Defer to Phase 9. |
+| D-1 | Merge style for PR #4 | Merge commit, to preserve the rename history across the restructure. |
+| D-2 | Keep Track H (hardening) as its own PRs before the envelope slices | Yes. CI and the harness first; the remaining hardening can overlap with slice 1. |
+| D-3 | Cap values and unit | Per-session cap high enough for the baseline plus a real conversation (about 40 exchanges); daily cap counted in user turns, not LLM calls; both app settings. Re-tune after Phase 10 measurement. Decide whether the daily cap is global or per user. |
+| D-4 | Durable storage shape and retention | Chunked table values for now, Blob later if rows keep growing. Retention exactly as the privacy notice says (24 months, delete-by-user path). |
+| D-5 | Keep or remove `POST /api/chat-sync` | Remove it unless an offline-first client feature needs it; the server already retains history. |
+| D-6 | Bracket tags on baseline-1 questions: shown to the querent or stripped | Treat as metadata and strip in the bank builder, unless they are intentional liturgy. |
+| D-7 | Reduce the per-turn chorus calls | Defer. Revisit with real cost numbers from Phase 10. |
+| D-8 | Which Static Web App is production, and retire the other | Confirm; delete the unused SWA resource and its token secret. |
+| D-9 | Release PR style | Squash with a detailed description and changelog, since slices will have been reviewed individually. |
+| D-10 | Keep lab pages in the production artifact | No. Exclude or relocate them. |
 
-## 8. Appendix: how the evidence was gathered
+## 10. Appendix: evidence and how to reproduce it
 
-- Branch comparison: `git merge-base`, `git rev-list --count`, `git diff --stat origin/main...origin/xstate`, and `git merge-tree --write-tree origin/main origin/xstate` (clean, no conflicts).
-- Tests: `cd frontend/api && npm ci && npm test` on a worktree of `origin/xstate` (131 pass, 0 fail).
-- Offline run: `OFFLINE=1 node frontend/server.js`, then `POST /api/chat` four times with a cookie jar and `GET /api/chat-state`.
-- F-01 reproduction: copy `frontend/api` alone to a temp directory and run `node -e 'require("./src/index.js")'` with `OFFLINE=1`.
-- F-03: `node -e 'require("./src/storage/durableTableStorage")'` gives `SyntaxError: Unexpected end of input`; `rg reloadSessionFromDurable` finds only the call in `server.js`.
-- F-02: `rg "incrementDailyUsage|readDailyUsage"` shows no call site in the chat path; `shared.js` lines 28 to 29 show the defaults.
-- F-04: `wc -c` on the prompt files, and reading `philosophersCustomPrompt.js` and the `chatService.js` call sites.
-- New blob volume: `git rev-list --objects origin/main..origin/xstate | git cat-file --batch-check` (359 blobs, about 4 MB).
+Artifacts from this revision (in `/opt/cursor/artifacts/`): `plan-branch-audit.log` (all numbers in sections 3 to 5) and `plan-branch-chat-smoke.webp` (chat UI on the base).
+
+Commands used, from a worktree of `origin/plan/frozen-packet-envelope` (`git worktree add /tmp/pk origin/plan/frozen-packet-envelope --detach`):
+
+- Branch relationship: `git merge-base`, `git log --oneline origin/xstate..origin/plan/frozen-packet-envelope`, `git diff --stat origin/xstate...origin/plan/frozen-packet-envelope`.
+- Merge checks: `git merge-tree --write-tree --name-only` for the base into `main` (one conflict, `AGENTS.md`) and for PR #3's branch into the base (roughly 30 conflicts).
+- Tests: `cd api && npm ci && npm test` (131 pass, 1 skipped), `node --test` (133 pass, 1 skipped).
+- Deploy isolation: copy `api/` to a temp directory and run `node -e 'require("./index.js")'` with `OFFLINE=1`.
+- Behavior and payloads: a fake OpenAI-compatible server (`OPENAI_BASE_URL=http://127.0.0.1:4999/v1`) that returns schema-valid JSON and records each request; `server-dev.js` driven with 45 `POST /api/chat` calls through a cookie jar; request bodies grouped by `response_format.json_schema.name`.
+- Caps: `GET /api/debug` with `DEBUG_LOGS=1` after the run.
+- chat-sync: `POST /api/chat-sync` with `{"clientSeq":9999,"messages":[{"role":"assistant","text":"FORGED"}]}`, then `GET /api/chat-state`.
+- Table limits: Azurite (`npm i azurite`, `azurite-table`), `UseDevelopmentStorage=true`, `saveSessionCheckpoint` with increasing payloads.
+- Crash: `DURABLE_STORAGE_MODE=azurite SESSION_CHECKPOINT_EVERY_K_TURNS=1` with 1.5 KB replies, 30 sequential chat requests.
+- Question bank: parse `api/prompts/attache/attache_questions.json` (20, 27, 24 questions; one duplicate; 20 of 20 baseline-1 entries end with a bracket tag).
+- Browser: Chrome against the dev server on the base: landing, chat route, three exchanges, reload restores the transcript.
+- Privacy and retention: `web/content/privacy-notice.md` section 8 versus `git grep -nE "deleteEntity|purge|retention" -- api` (no match).
+
+Limits of this evidence: all LLM behavior was observed through a fake endpoint, so nothing here measures model quality or real token cost. Azure behavior was observed on Azurite, which enforced the same property-size limits as the service documents. Multi-instance behavior was reasoned from the code, not run.
