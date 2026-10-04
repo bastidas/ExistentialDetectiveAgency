@@ -24,6 +24,16 @@ Unified landing, querent chat, and poem experiences served from `web/` and power
 
 `npm run dev` wraps `server-dev.js` with `nodemon`. Use `npm start` without live reload. `npm test` runs the API test suite.
 
+### Testing
+
+Run from `api/` (or the repo root with `npm test`):
+
+- `npm test` — all `*.test.js` under `api/` (`node --test`). Storage tests need Azurite; without it they skip locally and fail when `CI=true`. To run them: `npx --package azurite azurite-table`, then set `DURABLE_STORAGE_MODE=azurite`, `AZURE_STORAGE_CONNECTION_STRING=UseDevelopmentStorage=true`, `DOSSIER_TABLE_NAME=edatest`.
+- `npm run test:isolated` — copies `api/` alone to a temp folder and loads `index.js`, as the Azure deploy would.
+- `npm run baseline` — prints how many model calls a 45-turn session makes and how stable each agent's system prompt is. Compare before and after any prompt change.
+- `api/test-support/fakeOpenAI.js` — an OpenAI-compatible server that records every request. Start it standalone with `FAKE_PORT=4999 node api/test-support/fakeOpenAI.js` and run the app with `OPENAI_BASE_URL=http://127.0.0.1:4999/v1 OPENAI_API_KEY=sk-fake npm start`.
+- `api/test-support/knownDefects*.test.js` — documented bugs as `todo` tests. They report as `# TODO` while the bug exists.
+
 ### API surface
 - `GET /api/debug` — diagnostics when `DEBUG_LOGS=1`.
 - `POST /api/chat` — main querent endpoint.

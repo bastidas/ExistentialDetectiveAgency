@@ -21,6 +21,8 @@ api/                 # SWA api_location — Functions + all backend code
     shared/          # LLM payload helpers, mock, refusal
     attache/, detective/, philosophers/
   dossier/, orchestration/, session/, storage/, lab/
+  test-support/      # fake OpenAI server, call analysis, harness tests (not shipped logic)
+  scripts/           # check-isolated, baseline-report
 server-dev.js        # local Express only (serves web/, requires api/)
 docs/, archive/, .cursor/
 ```
@@ -36,6 +38,7 @@ docs/, archive/, .cursor/
 | Shared LLM plumbing | `api/agents/shared/` |
 | Turn routing | `api/orchestration/`, `api/chatService.js` |
 | HTTP contract | `api/contracts/` |
+| Test harness (fake OpenAI, payload capture, known-defect tests) | `api/test-support/` |
 
 ## Rules
 
@@ -43,4 +46,6 @@ docs/, archive/, .cursor/
 - Anything production `require()`s must live inside `api/` (SWA only deploys that folder for Functions).
 - `api/prompts/` is model text; `api/prompting/` is composer code. Do not mix them.
 - `api/agents/shared/` is not a character. Character code goes under `attache`, `detective`, or `philosophers`.
+- Tests: `npm test` (from repo root or `api/`) runs every `*.test.js` under `api/`; do not list test files by hand. Run `npm run test:isolated` in `api/` after adding any `require()` that might leave `api/`.
+- Known defects are `todo` tests in `api/test-support/knownDefects*.test.js`; when you fix one, remove its `todo` option in the same PR.
 - Local: `npm run dev` (Express). Production: SWA workflows with `app_location: web`, `api_location: api`.
