@@ -593,6 +593,19 @@ function detectiveClosurePhaseFromExchangeSum(sumBefore, maxEx) {
   return null;
 }
 
+/**
+ * True when the session has used its final exchange, so the next request is answered with 204 and
+ * makes no model call. Mirrors the first check in `composeChatResponse`.
+ *
+ * @param {string} sessionId
+ * @param {number} maxUserExchanges
+ * @returns {boolean}
+ */
+function isSessionPastFinalExchange(sessionId, maxUserExchanges) {
+  const maxEx = resolveMaxUserExchanges({ maxUserExchanges });
+  return getAttacheExchangeCount(sessionId) + getDetectiveTurnCount(sessionId) >= maxEx + 1;
+}
+
 async function composeChatResponse(sessionId, message, options = {}) {
   /** @type {unknown[]} */
   const llmRefusalMetas = [];
@@ -1161,6 +1174,7 @@ function simulateAttacheLabAdvanceQuestionIndexWithinPhase(sessionId) {
 
 module.exports = {
   composeChatResponse,
+  isSessionPastFinalExchange,
   mergeDossierFromTableIfNewer,
   exportSessionRuntimeForDurable,
   restoreSessionRuntimeFromDurable,
