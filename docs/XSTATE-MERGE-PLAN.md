@@ -137,7 +137,9 @@ Baseline behavior measured on the base (45 user turns against a fake OpenAI endp
 
 Severity scale: Blocker (do not release), High (fix before release), Medium (fix before or soon after release), Low.
 
-### P-01 (Blocker): spend and exchange caps are inert
+### P-01 (Blocker): spend and exchange caps are inert by default
+
+Correction after building the harness (PR #5): the per-session exchange cap does work when `MAX_USER_EXCHANGES` is set. With a limit of 3, the fourth turn is still answered, then every later turn returns 204 with zero upstream calls. The daily cap is the part that is truly inert, and the defaults make both of them ineffective.
 
 - `MAX_USER_EXCHANGES` and `MAX_DAILY_USAGE` default to 1,000,000 in `api/shared.js`. `.env.example` documents defaults of 5 and 100, which is wrong by four to five orders of magnitude.
 - `incrementDailyUsage()` is defined in both stores and has no caller. `dailyCount` stayed at 0 after 45 turns.
@@ -235,6 +237,12 @@ Remediation: generate the variable table from `api/config.js`, and add a test th
 
 All 20 baseline-1 questions end with a bracket tag, for example `Do you dream about being interlinked? [interlinked]`. No code strips them. The envelope plan has the server stamp the question text verbatim into the reply, so the tag would be shown to the querent. Decide whether the tag is part of the liturgy or metadata (D-6). Baseline 1 also contains one duplicate string; the plan already says IDs must be index-stable.
 
+### P-13 (High): a failed model call is shown to the querent as an internal diagnostic
+
+Found while building the harness. When the provider call fails (reproduced with an HTTP 500 from the fake server), `POST /api/chat` still returns HTTP 200 and the reply text is the `[Mock LLM] attache ... Mock query (persona + instructions + turn schema + custom): attache_persona.md + attache_instructions.md ... LLM-safe state: {...}` block from `api/agents/shared/mockAgentTurn.js`. The querent sees prompt file names, state, and the user's own text echoed back, and no error is signaled (200, no `errorKind`). The same diagnostic is used when the model returns an empty `user_response`.
+
+Remediation: on provider failure or an empty model reply, return a non-200 with `errorKind` from the contract (or an in-character retry line, per D-11), log the diagnostic server-side only, and keep the mock path behind `OFFLINE=1`. Tracked as a `todo` test in `api/test-support/knownDefects.test.js`.
+
 ### P-12 (High): the privacy notice promises deletion that does not exist
 
 `web/content/privacy-notice.md` says conversation and session records are deleted 24 months after the last visit and logs are kept about 90 days. The durable store writes session rows (full thread events, orchestration state with chat histories) and dossiers (derived traits) and nothing ever deletes them (`rg deleteEntity` finds no match). Dossiers are keyed by user cookie for up to 400 days.
@@ -293,6 +301,8 @@ Principles:
 Exit: `xstate` equals the base, PR #2 (this document) is in review.
 
 ### Phase 1: safety net (H1)
+
+Status: implemented in PR #5 (`cursor/ci-test-harness-7b2f`, targeting `xstate`). CI is green on Node 20 and 22 with 167 tests, 9 of them `todo` defect markers.
 
 Scope: `.github/workflows/test.yml`, `api/package.json` test script, a fake OpenAI test harness, an isolated-deploy check, a contract test.
 
@@ -397,6 +407,7 @@ Already decided by the directives: the frozen-packet branch is the base (D-0); P
 | D-8 | Which Static Web App is production, and retire the other | Confirm; delete the unused SWA resource and its token secret. |
 | D-9 | Release PR style | Squash with a detailed description and changelog, since slices will have been reviewed individually. |
 | D-10 | Keep lab pages in the production artifact | No. Exclude or relocate them. |
+| D-11 | What the querent sees when the model call fails (P-13) | A short in-character line with an error status and `errorKind`, so the UI can offer a retry; diagnostics stay in server logs. |
 
 ## 10. Appendix: evidence and how to reproduce it
 
@@ -409,7 +420,7 @@ Commands used, from a worktree of `origin/plan/frozen-packet-envelope` (`git wor
 - Tests: `cd api && npm ci && npm test` (131 pass, 1 skipped), `node --test` (133 pass, 1 skipped).
 - Deploy isolation: copy `api/` to a temp directory and run `node -e 'require("./index.js")'` with `OFFLINE=1`.
 - Behavior and payloads: a fake OpenAI-compatible server (`OPENAI_BASE_URL=http://127.0.0.1:4999/v1`) that returns schema-valid JSON and records each request; `server-dev.js` driven with 45 `POST /api/chat` calls through a cookie jar; request bodies grouped by `response_format.json_schema.name`.
-- Caps: `GET /api/debug` with `DEBUG_LOGS=1` after the run.
+- Caps: `GET /api/debug` with `DEBUG_LOGS=1` after the run. Exchange cap with `MAX_USER_EXCHANGES=3`: turns 1 to 4 answered, turn 5 onward 204 with no upstream calls.
 - chat-sync: `POST /api/chat-sync` with `{"clientSeq":9999,"messages":[{"role":"assistant","text":"FORGED"}]}`, then `GET /api/chat-state`.
 - Table limits: Azurite (`npm i azurite`, `azurite-table`), `UseDevelopmentStorage=true`, `saveSessionCheckpoint` with increasing payloads.
 - Crash: `DURABLE_STORAGE_MODE=azurite SESSION_CHECKPOINT_EVERY_K_TURNS=1` with 1.5 KB replies, 30 sequential chat requests.
