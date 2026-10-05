@@ -12,10 +12,13 @@ const {
 } = require("./orchestration/chatMachine");
 const { classifyTimeAway } = require("./orchestration/timeAwayClassification");
 const apiConfig = require("./config");
-const { createChatStateSnapshotBody } = require("./contracts/chatApiContract");
+const { createChatStateSnapshotBody, buildChatPostErrorBody } = require("./contracts/chatApiContract");
 const { getDebugStateLevel } = require("./logger");
 const durableTableStorage = require("./storage/durableTableStorage");
 const threadEvents = require("./storage/threadEvents");
+const usageLimits = require("./usage/usageLimits");
+const dailyUsageStores = require("./usage/dailyUsageStore");
+const { createRateLimiter, clientKeyFromHeaders } = require("./usage/rateLimiter");
 
 const DEV = /^(1|true|yes)$/i.test(process.env.DEV || "");
 const OFFLINE = /^(1|true|yes)$/i.test(process.env.OFFLINE || "");
@@ -27,8 +30,11 @@ const DEBUG_STATE = DEBUG_STATE_LEVEL >= 1;
 
 const MODEL = process.env.OPENAI_MODEL || "gpt-4o";
 const SERVICE_TIER = process.env.OPENAI_SERVICE_TIER || "";
-const MAX_USER_EXCHANGES = Number(process.env.MAX_USER_EXCHANGES || 1_000_000);
-const MAX_DAILY_USAGE = Number(process.env.MAX_DAILY_USAGE || 1_000_000);
+const LIMITS = usageLimits.resolveLimits();
+const MAX_USER_EXCHANGES = LIMITS.maxUserExchanges;
+const MAX_DAILY_USAGE = LIMITS.maxDailyUsage;
+const MAX_MESSAGE_CHARS = LIMITS.maxMessageChars;
+const burstLimiter = createRateLimiter({ max: LIMITS.maxRequestsPerMinute, windowMs: 60_000 });
 
 /** @deprecated Prefer `apiConfig.resolveDurableStorageMode()`; kept for legacy `/api/debug` and callers. */
 const ENABLE_DURABLE_STORAGE = /^(1|true|yes)$/i.test(process.env.ENABLE_DURABLE_STORAGE || "");
@@ -59,38 +65,6 @@ const SESSION_ID_COOKIE_NAME = "sessionId";
 const USER_ID_COOKIE_NAME = "edaUserId";
 const SESSION_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 const USER_COOKIE_MAX_AGE_SECONDS = 400 * 24 * 60 * 60;
-
-function createFileDailyUsageStore(dataDir) {
-  const filePath = path.join(dataDir, "daily_usage.json");
-  return {
-    readDailyUsage() {
-      try {
-        const raw = fs.readFileSync(filePath, "utf8");
-        const j = JSON.parse(raw);
-        return typeof j.count === "number" ? j.count : 0;
-      } catch (_) {
-        return 0;
-      }
-    },
-    incrementDailyUsage() {
-      const n = this.readDailyUsage() + 1;
-      fs.mkdirSync(dataDir, { recursive: true });
-      fs.writeFileSync(filePath, JSON.stringify({ count: n }));
-    },
-  };
-}
-
-function createMemoryDailyUsageStore() {
-  let count = 0;
-  return {
-    readDailyUsage() {
-      return count;
-    },
-    incrementDailyUsage() {
-      count += 1;
-    },
-  };
-}
 
 function parseCookieValue(cookieHeader, cookieName) {
   const h = typeof cookieHeader === "string" ? cookieHeader : "";
@@ -296,8 +270,65 @@ async function getChatStateForSession(sessionId, userId) {
   });
 }
 
+/**
+ * @param {string} message
+ * @returns {{ status: number, body: object }|null}
+ */
+function rejectMessageLength(message) {
+  if (message.length <= MAX_MESSAGE_CHARS) return null;
+  return {
+    status: 400,
+    body: buildChatPostErrorBody({
+      error: `That message is too long (limit ${MAX_MESSAGE_CHARS} characters).`,
+      errorKind: "bad_request",
+    }),
+  };
+}
+
+/**
+ * Per-client burst check. Callers pass `options.clientKey` (see `clientKeyFromHeaders`); without a
+ * key the check is skipped.
+ *
+ * @param {{ clientKey?: string }|undefined} options
+ * @returns {{ status: number, body: object }|null}
+ */
+function rejectBurst(options) {
+  const key = options && options.clientKey;
+  if (!key) return null;
+  const verdict = burstLimiter.check(key);
+  if (verdict.allowed) return null;
+  return {
+    status: 429,
+    body: buildChatPostErrorBody({ error: usageLimits.RATE_LIMIT_MESSAGE, errorKind: "rate_limit" }),
+  };
+}
+
 async function handleChatRequest(sessionId, trimmed, options) {
+  const tooLong = rejectMessageLength(trimmed);
+  if (tooLong) return tooLong;
+  const burst = rejectBurst(options);
+  if (burst) return burst;
+
   await hydrateSessionFromDurable(sessionId);
+
+  const dailyStore = options && options.dailyUsageStore;
+  const spendsModelTurn = !apiConfig.OFFLINE && !!(options && options.openaiClient);
+  const sessionClosed = chatService.isSessionPastFinalExchange(sessionId, MAX_USER_EXCHANGES);
+  let reservedCount = null;
+  if (spendsModelTurn && !sessionClosed && dailyStore && typeof dailyStore.reserveTurn === "function") {
+    const reservation = await dailyStore.reserveTurn(MAX_DAILY_USAGE);
+    if (!reservation.allowed) {
+      return {
+        status: 429,
+        body: buildChatPostErrorBody({
+          error: usageLimits.DAILY_LIMIT_MESSAGE,
+          errorKind: "rate_limit",
+        }),
+      };
+    }
+    reservedCount = reservation.count;
+  }
+
   const prev = userExchangeCounts.get(sessionId) ?? 0;
   const exchangeCount = prev + 1;
   userExchangeCounts.set(sessionId, exchangeCount);
@@ -308,9 +339,11 @@ async function handleChatRequest(sessionId, trimmed, options) {
   lastActivityAtBySession.set(sessionId, now);
 
   const dailyUsage =
-    options && options.dailyUsageStore && typeof options.dailyUsageStore.readDailyUsage === "function"
-      ? options.dailyUsageStore.readDailyUsage()
-      : 0;
+    reservedCount != null
+      ? reservedCount
+      : dailyStore && typeof dailyStore.readDailyUsage === "function"
+        ? await dailyStore.readDailyUsage()
+        : 0;
 
   const out = await chatService.composeChatResponse(sessionId, trimmed, {
     ...options,
@@ -368,36 +401,44 @@ async function handleChatStream(sessionId, trimmed, options, onEvent) {
   await onEvent({ type: "final", status: result.status, body: result.body });
 }
 
-async function handleChatSync(sessionId, userId, payload) {
+/**
+ * Recovery path for a client whose local transcript is ahead of what the server holds (for example
+ * after a restart that lost in-memory state). It can only append events beyond the ones the server
+ * already has: it never rewrites or removes stored events, only whitelisted event kinds are
+ * accepted, sizes are capped, and `serverSeq` advances by the number of user turns appended rather
+ * than to whatever number the client sends.
+ *
+ * @param {string} sessionId
+ * @param {string|null} userId
+ * @param {{ clientSeq?: number, messages?: unknown[] }} payload
+ * @param {{ clientKey?: string }} [options]
+ */
+async function handleChatSync(sessionId, userId, payload, options) {
+  if (rejectBurst(options)) return { ok: false, reason: "rate_limited" };
   await hydrateSessionFromDurable(sessionId);
-  const localMessages = payload && Array.isArray(payload.messages) ? payload.messages : [];
   const clientSeq =
     payload && typeof payload.clientSeq === "number" && Number.isFinite(payload.clientSeq)
       ? Math.max(0, Math.floor(payload.clientSeq))
       : 0;
   const currentSeq = threadSeqBySession.get(sessionId) || 0;
-  if (clientSeq <= currentSeq || localMessages.length === 0) {
+  const current = threadEventsBySession.get(sessionId) || [];
+  const incoming = payload && Array.isArray(payload.messages) ? payload.messages : [];
+  if (clientSeq <= currentSeq || incoming.length === 0) {
     return { ok: true, serverSeq: currentSeq };
   }
-  const normalizedEvents = [];
-  for (let i = 0; i < localMessages.length; i += 1) {
-    const m = localMessages[i];
-    if (!m || typeof m !== "object") continue;
-    const role = m.role === "assistant" ? "assistant" : "user";
-    const kind = role === "user" ? "user" : m.kind || "detective";
-    normalizedEvents.push({
-      ts: Date.now(),
-      phase: "detective",
-      kind: String(kind),
-      text: String(m.text || ""),
-      agent: role === "user" ? "user" : m.agent || "detective",
-    });
+  const tail = threadEvents.sanitizeSyncedMessages(incoming.slice(current.length), {
+    maxEvents: 4 * (MAX_USER_EXCHANGES + 2),
+    maxChars: Math.max(MAX_MESSAGE_CHARS, 8000),
+  });
+  const userTurnsAppended = tail.filter((e) => e.kind === "user").length;
+  if (userTurnsAppended === 0) {
+    return { ok: true, serverSeq: currentSeq };
   }
-  const merged = threadEvents.trimEvents(normalizedEvents);
-  threadEventsBySession.set(sessionId, merged);
-  threadSeqBySession.set(sessionId, clientSeq);
+  const nextSeq = Math.min(clientSeq, currentSeq + userTurnsAppended);
+  threadEventsBySession.set(sessionId, threadEvents.trimEvents(current.concat(tail)));
+  threadSeqBySession.set(sessionId, nextSeq);
   await saveSessionCheckpointToDurable(sessionId, userId, getChatEnvelopeForSession(sessionId));
-  return { ok: true, serverSeq: clientSeq };
+  return { ok: true, serverSeq: nextSeq };
 }
 
 module.exports = {
@@ -423,8 +464,11 @@ module.exports = {
   PROMPTS_DIR,
   userExchangeCounts,
   threadEventsBySession,
-  createFileDailyUsageStore,
-  createMemoryDailyUsageStore,
+  createFileDailyUsageStore: dailyUsageStores.createFileDailyUsageStore,
+  createMemoryDailyUsageStore: dailyUsageStores.createMemoryDailyUsageStore,
+  createDailyUsageStore: dailyUsageStores.createDailyUsageStore,
+  clientKeyFromHeaders,
+  MAX_MESSAGE_CHARS,
   SESSION_ID_COOKIE_NAME,
   USER_ID_COOKIE_NAME,
   SESSION_COOKIE_MAX_AGE_SECONDS,

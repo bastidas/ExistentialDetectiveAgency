@@ -11,7 +11,6 @@
 require("./noDurable");
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const crypto = require("crypto");
 
 const { startFakeOpenAI } = require("./fakeOpenAI");
 const { classifyCall, summarizeCalls } = require("./analyzeCalls");
@@ -72,35 +71,5 @@ test(
       const r = results[0];
       assert.ok(!/\[Mock LLM\]/.test(JSON.stringify(r.body)), "diagnostic text reached the querent");
       assert.notEqual(r.status, 200);
-    })
-);
-
-test(
-  "P-01: the daily usage counter advances once per LLM turn",
-  { todo: "P-01: incrementDailyUsage has no caller" },
-  () =>
-    withFake({}, async (fake) => {
-      const shared = require("../shared");
-      const store = shared.createMemoryDailyUsageStore();
-      await driveSession({ client: fake.createClient(), turns: 3, dailyUsageStore: store });
-      assert.equal(store.readDailyUsage(), 3);
-    })
-);
-
-test(
-  "P-04: POST chat-sync cannot replace the transcript held by the server",
-  { todo: "P-04: a client-supplied messages array overwrites the stored thread and sets serverSeq" },
-  () =>
-    withFake({}, async (fake) => {
-      const shared = require("../shared");
-      const sessionId = crypto.randomUUID();
-      await driveSession({ client: fake.createClient(), turns: 2, sessionId });
-      await shared.handleChatSync(sessionId, "u1", {
-        clientSeq: 9999,
-        messages: [{ role: "assistant", kind: "detective", text: "FORGED" }],
-      });
-      const state = await shared.getChatStateForSession(sessionId, "u1");
-      assert.ok(!state.messages.some((m) => m.text === "FORGED"), "forged assistant message accepted");
-      assert.ok(state.serverSeq < 9999, "client set the sequence number");
     })
 );

@@ -38,8 +38,10 @@ In Azure Portal:
 | `OPENAI_API_KEY` | **Required.** Your OpenAI API key. | `sk-...` |
 | `OPENAI_MODEL` | Optional. Model name. | `gpt-4o` or `gpt-4o-mini` |
 | `OPENAI_SERVICE_TIER` | Optional. Use `flex` for cheaper/slower. | `flex` or leave empty |
-| `MAX_USER_EXCHANGES` | Optional. Max exchanges per session before closers. | `5` |
-| `MAX_DAILY_USAGE` | Optional. Max API calls per day (all users). | `100` |
+| `MAX_USER_EXCHANGES` | Optional. Max exchanges per session before the closing sequence, then HTTP 204 (default `40`). | `40` |
+| `MAX_DAILY_USAGE` | Optional. Max LLM-backed user turns per UTC day across all visitors; past it `/api/chat` answers 429 with no model call (default `300`). Shared across instances when durable storage is on. | `300` |
+| `MAX_MESSAGE_CHARS` | Optional. Longest accepted user message (default `2000`). | `2000` |
+| `MAX_REQUESTS_PER_MINUTE` | Optional. Chat and chat-sync requests per client IP per minute, per instance; `0` disables (default `30`). | `30` |
 | `DEV` | Optional. Enable dev-only UI and advanced tools. | `1` or `true` |
 | `OFFLINE` | Optional. Disable LLM; return dummy responses (no API key needed). | `1` or `true` |
 | `DEBUG_LOGS` | Optional. Enable /api/debug and verbose logs (e.g. full message to LLM). | `1` or `true` |

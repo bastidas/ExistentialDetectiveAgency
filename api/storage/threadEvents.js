@@ -78,7 +78,45 @@ function toChatStateMessages(events) {
     });
 }
 
+/** Event kinds the server itself writes (see `appendTurn`); client-synced events must use one of them. */
+const SYNCABLE_KINDS = Object.freeze({
+  user: { phase: "detective", agent: "user" },
+  attache: { phase: "baseline", agent: "attache" },
+  detective: { phase: "detective", agent: "detective" },
+  lumen_user: { phase: "detective", agent: "lumen" },
+  umbra_user: { phase: "detective", agent: "umbra" },
+});
+
+/**
+ * Turn client-supplied transcript lines into server thread events. Unknown kinds, non-objects,
+ * empty text and anything past `maxEvents` are dropped, text is cut to `maxChars`, and the agent
+ * and phase are derived from the kind rather than trusted from the client.
+ *
+ * @param {unknown} messages
+ * @param {{ maxEvents: number, maxChars: number }} limits
+ * @returns {Array<{ ts: number, phase: string, kind: string, text: string, agent: string }>}
+ */
+function sanitizeSyncedMessages(messages, limits) {
+  const list = Array.isArray(messages) ? messages : [];
+  const out = [];
+  for (const m of list) {
+    if (out.length >= limits.maxEvents) break;
+    if (!m || typeof m !== "object") continue;
+    const role = m.role === "assistant" ? "assistant" : "user";
+    const kind = role === "user" ? "user" : String(m.kind || "detective");
+    const spec = Object.prototype.hasOwnProperty.call(SYNCABLE_KINDS, kind) ? SYNCABLE_KINDS[kind] : null;
+    if (!spec) continue;
+    if (role === "user" && kind !== "user") continue;
+    if (role === "assistant" && kind === "user") continue;
+    const text = typeof m.text === "string" ? m.text.slice(0, limits.maxChars) : "";
+    if (!text.trim()) continue;
+    out.push({ ts: Date.now(), phase: spec.phase, kind, text, agent: spec.agent });
+  }
+  return out;
+}
+
 module.exports = {
+  sanitizeSyncedMessages,
   MAX_THREAD_EVENTS,
   MAX_THREAD_JSON_CHARS,
   trimEvents,
