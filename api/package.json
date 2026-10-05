@@ -5,7 +5,9 @@
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
-    "test": "node --test logger.debugPrompts.test.js prompting/promptComposer.smoke.test.js prompting/turnBuilderRegistry.attache.test.js prompting/turnInstructionsExtract.test.js prompting/instructionSelection.attache.test.js agents/attache/attachePromptContext.test.js agents/attache/attachePromptPolicy.test.js agents/attache/attacheDomainTransitions.test.js orchestration/chatMachine.persist-invoke.test.js orchestration/orchestrationLabSnapshot.test.js lab/chatTestSeed.test.js lab/chatScenarioPreview.test.js dossier/dossier.therapistSafe.test.js dossier/dossierLabPreset.test.js narrativePhases.test.js agents/shared/buildChatCompletionMessages.test.js agents/shared/llmPayloadPreview.test.js agents/detective/existentialTherapyPhase.test.js storage/durableTableStorage.azurite.test.js"
+    "test": "node --test",
+    "test:isolated": "node scripts/check-isolated.js",
+    "baseline": "node scripts/baseline-report.js"
   },
   "engines": {
     "node": ">=18"

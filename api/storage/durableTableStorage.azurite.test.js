@@ -9,6 +9,15 @@ const skipAzurite =
   !String(process.env.AZURE_STORAGE_CONNECTION_STRING || "").trim() ||
   !String(process.env.DOSSIER_TABLE_NAME || "").trim();
 
+// A silently skipped storage test is a green build that proves nothing: fail in CI instead.
+if (skipAzurite && /^(1|true)$/i.test(process.env.CI || "")) {
+  test("Azurite must be configured in CI", () => {
+    assert.fail(
+      "Set DURABLE_STORAGE_MODE=azurite, AZURE_STORAGE_CONNECTION_STRING and DOSSIER_TABLE_NAME (see .github/workflows/test.yml)."
+    );
+  });
+}
+
 test(
   "durable Table round-trip (Azurite): session + orchestration JSON",
   { skip: skipAzurite },

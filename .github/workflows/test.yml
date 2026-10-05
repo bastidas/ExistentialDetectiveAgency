@@ -1,0 +1,73 @@
+name: API tests
+
+on:
+  pull_request:
+    branches:
+      - main
+      - xstate
+  push:
+    branches:
+      - main
+      - xstate
+  workflow_dispatch:
+
+concurrency:
+  group: api-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
+    defaults:
+      run:
+        working-directory: api
+    env:
+      CI: "true"
+      DURABLE_STORAGE_MODE: azurite
+      AZURE_STORAGE_CONNECTION_STRING: UseDevelopmentStorage=true
+      DOSSIER_TABLE_NAME: edatest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Start Azurite (Table service)
+        run: |
+          npx --yes --package azurite@3.37.0 azurite-table --silent --tableHost 127.0.0.1 --location "$RUNNER_TEMP/azurite" &
+          for i in $(seq 1 30); do
+            if (echo > /dev/tcp/127.0.0.1/10002) 2>/dev/null; then echo "Azurite is up"; exit 0; fi
+            sleep 1
+          done
+          echo "Azurite did not start" >&2
+          exit 1
+
+      - name: Unit, integration and harness tests
+        run: npm test
+
+      - name: API loads when only api/ is deployed
+        run: npm run test:isolated
+
+      - name: Prompt and payload baseline
+        if: matrix.node == 22
+        run: |
+          {
+            echo "### Prompt and payload baseline"
+            echo
+            npm run --silent baseline 2>/dev/null
+          } >> "$GITHUB_STEP_SUMMARY"
