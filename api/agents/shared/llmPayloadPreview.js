@@ -7,10 +7,11 @@
 
 /** Lab copy: how prior turns appear in a user message (sent as a user-role message after schema, when non-empty). */
 const LAB_HISTORY_NOTE =
-  "Prior user/assistant turns formatted for the model (formatConversationHistoryBlock). Empty on a new thread.";
+  "Prior turns as native user/assistant messages (last HISTORY_TAIL_TURNS). Empty on a new thread.";
 
 /** Lab copy: this turn’s user text (sent as the final user-role message). */
-const LAB_USER_NOTE = "POST /api/chat body field `message` for this turn.";
+const LAB_USER_NOTE =
+  "This-turn user channel: packet JSON, then ---QUERENT---, then the raw querent text (POST /api/chat `message`).";
 
 const { extractTurnInstructionsFromSystemPrompt } = require("../../prompting/turnInstructionsExtract");
 
@@ -41,12 +42,12 @@ function buildNonSystemMessagesPreview({ historyNote, userNote }) {
   return [
     {
       role: "user",
-      label: "Conversation history",
+      label: "Prior turns (native roles)",
       content: historyNote,
     },
     {
       role: "user",
-      label: "Current user message",
+      label: "This turn (packet + QUERENT)",
       content: userNote,
     },
   ];

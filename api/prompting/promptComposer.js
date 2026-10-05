@@ -389,8 +389,46 @@ function composeAgentPrompt({
   return result;
 }
 
+/**
+ * Frozen system string: persona + instructions + short Structured Outputs reminder.
+ * Forbidden: catalog bodies, custom tails, session, schema dumps.
+ *
+ * @param {string} agentKey
+ * @returns {ComposedAgentPrompt}
+ */
+function composeStaticSystemPrompt(agentKey) {
+  ensurePromptRegistryValidated();
+  const entry = getPromptRegistryEntry(agentKey);
+  if (!entry) {
+    throw new Error(`Unknown prompt registry agent key: ${agentKey}`);
+  }
+  const persona = loadText(entry.personaPath);
+  const instructions = loadText(entry.instructionsPath);
+  const outputSchema = loadJson(entry.outputSchemaPath);
+  const structuredOutputsResponseFormat = buildStructuredOutputsResponseFormat(
+    agentKey,
+    outputSchema
+  );
+  let schemaAppendix = "";
+  if (outputSchema && typeof outputSchema === "object") {
+    schemaAppendix = structuredOutputsResponseFormat
+      ? STRUCTURED_OUTPUT_SYSTEM_APPENDIX
+      : "";
+  }
+  const content = joinNonEmpty([persona, instructions, schemaAppendix]);
+  return {
+    role: "system",
+    content,
+    outputSchema,
+    structuredOutputsResponseFormat,
+    selectedInstructionIds: [],
+    llmSafeState: {},
+  };
+}
+
 module.exports = {
   composeAgentPrompt,
+  composeStaticSystemPrompt,
   buildDetectiveSessionForTurnInstructions,
   buildAttacheSessionForTurnInstructions,
   buildDetectiveTurnInstructionBlock,

@@ -19,11 +19,12 @@ const {
 } = require("./agents/attache/attacheMachine");
 const { advanceAttacheOrchestratorForPromptTurn } = require("./agents/attache/attacheOrchestratorAdvance");
 const { buildMockReplyFromRegistry } = require("./agents/shared/mockAgentTurn");
-const { composeAgentPrompt } = require("./prompting/promptComposer");
+const { composeAgentPrompt, composeStaticSystemPrompt } = require("./prompting/promptComposer");
 const { createDetectiveCall } = require("./agents/detective/detectiveCall");
 const { philosophersNarrativeMachine } = require("./agents/philosophers/philosophersMachine");
-const { buildPhilosophersCustomPrompt } = require("./agents/philosophers/philosophersCustomPrompt");
 const { createPhilosopherCall } = require("./agents/philosophers/philosophersCall");
+const { buildAgentUserPacket } = require("./prompting/packetRegistry");
+const { formatUserChannelMessage } = require("./prompting/userChannel");
 const config = require("./config");
 const logger = require("./logger");
 const {
@@ -802,50 +803,21 @@ async function composeChatResponse(sessionId, message, options = {}) {
       });
 
       const philSession = buildPhilosopherComposeSession(sessionId, dossier);
-      const internalState = {};
-      let lumenCustom = "";
-      let umbraCustom = "";
-      try {
-        lumenCustom = buildPhilosophersCustomPrompt({
-          agentKey: "lumen",
-          activeVoice: "lumen",
-          session: philSession,
-        });
-      } catch (_) {
-        lumenCustom = "";
-      }
-      try {
-        umbraCustom = buildPhilosophersCustomPrompt({
-          agentKey: "umbra",
-          activeVoice: "umbra",
-          session: philSession,
-        });
-      } catch (_) {
-        umbraCustom = "";
-      }
-      const composedLumen = composeAgentPrompt({
-        agentKey: "lumen",
-        session: philSession,
-        internalState,
-        custom: lumenCustom || undefined,
-        debugContext: { activeAgent: "philosophers" },
-      });
-      const composedUmbra = composeAgentPrompt({
-        agentKey: "umbra",
-        session: philSession,
-        internalState,
-        custom: umbraCustom || undefined,
-        debugContext: { activeAgent: "philosophers" },
-      });
+      const composedLumen = composeStaticSystemPrompt("lumen");
+      const composedUmbra = composeStaticSystemPrompt("umbra");
+      const lumenPacket = buildAgentUserPacket("lumen", philSession);
+      const umbraPacket = buildAgentUserPacket("umbra", philSession);
+      const lumenUserChannel = formatUserChannelMessage(lumenPacket, message, "lumen");
+      const umbraUserChannel = formatUserChannelMessage(umbraPacket, message, "umbra");
 
       const prevLumen = lumenChatHistoryBySessionId.get(sessionId) || [];
       const prevUmbra = umbraChatHistoryBySessionId.get(sessionId) || [];
       const callLumen = createPhilosopherCall(options.openaiClient, {
-        userMessage: message,
+        userChannelContent: lumenUserChannel,
         agentKey: "lumen",
       });
       const callUmbra = createPhilosopherCall(options.openaiClient, {
-        userMessage: message,
+        userChannelContent: umbraUserChannel,
         agentKey: "umbra",
       });
 

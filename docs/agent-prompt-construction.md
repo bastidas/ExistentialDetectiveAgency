@@ -1,6 +1,8 @@
 # How agent prompts are constructed today
 
-Evaluation of how detective, attaché, Umbra, and Lumen system prompts are assembled: one shared composer, four registries, and very different “custom/turn” tails. This is the baseline for later collapsing detective/Umbra/Lumen to a stable universal prompt with state passed outside the prompt text.
+**Lumen / Umbra (envelope slice 1):** frozen `composeStaticSystemPrompt` (persona + instructions + Structured Outputs reminder) + native history roles + a this-turn user channel (`packet JSON` + `---QUERENT---` + raw querent). See `.cursor/plans/frozen_packet_envelope_16a5398b.plan.md`.
+
+Detective and attaché still use `composeAgentPrompt` (catalog / `# TURN INSTRUCTIONS` tails). All four agents share native history in `buildChatCompletionMessages`.
 
 ## Next after review
 
@@ -9,7 +11,7 @@ Evaluation of how detective, attaché, Umbra, and Lumen system prompts are assem
 
 ---
 
-All four agents go through one hub: [`composeAgentPrompt`](../api/prompting/promptComposer.js) in [`promptComposer.js`](../api/prompting/promptComposer.js). Paths come from [`promptRegistry.js`](../api/prompting/promptRegistry.js). The **messages** sent to OpenAI are always: system string + optional formatted chat history + current user message ([`buildChatCompletionMessages`](../api/agents/shared/buildChatCompletionMessages.js)).
+All four agents go through one hub: [`composeAgentPrompt`](../api/prompting/promptComposer.js) in [`promptComposer.js`](../api/prompting/promptComposer.js). Paths come from [`promptRegistry.js`](../api/prompting/promptRegistry.js). The **messages** sent to OpenAI are: frozen or composed `system` + native prior `user`/`assistant` turns + this-turn `user` ([`buildChatCompletionMessages`](../api/agents/shared/buildChatCompletionMessages.js)). Philosophers wrap this turn as packet + `---QUERENT---`; detective/attaché still send the raw querent text as that last user message.
 
 ```mermaid
 flowchart TD
