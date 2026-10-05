@@ -21,8 +21,8 @@ test("buildComposedPromptPreviewPayload maps composed fields", () => {
   assert.ok(p.outputSchemaJson.includes('"type"'));
   assert.ok(Array.isArray(p.additionalMessages));
   assert.equal(p.additionalMessages.length, 2);
-  assert.equal(p.additionalMessages[0].label, "Conversation history");
-  assert.equal(p.additionalMessages[1].label, "Current user message");
+  assert.equal(p.additionalMessages[0].label, "Prior turns (native roles)");
+  assert.equal(p.additionalMessages[1].label, "This turn (packet + QUERENT)");
   assert.equal(p.labLlmSafeState && p.labLlmSafeState.existential_therapy_phase, "middle");
   assert.equal(p.turnInstructionsPreview, "");
 });

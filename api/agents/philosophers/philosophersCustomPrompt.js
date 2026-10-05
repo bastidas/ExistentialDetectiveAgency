@@ -7,10 +7,8 @@ const MAX_PROMPTS_APPEND = 8000;
 /**
  * Mock placeholder for Lumen/Umbra custom prompt tail.
  *
- * **Target pattern** (same contract as attaché / detective): persona + instructions + **dynamic tail**
- * where the tail is produced by the philosophers xstate machine (`philosophersMachine`) and passed as
- * `custom` into `composeAgentPrompt`, instead of this mock prefix + prompts file dump. Until that
- * lands, the registry `promptsPath` text is appended here for dev parity only.
+ * **Unused on the live path.** Lumen/Umbra use `composeStaticSystemPrompt` plus a user packet.
+ * Kept until remaining lab/docs callers are deleted.
  *
  * @param {object} input
  * @param {"lumen"|"umbra"} input.agentKey

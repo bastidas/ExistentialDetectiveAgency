@@ -33,7 +33,7 @@ docs/, archive/, .cursor/
 |--------|----------|
 | Chat / notes / poem UI | `web/js/` and `web/styles/` |
 | Agent prompts (persona, catalogs) | `api/prompts/{attache,detective,lumen,umbra}/` |
-| Prompt assembly code | `api/prompting/` |
+| Prompt assembly code | `api/prompting/` (composer, packet registry, user channel) |
 | Character runtime / XState | `api/agents/{attache,detective,philosophers}/` |
 | Shared LLM plumbing | `api/agents/shared/` |
 | Turn routing | `api/orchestration/`, `api/chatService.js` |

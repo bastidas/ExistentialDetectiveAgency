@@ -28,7 +28,6 @@ async function withFake(options, fn) {
 
 test(
   "P-03: no system prompt sent to the model contains mock or placeholder text",
-  { todo: "P-03, envelope slice 1: Lumen and Umbra still receive [mock custom ...] and placeholder files" },
   () =>
     withFake({}, async (fake) => {
       await driveSession({ client: fake.createClient(), turns: 12 });
@@ -53,7 +52,6 @@ test(
 
 test(
   "E-1: conversation history is sent as native user/assistant messages",
-  { todo: "envelope slice 1: history is one flattened 'Conversation history' user message" },
   () =>
     withFake({}, async (fake) => {
       await driveSession({ client: fake.createClient(), turns: 14 });

@@ -100,6 +100,15 @@ const LAST_N_CLIENT_TRANSCRIPT_TURNS = Math.max(
   1,
   parseInt(process.env.LAST_N_CLIENT_TRANSCRIPT_TURNS, 10) || 100
 );
+/** Native chat-history tail sent to the model (not inside the JSON packet). */
+const HISTORY_TAIL_TURNS = Math.max(
+  1,
+  parseInt(process.env.HISTORY_TAIL_TURNS, 10) || 8
+);
+const HISTORY_TURN_MAX_CHARS = Math.max(
+  200,
+  parseInt(process.env.HISTORY_TURN_MAX_CHARS, 10) || 4000
+);
 /** Upsert session row to Azure Table at least every K user turns (if dirty). */
 const SESSION_CHECKPOINT_EVERY_K_TURNS = Math.max(
   1,
@@ -160,6 +169,8 @@ module.exports = {
   DETECTIVE_HISTORY_STORAGE_CHAR_LIMIT,
   LAST_N_MESSAGES_FOR_DOSSIER,
   LAST_N_CLIENT_TRANSCRIPT_TURNS,
+  HISTORY_TAIL_TURNS,
+  HISTORY_TURN_MAX_CHARS,
   SESSION_CHECKPOINT_EVERY_K_TURNS,
   SESSION_CHECKPOINT_MIN_INTERVAL_MS,
   ENABLE_DURABLE_STORAGE_LEGACY,
