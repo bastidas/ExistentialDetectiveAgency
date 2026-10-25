@@ -1,6 +1,6 @@
 # Storage field audit: what is written, what is read, and where names disagree
 
-Audit of the durable rows on the PR 13 branch. Names are the exact strings in code. "Read" means a code path uses the value after loading it, not merely that the loader returns it. For per-agent detail see [`agent-state-inventory.md`](agent-state-inventory.md); for phases see [`phases.md`](phases.md).
+Audit of the durable rows on the PR 13 branch. Names are the exact strings in code. "Read" means a code path uses the value after loading it, not merely that the loader returns it. For per-agent detail see [`agent-state-inventory.md`](agent-state-inventory.md); for phases see [`phases.md`](phases.md). For intent, size and the bound that stops each persisted item from growing, see [What persistence keeps track of](durable-user-state.md#what-persistence-keeps-track-of).
 
 Sources: `api/storage/durableTableStorage.js` (row shapes), `api/shared.js` (what is handed to it and what is done with the result), `api/chatService.js` (the blob), `api/dossier/summarization.js` (the summarizer).
 
@@ -27,7 +27,7 @@ Other recommendations from the section 5 list:
 | Fix `durable-user-state.md` and dead config | Yes: doc rewritten; `N_DOSSIER_UPDATE_TURNS` and `shouldRunDossierUpdate` removed; `CONVERSATION_CHAR_THRESHOLD_BEFORE_SUMMARY` is now live and `DETECTIVE_HISTORY_STORAGE_CHAR_LIMIT` is removed (the cap is the fixed 12 messages / 60,000 chars) |
 | Delete the unused columns | Not done, by decision: they are wired in instead |
 
-Later change: the detective history is stored once (the column; the blob copy was dropped), and the attaché exchange count, detective turn count and story turn are rebuilt from the log when the blob is missing.
+Later change: the detective history is stored once (the column; the blob copy was dropped), and the attaché exchange count, detective turn count and story turn are rebuilt from the log when the blob is missing. The attaché session, therapy phase and streak ride on the log rows as `stateJson`. Intent and size bounds for every persisted item are in [`durable-user-state.md`](durable-user-state.md#what-persistence-keeps-track-of); the original notes in the sections below are unchanged.
 
 Not changed: the duplicated facts in section 3 (the turn counters still live in the blob and are only raised from the log, attaché state twice, three spellings of the summary key), the `dossierBySessionId` keying, and the dossier loading for a new session id (the dossier is still only merged when hydrate finds a user id on the stored session).
 

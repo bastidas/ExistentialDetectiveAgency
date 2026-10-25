@@ -2,7 +2,7 @@
 
 This lists every piece of state the server keeps for the four agents (detective, attaché, Lumen, Umbra) and says, for each one, whether it is in the durable checkpoint, rebuilt from the chat log, or lost on restart. It is meant for reasoning about checkpoint contents and recovery. Every field below was read from the code (file named in each section) and the sizes were measured by driving a fake-OpenAI session through `api/shared.js`, not guessed.
 
-Read it with [`durable-user-state.md`](durable-user-state.md) (tables, retention).
+Read it with [`durable-user-state.md`](durable-user-state.md) (tables, retention, and [the bound-and-intent inventory](durable-user-state.md#what-persistence-keeps-track-of)).
 
 ## Where state lives
 
