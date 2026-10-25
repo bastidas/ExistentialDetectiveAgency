@@ -52,6 +52,8 @@ In Azure Portal:
 | `CONVERSATION_CHAR_THRESHOLD_BEFORE_SUMMARY` | Optional summarization threshold in chars. | `6000` |
 | `DETECTIVE_HISTORY_STORAGE_CHAR_LIMIT` | Optional max chars stored for detective history. | `450000` |
 | `LAST_N_MESSAGES_FOR_DOSSIER` | Optional dossier analyzer recent-message cap. | `12` |
+| `HISTORY_TAIL_TURNS` | Optional. Prior messages sent to the model as native chat history (default `8`, about 4 exchanges). | `8` |
+| `HISTORY_TURN_MAX_CHARS` | Optional. Max characters kept per history message (default `4000`). | `4000` |
 
 Durable storage is enabled when `DURABLE_STORAGE_MODE` is `azurite` or `azure-cloud` and storage settings are present.
 

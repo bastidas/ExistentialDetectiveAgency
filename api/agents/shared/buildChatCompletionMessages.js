@@ -1,28 +1,28 @@
 "use strict";
 
-const { formatConversationHistoryBlock } = require("./formatConversationHistoryBlock");
+const { sliceNativeHistory } = require("../../prompting/userChannel");
 
 /**
- * Build OpenAI `messages` in the order used by detective / attaché / philosopher calls:
- * `system` (persona + instructions + catalog + custom + JSON schema appendix from `composeAgentPrompt`)
- * → optional history `user` → final `user` (this turn).
- * Dev preview order matches this via `./llmPayloadPreview.js` (`buildNonSystemMessagesPreview`).
+ * OpenAI `messages`: frozen `system` → native history roles → this-turn user channel.
  *
  * @param {object} input
- * @param {string} input.systemContent — exact string for `role: "system"`
+ * @param {string} input.systemContent
  * @param {Array<{ role?: string, content?: unknown }>} [input.chatHistory]
- * @param {string} [input.userMessage] — current turn user text
+ * @param {string} [input.userChannelContent] — packet JSON + QUERENT + raw text
+ * @param {string} [input.userMessage] — fallback when `userChannelContent` is omitted
  * @returns {Array<{ role: string, content: string }>}
  */
-function buildChatCompletionMessages({ systemContent, chatHistory, userMessage }) {
+function buildChatCompletionMessages({
+  systemContent,
+  chatHistory,
+  userChannelContent,
+  userMessage,
+}) {
   const messages = [{ role: "system", content: String(systemContent ?? "") }];
-  const historyBlock = formatConversationHistoryBlock(
-    Array.isArray(chatHistory) ? chatHistory : []
-  );
-  if (historyBlock) {
-    messages.push({ role: "user", content: historyBlock });
-  }
-  messages.push({ role: "user", content: String(userMessage ?? "") });
+  messages.push(...sliceNativeHistory(chatHistory));
+  const last =
+    userChannelContent != null ? String(userChannelContent) : String(userMessage ?? "");
+  messages.push({ role: "user", content: last });
   return messages;
 }
 

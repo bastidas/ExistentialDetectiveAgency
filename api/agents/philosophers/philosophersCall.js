@@ -94,7 +94,7 @@ function normalizeUmbraOutput(parsed) {
 
 /**
  * @param {import("openai").default | null} openaiClient
- * @param {{ userMessage?: string, agentKey: "lumen"|"umbra" }} opts
+ * @param {{ userChannelContent?: string, userMessage?: string, agentKey: "lumen"|"umbra" }} opts
  */
 function createPhilosopherCall(openaiClient, opts) {
   const agentKey = opts && opts.agentKey === "umbra" ? "umbra" : "lumen";
@@ -108,13 +108,17 @@ function createPhilosopherCall(openaiClient, opts) {
     const systemContent = String(
       input && input.composed_system_prompt != null ? input.composed_system_prompt : ""
     );
-    const userMessage =
-      opts && typeof opts.userMessage === "string" ? opts.userMessage : "";
+    const userChannelContent =
+      opts && typeof opts.userChannelContent === "string"
+        ? opts.userChannelContent
+        : opts && typeof opts.userMessage === "string"
+          ? opts.userMessage
+          : "";
 
     const messages = buildChatCompletionMessages({
       systemContent,
       chatHistory: input && Array.isArray(input.chat_history) ? input.chat_history : [],
-      userMessage,
+      userChannelContent,
     });
 
     const serviceTier = String(process.env.OPENAI_SERVICE_TIER || "").trim();
@@ -146,7 +150,7 @@ function createPhilosopherCall(openaiClient, opts) {
       messages,
       messageCount: messages.length,
       historyTurns: Array.isArray(input?.chat_history) ? input.chat_history.length : 0,
-      userMessageLength: userMessage.length,
+      userMessageLength: userChannelContent.length,
       systemPromptLength: systemContent.length,
     });
 

@@ -5,9 +5,8 @@
  * Uses shared `buildComposedPromptPreviewPayload` so all agents share one preview shape.
  */
 
-const { composeAgentPrompt } = require("../prompting/promptComposer");
+const { composeAgentPrompt, composeStaticSystemPrompt } = require("../prompting/promptComposer");
 const { computeDetectiveCatalogInstructionIds } = require("../agents/detective/detectivePromptPolicy");
-const { buildPhilosophersCustomPrompt } = require("../agents/philosophers/philosophersCustomPrompt");
 const { buildComposedPromptPreviewPayload } = require("../agents/shared/llmPayloadPreview");
 const {
   createInitialAttacheSessionState,
@@ -28,6 +27,7 @@ const {
   pickExistentialTherapyPhase,
   pickNarrativePhase,
 } = require("./chatScenarioLabPhases");
+const { buildAgentUserPacket } = require("../prompting/packetRegistry");
 const {
   classifyTimeAway,
   getTimeAwayThresholds,
@@ -187,33 +187,6 @@ function deriveActiveAgent(p) {
 }
 
 /**
- * Same session shape as `buildPhilosopherComposeSession` in chatService when there is no
- * persisted narrative snapshot (turn 0 → `Exposition`) and optional dossier — used only for lab preview.
- *
- * @param {boolean} hasDossier
- * @param {object} preset — lab preset (for `narrativePhase`)
- * @returns {Record<string, unknown>}
- */
-function buildPhilosopherSessionForLabPreview(hasDossier, preset) {
-  const p = preset && typeof preset === "object" ? preset : {};
-  /** @type {Record<string, unknown>} */
-  const session = {
-    narrative_phase: pickNarrativePhase(p),
-  };
-  if (hasDossier) {
-    const nowMs = Date.now();
-    const base = createEmptyDossier("preview");
-    const lb = resolveLabLastBaselineCompletedAt(
-      { ...p, hasDossier: true, baselineCompleted: true },
-      nowMs
-    );
-    if (lb != null) base.meta.lastBaselineCompletedAt = lb;
-    session.dossier_summary = buildTherapistSafeDossierSummary(normalizeDossier(base, "preview"));
-  }
-  return session;
-}
-
-/**
  * Lab-only: attaché + detective completed-turn counts (mirrors server maps for closure math).
  *
  * @param {object} p
@@ -367,42 +340,25 @@ function buildPromptPreviewFromPreset(preset) {
       composed,
     });
 
-    const philSession = buildPhilosopherSessionForLabPreview(hasDossier, p);
-    const internalState = {};
-    let lumenCustom = "";
-    let umbraCustom = "";
-    try {
-      lumenCustom = buildPhilosophersCustomPrompt({
-        agentKey: "lumen",
-        activeVoice: "lumen",
-        session: philSession,
-      });
-    } catch (_) {
-      lumenCustom = "";
+    const philSession = {
+      narrative_phase: pickNarrativePhase(p),
+    };
+    if (hasDossier) {
+      const nowMs = Date.now();
+      const base = createEmptyDossier("preview");
+      const lb = resolveLabLastBaselineCompletedAt(
+        { ...p, hasDossier: true, baselineCompleted: true },
+        nowMs
+      );
+      if (lb != null) base.meta.lastBaselineCompletedAt = lb;
+      philSession.dossier_summary = buildTherapistSafeDossierSummary(
+        normalizeDossier(base, "preview")
+      );
     }
-    try {
-      umbraCustom = buildPhilosophersCustomPrompt({
-        agentKey: "umbra",
-        activeVoice: "umbra",
-        session: philSession,
-      });
-    } catch (_) {
-      umbraCustom = "";
-    }
-    const composedLumen = composeAgentPrompt({
-      agentKey: "lumen",
-      session: philSession,
-      internalState,
-      custom: lumenCustom || undefined,
-      debugContext: { activeAgent: "philosophers" },
-    });
-    const composedUmbra = composeAgentPrompt({
-      agentKey: "umbra",
-      session: philSession,
-      internalState,
-      custom: umbraCustom || undefined,
-      debugContext: { activeAgent: "philosophers" },
-    });
+    const composedLumen = composeStaticSystemPrompt("lumen");
+    const composedUmbra = composeStaticSystemPrompt("umbra");
+    composedLumen.llmSafeState = buildAgentUserPacket("lumen", philSession);
+    composedUmbra.llmSafeState = buildAgentUserPacket("umbra", philSession);
 
     return {
       ...primary,
