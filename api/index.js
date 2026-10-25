@@ -23,7 +23,11 @@ const client = apiKey
       maxRetries: 1,
     })
   : null;
-const dailyUsageStore = shared.createMemoryDailyUsageStore();
+const dailyUsageStore = shared.createDailyUsageStore();
+
+function clientKeyOf(request) {
+	return shared.clientKeyFromHeaders((name) => request.headers.get(name));
+}
 
 // ---------------------------------------------------------------------------
 // Azure Functions HTTP endpoints
@@ -98,6 +102,7 @@ app.http("chat", {
 			dailyUsageStore,
 			debug: shared.DEBUG_LOGS,
 			userId: identity.userId,
+			clientKey: clientKeyOf(request),
 		});
 
 		if (result.status === 204) {
@@ -132,7 +137,9 @@ app.http("chatSync", {
 		} catch (_) {
 			body = {};
 		}
-		const result = await shared.handleChatSync(identity.sessionId, identity.userId, body || {});
+		const result = await shared.handleChatSync(identity.sessionId, identity.userId, body || {}, {
+			clientKey: clientKeyOf(request),
+		});
 		return {
 			status: 200,
 			jsonBody: result,

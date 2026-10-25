@@ -5,6 +5,8 @@
  * records `app.http(...)` registrations, then calls the handlers the way the Functions host would.
  */
 
+process.env.MAX_REQUESTS_PER_MINUTE = "2";
+
 require("./noDurable");
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -41,9 +43,16 @@ test.after(async () => {
   await fake.close();
 });
 
-function request({ body, cookie } = {}) {
+function request({ body, cookie, ip } = {}) {
   return {
-    headers: { get: (k) => (String(k).toLowerCase() === "cookie" ? cookie || null : null) },
+    headers: {
+      get: (k) => {
+        const name = String(k).toLowerCase();
+        if (name === "cookie") return cookie || null;
+        if (name === "x-forwarded-for") return ip || null;
+        return null;
+      },
+    },
     json: async () => {
       if (body === undefined) throw new Error("no body");
       return body;
@@ -120,4 +129,23 @@ test("chat handler: a body that is not JSON is treated as an empty message, not 
   const res = await registered.chat.handler(request());
   assert.equal(res.status, 200);
   assert.equal(typeof res.jsonBody.reply, "string");
+});
+
+test("POST chat answers 429 rate_limit once a client IP exceeds the per-minute limit", async () => {
+  const statuses = [];
+  let last;
+  for (let i = 0; i < 4; i += 1) {
+    last = await registered.chat.handler(request({ body: { message: "hello" }, ip: "203.0.113.20:5555" }));
+    statuses.push(last.status);
+  }
+  assert.deepEqual(statuses, [200, 200, 429, 429]);
+  assert.equal(last.jsonBody.errorKind, "rate_limit");
+  const other = await registered.chat.handler(request({ body: { message: "hello" }, ip: "203.0.113.21" }));
+  assert.equal(other.status, 200);
+});
+
+test("POST chat rejects an over-long message with 400 bad_request", async () => {
+  const res = await registered.chat.handler(request({ body: { message: "x".repeat(5000) } }));
+  assert.equal(res.status, 400);
+  assert.equal(res.jsonBody.errorKind, "bad_request");
 });

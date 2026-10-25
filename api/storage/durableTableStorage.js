@@ -6,6 +6,7 @@ const config = require("../config");
 const PK = {
   session: "EDA_session",
   dossier: "EDA_dossier",
+  usageDaily: "EDA_usageDaily",
 };
 
 let _client = null;
@@ -152,6 +153,8 @@ async function getDossierByUserId(client, userId) {
 module.exports = {
   PK,
   getTableClient,
+  ensureTable,
+  getEntity,
   hydrateSession,
   saveSessionCheckpoint,
   saveDossierByUserId,

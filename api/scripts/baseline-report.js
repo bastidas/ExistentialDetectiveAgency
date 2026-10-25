@@ -7,6 +7,11 @@
  * shuffles its baseline questions, which otherwise changes the handoff turn between runs.
  */
 
+// The report measures prompt shape over a long conversation, so session and daily caps are lifted
+// unless the caller sets them.
+process.env.MAX_USER_EXCHANGES = process.env.MAX_USER_EXCHANGES || "1000000";
+process.env.MAX_DAILY_USAGE = process.env.MAX_DAILY_USAGE || "1000000";
+
 const { startFakeOpenAI } = require("../test-support/fakeOpenAI");
 const { driveSession } = require("../test-support/driveSession");
 const { summarizeCalls, formatReport } = require("../test-support/analyzeCalls");

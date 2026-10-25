@@ -26,7 +26,11 @@ const {
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = path.join(__dirname, "data");
-const dailyUsageStore = shared.createFileDailyUsageStore(DATA_DIR);
+const dailyUsageStore = shared.createDailyUsageStore({ dataDir: DATA_DIR });
+
+function clientKeyOf(req) {
+  return shared.clientKeyFromHeaders((name) => req.headers[name], req.socket && req.socket.remoteAddress);
+}
 
 const apiKey = process.env.OPENAI_API_KEY;
 if (!apiKey && !shared.OFFLINE) {
@@ -96,7 +100,7 @@ app.get("/api/config", (req, res) => {
 app.get("/api/debug", async (req, res) => {
   if (!shared.DEBUG_LOGS) return res.status(404).end();
   const sessionId = getOrCreateSessionId(req, res);
-  const dailyCount = dailyUsageStore.readDailyUsage();
+  const dailyCount = await dailyUsageStore.readDailyUsage();
   const userExchangeCount = shared.userExchangeCounts.get(sessionId) ?? 0;
   res.json({
     devMode: shared.DEV,
@@ -320,6 +324,7 @@ app.post("/api/chat", async (req, res) => {
     dailyUsageStore,
     debug: shared.DEBUG_LOGS,
     userId: identity.userId,
+    clientKey: clientKeyOf(req),
   });
   const status = result.status;
   const body = result.body;
@@ -332,7 +337,9 @@ app.post("/api/chat", async (req, res) => {
 app.post("/api/chat-sync", async (req, res) => {
   const identity = shared.ensureExpressIdentity(req, res);
   const payload = req.body && typeof req.body === "object" ? req.body : {};
-  const result = await shared.handleChatSync(identity.sessionId, identity.userId, payload);
+  const result = await shared.handleChatSync(identity.sessionId, identity.userId, payload, {
+    clientKey: clientKeyOf(req),
+  });
   return res.json(result);
 });
 
@@ -375,6 +382,7 @@ app.post("/api/chat-stream", async (req, res) => {
       dailyUsageStore,
       debug: shared.DEBUG_LOGS,
       userId: identity.userId,
+      clientKey: clientKeyOf(req),
     }, onEvent);
   } catch (err) {
     console.error("/api/chat-stream handler error:", err && err.message);
@@ -395,6 +403,9 @@ app.post("/api/chat-stream", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Chat server running at http://localhost:${PORT}`);
   console.log(`Prompts dir: ${shared.PROMPTS_DIR}`);
+  console.log(
+    `Limits: ${shared.MAX_USER_EXCHANGES} exchanges/session, ${shared.MAX_DAILY_USAGE} LLM turns/day, ${shared.MAX_MESSAGE_CHARS} chars/message (daily store: ${dailyUsageStore.kind})`
+  );
   if (shared.OFFLINE) {
     console.log("OFFLINE=1: AI backend disabled, returning generic replies.");
   } else {

@@ -1,9 +1,9 @@
 "use strict";
 
 /**
- * Cap behavior (see docs/XSTATE-MERGE-PLAN.md, P-01). Needs the limits set before `shared.js` is loaded (it reads them at require time),
- * so it lives in its own file (one process per test file). The session cap works when configured
- * (its default is 1,000,000); the daily cap is a known defect and is marked `todo`.
+ * Cap behavior (docs/XSTATE-MERGE-PLAN.md, P-01). `shared.js` reads the limits when it loads, so they are set
+ * here first and this lives in its own file (one process per test file). The session cap works when configured
+ * (default 40); the daily cap (default 300) counts LLM-backed turns across sessions.
  */
 
 process.env.MAX_USER_EXCHANGES = "3";
@@ -39,24 +39,30 @@ test("per-session exchange cap: once exceeded the API answers 204 and makes no u
   }
 });
 
-test(
-  "P-01: the daily cap answers 429 with errorKind rate_limit and makes no upstream call",
-  { todo: "P-01: the daily counter is never incremented" },
-  async () => {
-    const shared = require("../shared");
-    const fake = await startFakeOpenAI();
-    try {
-      const store = shared.createMemoryDailyUsageStore();
-      const { results } = await driveSession({
-        client: fake.createClient(),
-        turns: 5,
-        dailyUsageStore: store,
-      });
-      const limited = results.find((r) => r.status === 429);
-      assert.ok(limited, `statuses: ${results.map((r) => r.status).join(",")}`);
-      assert.equal(limited.body.errorKind, "rate_limit");
-    } finally {
-      await fake.close();
+test("daily cap: turns past MAX_DAILY_USAGE answer 429 rate_limit and make no upstream calls", async () => {
+  const shared = require("../shared");
+  const { DAILY_LIMIT_MESSAGE } = require("../usage/usageLimits");
+  const fake = await startFakeOpenAI();
+  try {
+    const client = fake.createClient();
+    const store = shared.createMemoryDailyUsageStore();
+    const statuses = [];
+    const callsPerTurn = [];
+    let lastBody;
+    for (let i = 0; i < 5; i += 1) {
+      const before = fake.requests.length;
+      const { results } = await driveSession({ client, turns: 1, sessionId: `daily-${i}`, dailyUsageStore: store });
+      statuses.push(results[0].status);
+      callsPerTurn.push(fake.requests.length - before);
+      lastBody = results[0].body;
     }
+    assert.deepEqual(statuses, [200, 200, 429, 429, 429]);
+    assert.deepEqual(callsPerTurn.slice(2), [0, 0, 0]);
+    assert.ok(callsPerTurn[0] > 0 && callsPerTurn[1] > 0);
+    assert.equal(lastBody.errorKind, "rate_limit");
+    assert.equal(lastBody.error, DAILY_LIMIT_MESSAGE);
+    assert.equal(store.readDailyUsage(), 2);
+  } finally {
+    await fake.close();
   }
-);
+});
