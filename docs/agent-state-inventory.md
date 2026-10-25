@@ -22,14 +22,14 @@ Source: `saveSessionCheckpoint` in `api/storage/durableTableStorage.js`, payload
 | Property | Type | Size / bound | Purpose |
 |----------|------|--------------|---------|
 | `schemaV` | number | 1 value (`2`) | Row layout version |
-| `updatedAt` | ISO string | 24 chars | When the checkpoint was written. Read back by `hydrateSession` but not used: `lastActivityAtBySession` is not seeded from it, so time-away after a restart starts at 0 (see `storage-field-audit.md`) |
+| `updatedAt` | ISO string | 24 chars | When the checkpoint was written. On hydrate it, with the newest log row's `ts`, seeds `lastActivityAtBySession`, so time-away after a restart is real |
 | `userId` | string | about 36 chars, `""` if unknown | Links the session to the user's dossier |
 | `sessionSeq` | number | 1 to 40 typically | Number of exchanges logged; thread rows run `1..sessionSeq` |
-| `baselineCompleted` | boolean | 1 | Attaché finished, routing is detective. Write-only: no code reads it back |
-| `detectiveIntroSent` | boolean | 1 | Set from `active_agent === "detective"` (which is routing, not whether an intro was sent). Write-only; `/api/chat-state` always returns `detectiveIntroSent: false` |
-| `detectiveHistoryText` | string | at most 60,000 chars; **currently always `""`** | Reserved for a text summary of the detective phase; nothing fills it and nothing reads it |
-| `conversationSummariesJson` | chunked string | **currently `"null"`** (4 chars) | Reserved for summaries; nothing writes it (`conversationSummaries` is always `null`) and nothing reads it. `api/dossier/summarization.js` exists but the chat path does not call it |
-| `degradedReason` | string | 0 to about 100 chars | `;`-joined reasons if the write had to drop content |
+| `baselineCompleted` | boolean | 1 | Attaché finished, routing is detective. On hydrate, when no routing snapshot could be restored from the blob, routing is rebuilt as detective |
+| `detectiveIntroSent` | boolean | 1 | The detective has spoken (`detectiveTurnCount > 0`). On hydrate it floors the detective turn count at 1 so the detective does not open twice, and `/api/chat-state` reports it |
+| `detectiveHistoryText` | chunked string | at most 60,000 chars | The detective transcript, one `role<TAB>JSON string` line per message. Replaces the in-memory detective history on hydrate when the blob has none, or when `degradedReason` says the blob's copy was trimmed and this one is longer |
+| `conversationSummariesJson` | chunked string | `"null"` (4 chars) until a summary exists, then a record of at most about 6,200 chars | `{ v, userId, sessionId, fromSeq, throughSeq, text, createdAt }`: a summary of log exchanges `fromSeq..throughSeq`. Read on hydrate and published as `preceding_conversation_summary` (see `durable-user-state.md`) |
+| `degradedReason` | string | 0 to about 100 chars | `;`-joined reasons if the write had to drop content. Read on hydrate: surfaced in durable health and used to decide whether `detectiveHistoryText` overrides the blob |
 | `orchestrationRuntimeJson` | chunked string | measured below | The orchestration blob, next section |
 
 ## The orchestration blob
@@ -171,9 +171,11 @@ Source: `api/shared.js`. None of this is checkpointed and all of it is lost on r
 | Field | Purpose | After restart |
 |-------|---------|---------------|
 | `userExchangeCounts` (sessionId to number) | Counts exchanges against `MAX_USER_EXCHANGES` | Resets to 0. The checkpointed `detectiveTurnCount` plus `attacheExchangeCount` are the durable equivalent |
-| `lastActivityAtBySession` | Time-away classification | Empty, so the first request after a restart sees "no previous visit" |
+| `lastActivityAtBySession` | Time-away classification | Seeded on hydrate from the row's `updatedAt` and the newest thread row's `ts` |
 | `threadEventsBySession` | The last up to 400 log events for the client | Reloaded from thread rows on hydrate |
 | `threadSeqBySession` | Next log sequence number | Reloaded as the larger of `sessionSeq` and the last thread row |
+| `logTurnsBySession` | The last 200 exchanges (`{ seq, events }`) the summarizer may still need | Reloaded from thread rows on hydrate |
+| `summaryStateBySession` | `{ own, inherited }` summary records: this session's, and the user's from an earlier session | Reloaded from the row's `conversationSummariesJson` and the `EDA_userSummary` row |
 | `hydratedDurableSessions` | Which sessions have been read | Empty; each session is hydrated on its first request |
 | `pendingThreadTurnsBySession` | Exchanges not yet written to the log (at most 200) | Lost; this is the only window where a crash drops an exchange |
 | `dirtyTurnsSinceCheckpoint`, `lastCheckpointMsBySession` | Checkpoint scheduling | Reset; the first turn after a restart checkpoints |
@@ -197,4 +199,4 @@ Typical sessions fit comfortably. The worst case is dominated by `detectiveChatH
 - Only in the checkpoint: routing snapshot, attaché session, detective history, detective phase and streak, `currentStoryPhase`, counters. A checkpoint can lag the log by up to `SESSION_CHECKPOINT_EVERY_K_TURNS - 1` turns, and `historyRef.toSeq` against `sessionSeq` shows how many.
 - Only in the dossier row: the user's dossier.
 - Not stored at all: `lumenOtherResponse`, Lumen and Umbra notes and callouts, `lastMockReply` outside the snapshot, and the process-memory table above.
-- Open items for a later change: the attaché `chat_history` and `detectiveChatHistory` could also be rebuilt from the log (the log already has every `attache` and `detective` event), which would shrink the blob to a few thousand characters regardless of session length. `detectiveHistoryText` and `conversationSummariesJson` are written but empty.
+- Open items for a later change: the attaché `chat_history` and `detectiveChatHistory` could also be rebuilt from the log (the log already has every `attache` and `detective` event), which would shrink the blob to a few thousand characters regardless of session length.

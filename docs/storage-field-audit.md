@@ -4,6 +4,31 @@ Audit of the durable rows on the PR 13 branch. Names are the exact strings in co
 
 Sources: `api/storage/durableTableStorage.js` (row shapes), `api/shared.js` (what is handed to it and what is done with the result), `api/chatService.js` (the blob), `api/dossier/summarization.js` (the summarizer).
 
+## Status: what was done about these findings
+
+The sections below are the audit as written. Since then the five write-only columns were wired into the hydrate path rather than deleted (the first recommendation to delete them was set aside). Current behavior:
+
+| Column | Now written as | Now read by |
+|--------|----------------|-------------|
+| `baselineCompleted` | envelope `baseline_completed` (unchanged) | `hydrateSession` returns it; `restoreSessionFromRowColumns` rebuilds routing as detective when no routing snapshot could be restored from the blob (`seedPersistedChatMachineFromFlags`) |
+| `detectiveIntroSent` | `detectiveTurnCount > 0` (was `active_agent === "detective"`, a copy of `baselineCompleted`) | Floors the detective turn count at 1 on hydrate; `GET /api/chat-state` now reports the real value instead of a hard-coded `false` |
+| `detectiveHistoryText` | The detective transcript, one `role<TAB>JSON string` line per message, chunked, newest 60,000 chars at most (was `""`) | Becomes the detective history when the blob has none, or when `degradedReason` says the blob's copy was trimmed and the transcript is longer |
+| `degradedReason` | unchanged | `hydrateSession` returns it as `degraded[]`; durable health lists `stored_checkpoint_<reason>`; it decides whether `detectiveHistoryText` overrides the blob |
+| `conversationSummariesJson` | A summary record `{ v, userId, sessionId, fromSeq, throughSeq, text, createdAt }`, or `null` until one exists | Parsed on hydrate and published as `preceding_conversation_summary`; Lumen and Umbra send it to the model, the detective and attaché only carry it in the diagnostic view |
+
+Other recommendations from the section 5 list:
+
+| Recommendation | Done |
+|----------------|------|
+| Derived summary with a coverage marker | Yes: `fromSeq`/`throughSeq`, built from the log by `extendSummary` in `api/dossier/conversationSummary.js` |
+| Per-user continuity | Yes: `EDA_userSummary` row per `userId`; a new session loads it (the user id from the cookie is passed into hydrate) |
+| Driven from the log, not the checkpoint | Yes: summarized when the uncovered log text passes `CONVERSATION_CHAR_THRESHOLD_BEFORE_SUMMARY`; the user row is written at once, the session column with the next checkpoint |
+| Seed `lastActivityAtBySession` | Yes: from the row's `updatedAt` and the newest thread row's `ts` |
+| Fix `durable-user-state.md` and dead config | Yes: doc rewritten; `N_DOSSIER_UPDATE_TURNS` and `shouldRunDossierUpdate` removed; `CONVERSATION_CHAR_THRESHOLD_BEFORE_SUMMARY` and `DETECTIVE_HISTORY_STORAGE_CHAR_LIMIT` are now live |
+| Delete the unused columns | Not done, by decision: they are wired in instead |
+
+Not changed: the duplicated facts in section 3 (several turn counters, attaché state twice, three spellings of the summary key), the `dossierBySessionId` keying, and the dossier loading for a new session id (the dossier is still only merged when hydrate finds a user id on the stored session).
+
 ## 1. Row inventory
 
 ### Session row: partition `EDA_session`, row key `sessionId`
