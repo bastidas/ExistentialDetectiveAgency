@@ -22,13 +22,13 @@ Source: `saveSessionCheckpoint` in `api/storage/durableTableStorage.js`, payload
 | Property | Type | Size / bound | Purpose |
 |----------|------|--------------|---------|
 | `schemaV` | number | 1 value (`2`) | Row layout version |
-| `updatedAt` | ISO string | 24 chars | When the checkpoint was written; used to rebuild time-away on restart |
+| `updatedAt` | ISO string | 24 chars | When the checkpoint was written. Read back by `hydrateSession` but not used: `lastActivityAtBySession` is not seeded from it, so time-away after a restart starts at 0 (see `storage-field-audit.md`) |
 | `userId` | string | about 36 chars, `""` if unknown | Links the session to the user's dossier |
 | `sessionSeq` | number | 1 to 40 typically | Number of exchanges logged; thread rows run `1..sessionSeq` |
-| `baselineCompleted` | boolean | 1 | Attaché finished, routing is detective |
-| `detectiveIntroSent` | boolean | 1 | Detective has spoken (set from `active_agent === "detective"`) |
-| `detectiveHistoryText` | string | at most 60,000 chars; **currently always `""`** | Reserved for a text summary of the detective phase; nothing fills it today |
-| `conversationSummariesJson` | chunked string | **currently `"null"`** (4 chars) | Reserved for summaries; `api/dossier/summarization.js` exists but the chat path does not call it |
+| `baselineCompleted` | boolean | 1 | Attaché finished, routing is detective. Write-only: no code reads it back |
+| `detectiveIntroSent` | boolean | 1 | Set from `active_agent === "detective"` (which is routing, not whether an intro was sent). Write-only; `/api/chat-state` always returns `detectiveIntroSent: false` |
+| `detectiveHistoryText` | string | at most 60,000 chars; **currently always `""`** | Reserved for a text summary of the detective phase; nothing fills it and nothing reads it |
+| `conversationSummariesJson` | chunked string | **currently `"null"`** (4 chars) | Reserved for summaries; nothing writes it (`conversationSummaries` is always `null`) and nothing reads it. `api/dossier/summarization.js` exists but the chat path does not call it |
 | `degradedReason` | string | 0 to about 100 chars | `;`-joined reasons if the write had to drop content |
 | `orchestrationRuntimeJson` | chunked string | measured below | The orchestration blob, next section |
 
