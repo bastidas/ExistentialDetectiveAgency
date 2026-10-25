@@ -3,12 +3,15 @@
 const { TableClient, odata } = require("@azure/data-tables");
 const config = require("../config");
 const logger = require("../logger");
+const { parseSummaryJson, summaryToJson } = require("../dossier/conversationSummary");
 
 const PK = {
   session: "EDA_session",
   /** Prefix only: each session's chat history lives in partition `EDA_thread_<sessionId>`, one row per exchange. */
   thread: "EDA_thread",
   dossier: "EDA_dossier",
+  /** One row per user (row key `userId`): the latest conversation summary, so it outlives the session id. */
+  userSummary: "EDA_userSummary",
   usageDaily: "EDA_usageDaily",
 };
 
@@ -208,7 +211,7 @@ function fitThreadEvents(events, maxChars) {
 }
 
 /**
- * Decide what the full state checkpoint writes (orchestration, summaries, detective text), and say
+ * Decide what the full state checkpoint writes (orchestration, summary, detective text), and say
  * so when something had to give. Nothing here throws on size: an oversized blob degrades (older
  * history is not persisted) and the reasons are returned and stored on the row instead of failing.
  * The chat history is not part of this row; it is written per exchange (see `saveThreadTurn`).
@@ -218,7 +221,7 @@ function fitThreadEvents(events, maxChars) {
  */
 function planSessionWrite(payload) {
   const degraded = [];
-  const summariesJson = JSON.stringify(payload.conversationSummaries || null);
+  const summariesJson = summaryToJson(payload.conversationSummary);
   const detectiveText = truncateDetectiveHistory(payload.detectiveHistoryText || "");
 
   let orchJson = "";
@@ -288,10 +291,10 @@ async function saveThreadTurn(client, turn) {
  *
  * @param {import("@azure/data-tables").TableClient} client
  * @param {string} sessionId
- * @returns {Promise<{ events: Array<object>, lastSeq: number, userId: string|null, rows: number, problems: string[] }>}
+ * @returns {Promise<{ events: Array<object>, turns: Array<{ seq: number, events: Array<object> }>, lastTurnAt: string|null, lastSeq: number, userId: string|null, rows: number, problems: string[] }>}
  */
 async function loadThread(client, sessionId) {
-  const out = { events: [], lastSeq: 0, userId: null, rows: 0, problems: [] };
+  const out = { events: [], turns: [], lastTurnAt: null, lastSeq: 0, userId: null, rows: 0, problems: [] };
   const partitionKey = threadPartitionKey(sessionId);
   if (!client || !partitionKey) return out;
   await ensureTable(client);
@@ -301,9 +304,13 @@ async function loadThread(client, sessionId) {
   rows.sort((a, b) => (a.rowKey < b.rowKey ? -1 : a.rowKey > b.rowKey ? 1 : 0));
   for (const row of rows) {
     const events = parseChunked(row, "eventsJson", [], out.problems);
-    if (Array.isArray(events)) out.events.push(...events);
+    if (Array.isArray(events)) {
+      out.events.push(...events);
+      out.turns.push({ seq: Number(row.rowKey) || 0, events });
+    }
     out.lastSeq = Math.max(out.lastSeq, Number(row.rowKey) || 0);
     if (row.userId) out.userId = String(row.userId);
+    if (row.ts && (out.lastTurnAt == null || String(row.ts) > out.lastTurnAt)) out.lastTurnAt = String(row.ts);
   }
   out.rows = rows.length;
   return out;
@@ -312,11 +319,19 @@ async function loadThread(client, sessionId) {
 async function hydrateSession(client, sessionId) {
   const empty = {
     threadEvents: [],
+    threadTurns: [],
     updatedAt: null,
+    lastActivityAt: null,
     sessionSeq: 0,
     userId: null,
     orchestrationRuntime: null,
     schemaV: null,
+    baselineCompleted: false,
+    detectiveIntroSent: false,
+    detectiveHistoryText: "",
+    degradedReason: "",
+    degraded: [],
+    conversationSummary: null,
     problems: [],
   };
   if (!client || !sessionId) return empty;
@@ -330,16 +345,32 @@ async function hydrateSession(client, sessionId) {
   // Rows written before the per-exchange thread rows kept the history inside the session row.
   const legacyThread = thread.rows === 0 && entity ? parseChunked(row, "threadEventsJson", [], problems) : [];
   const threadEvents = thread.rows > 0 ? thread.events : Array.isArray(legacyThread) ? legacyThread : [];
+  const historyText = entity ? readChunked(row, "detectiveHistoryText") : { text: "", corrupt: false };
+  if (historyText.corrupt) problems.push("detectiveHistoryText_missing_chunk");
+  const summaryText = entity ? readChunked(row, "conversationSummariesJson") : { text: "", corrupt: false };
+  if (summaryText.corrupt) problems.push("conversationSummariesJson_missing_chunk");
+  const degradedReason = row.degradedReason ? String(row.degradedReason) : "";
   if (problems.length > 0) {
     logger.warn("durableTableStorage", "hydrateSession", `session has unreadable values: ${problems.join(", ")}`);
   }
   return {
     threadEvents,
+    threadTurns: thread.turns,
     updatedAt: row.updatedAt ? String(row.updatedAt) : null,
+    lastActivityAt: [row.updatedAt ? String(row.updatedAt) : null, thread.lastTurnAt]
+      .filter(Boolean)
+      .sort()
+      .pop() || null,
     sessionSeq: Math.max(Number(row.sessionSeq || 0), thread.lastSeq),
     userId: row.userId ? String(row.userId) : thread.userId,
     orchestrationRuntime,
     schemaV: row.schemaV == null ? null : Number(row.schemaV),
+    baselineCompleted: row.baselineCompleted === true,
+    detectiveIntroSent: row.detectiveIntroSent === true,
+    detectiveHistoryText: historyText.text,
+    degradedReason,
+    degraded: degradedReason ? degradedReason.split(";").filter(Boolean) : [],
+    conversationSummary: parseSummaryJson(summaryText.text),
     problems,
   };
 }
@@ -365,9 +396,9 @@ async function saveSessionCheckpoint(client, payload) {
     sessionSeq: Number(payload.sessionSeq || 0),
     baselineCompleted: !!payload.baselineCompleted,
     detectiveIntroSent: !!payload.detectiveIntroSent,
-    detectiveHistoryText: plan.detectiveText,
     degradedReason: plan.degraded.join(";"),
   };
+  writeChunked(entity, "detectiveHistoryText", plan.detectiveText);
   writeChunked(entity, "conversationSummariesJson", plan.summariesJson);
   writeChunked(entity, "orchestrationRuntimeJson", plan.orchJson);
   await client.upsertEntity(entity, "Replace");
@@ -411,6 +442,39 @@ async function getDossierByUserId(client, userId) {
   };
 }
 
+/**
+ * Keep the user's latest conversation summary so a visitor whose session id has expired still has it.
+ *
+ * @param {import("@azure/data-tables").TableClient} client
+ * @param {string} userId
+ * @param {import("../dossier/conversationSummary").SummaryRecord} record
+ */
+async function saveUserSummary(client, userId, record) {
+  if (!client || !userId || !record) return;
+  await ensureTable(client);
+  const entity = {
+    partitionKey: PK.userSummary,
+    rowKey: String(userId),
+    updatedAt: new Date().toISOString(),
+  };
+  writeChunked(entity, "summaryJson", summaryToJson(record));
+  await client.upsertEntity(entity, "Replace");
+}
+
+/**
+ * @param {import("@azure/data-tables").TableClient} client
+ * @param {string} userId
+ * @returns {Promise<import("../dossier/conversationSummary").SummaryRecord|null>}
+ */
+async function getUserSummary(client, userId) {
+  if (!client || !userId) return null;
+  await ensureTable(client);
+  const entity = await getEntity(client, PK.userSummary, String(userId));
+  if (!entity) return null;
+  const { text, corrupt } = readChunked(entity, "summaryJson");
+  return corrupt ? null : parseSummaryJson(text);
+}
+
 module.exports = {
   PK,
   SESSION_SCHEMA_V,
@@ -426,6 +490,8 @@ module.exports = {
   threadPartitionKey,
   saveDossierByUserId,
   getDossierByUserId,
+  saveUserSummary,
+  getUserSummary,
   splitIntoChunks,
   writeChunked,
   readChunked,

@@ -88,6 +88,8 @@ const MOCK_AGENT_DIAGNOSTICS = /^(1|true|yes)$/i.test(process.env.MOCK_AGENT_DIA
 // Session restore + persistence naming group.
 const CONVERSATION_CHAR_THRESHOLD_BEFORE_SUMMARY =
   parseInt(process.env.CONVERSATION_CHAR_THRESHOLD_BEFORE_SUMMARY, 10) || 6000;
+/** Set to 0 to stop making the extra model call that condenses a long conversation into a summary. */
+const ENABLE_CONVERSATION_SUMMARY = !/^(0|false|no|off)$/i.test(process.env.ENABLE_CONVERSATION_SUMMARY || "");
 const DETECTIVE_HISTORY_STORAGE_CHAR_LIMIT = Math.max(
   50_000,
   parseInt(process.env.DETECTIVE_HISTORY_STORAGE_CHAR_LIMIT, 10) || 450_000
@@ -166,6 +168,7 @@ module.exports = {
   DEBUG_LOGS,
   MOCK_AGENT_DIAGNOSTICS,
   CONVERSATION_CHAR_THRESHOLD_BEFORE_SUMMARY,
+  ENABLE_CONVERSATION_SUMMARY,
   DETECTIVE_HISTORY_STORAGE_CHAR_LIMIT,
   LAST_N_MESSAGES_FOR_DOSSIER,
   LAST_N_CLIENT_TRANSCRIPT_TURNS,

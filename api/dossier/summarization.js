@@ -7,10 +7,6 @@ const logger = require("../logger");
 // Configuration knobs for memory & dossier triggers
 // ---------------------------------------------------------------------------
 
-// How many detective turns between dossier analyzer runs
-const N_DOSSIER_UPDATE_TURNS =
-	parseInt(process.env.N_DOSSIER_UPDATE_TURNS, 10) || 12;
-
 // Keep a trailing slice of history so the model still sees recent dialogue
 // after summarization.
 const RECENT_HISTORY_TAIL_LENGTH = Math.min(
@@ -26,8 +22,15 @@ function logInfo(...args) {
 // Conversation summarizer
 // ---------------------------------------------------------------------------
 
-async function summarizeHistory(openai, history) {
+/**
+ * @param {import("openai").default} openai
+ * @param {string} history
+ * @param {{ fallbackToTruncation?: boolean }} [opts] — with `fallbackToTruncation: false`, a model error
+ *   returns "" instead of the tail of the input, so a caller never stores raw transcript as a summary
+ */
+async function summarizeHistory(openai, history, opts) {
 	const text = String(history || "");
+	const fallbackToTruncation = !opts || opts.fallbackToTruncation !== false;
 
 	// In OFFLINE mode, we cannot call the model; return a crude truncation.
 	if (config.OFFLINE) {
@@ -76,6 +79,7 @@ Summary:
 	} catch (err) {
 		logInfo("Error in summarizeHistory:", err.message || err);
 		if (config.DEBUG_LOGS) logger.error("summarization", err);
+		if (!fallbackToTruncation) return "";
 		if (text.length <= config.CONVERSATION_CHAR_THRESHOLD_BEFORE_SUMMARY) return text;
 		return text.slice(-config.CONVERSATION_CHAR_THRESHOLD_BEFORE_SUMMARY);
 	}
@@ -99,21 +103,9 @@ async function maybeSummarize(
 	return `# MEMORY SUMMARY\n${summary}\n\n# RECENT HISTORY\n${recentTail}`;
 }
 
-// ---------------------------------------------------------------------------
-// Dossier trigger helper
-// ---------------------------------------------------------------------------
-
-function shouldRunDossierUpdate(turnCount) {
-	const n = Number(turnCount) || 0;
-	if (n <= 0) return false;
-	return n % N_DOSSIER_UPDATE_TURNS === 0;
-}
-
 module.exports = {
-	N_DOSSIER_UPDATE_TURNS,
 	RECENT_HISTORY_TAIL_LENGTH,
 	summarizeHistory,
 	maybeSummarize,
-	shouldRunDossierUpdate,
 };
 

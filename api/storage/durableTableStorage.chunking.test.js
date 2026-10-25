@@ -62,7 +62,7 @@ function checkpoint(overrides) {
     sessionSeq: 3,
     baselineCompleted: true,
     detectiveIntroSent: true,
-    conversationSummaries: null,
+    conversationSummary: null,
     detectiveHistoryText: "",
     orchestrationRuntime: { v: 2, blob: "ok" },
     ...overrides,
@@ -273,4 +273,72 @@ test("a large dossier is chunked and read back whole", async () => {
   await storage.saveDossierByUserId(client, "u1", dossier);
   const row = await storage.getDossierByUserId(client, "u1");
   assert.equal(JSON.parse(row.dossierJson).notes.length, 90_000);
+});
+
+test("every checkpoint column round-trips through hydrate, including a transcript past one property", async () => {
+  const { renderDetectiveHistoryText, parseDetectiveHistoryText } = require("./detectiveHistoryText");
+  const { SUMMARY_SCHEMA_V } = require("../dossier/conversationSummary");
+  const client = makeLimitedClient();
+  const history = [];
+  for (let i = 0; i < 400; i += 1) {
+    history.push({ role: i % 2 ? "assistant" : "user", content: `line ${i}\nwith a newline\tand a tab ` + "w".repeat(100) });
+  }
+  const text = renderDetectiveHistoryText(history);
+  assert.ok(text.length > 40_000, "the transcript spans more than one chunk");
+  const record = {
+    v: SUMMARY_SCHEMA_V,
+    userId: "u1",
+    sessionId: "s1",
+    fromSeq: 1,
+    throughSeq: 9,
+    text: "the querent keeps circling a stalled career",
+    createdAt: "2026-01-01T00:00:00.000Z",
+  };
+  const result = await storage.saveSessionCheckpoint(
+    client,
+    checkpoint({ detectiveHistoryText: text, conversationSummary: record })
+  );
+  assert.deepEqual(result.degraded, []);
+  const row = client.rows.get("EDA_session|s1");
+  assert.ok(row.detectiveHistoryTextChunks > 1);
+
+  const hydrated = await storage.hydrateSession(client, "s1");
+  assert.equal(hydrated.baselineCompleted, true);
+  assert.equal(hydrated.detectiveIntroSent, true);
+  assert.deepEqual(hydrated.degraded, []);
+  assert.deepEqual(hydrated.conversationSummary, record);
+  const restored = parseDetectiveHistoryText(hydrated.detectiveHistoryText);
+  assert.ok(restored.length >= 100);
+  assert.deepEqual(restored, history.slice(-restored.length));
+});
+
+test("degradedReason comes back as a list, and an empty summary column reads as no summary", async () => {
+  const client = makeLimitedClient();
+  const big = { v: 2, detectiveChatHistory: Array.from({ length: 300 }, () => ({ role: "user", content: "y".repeat(2_000) })) };
+  const written = await storage.saveSessionCheckpoint(client, checkpoint({ orchestrationRuntime: big, detectiveHistoryText: "z".repeat(50_000) }));
+  assert.ok(written.degraded.length > 0, "the oversized blob was reduced");
+  const hydrated = await storage.hydrateSession(client, "s1");
+  assert.deepEqual(hydrated.degraded, written.degraded);
+  assert.equal(hydrated.degradedReason, written.degraded.join(";"));
+  assert.equal(hydrated.conversationSummary, null);
+  assert.equal(client.rows.get("EDA_session|s1").conversationSummariesJson, "null");
+});
+
+test("the per-user summary row round-trips and ignores rows in another layout", async () => {
+  const { SUMMARY_SCHEMA_V } = require("../dossier/conversationSummary");
+  const client = makeLimitedClient();
+  assert.equal(await storage.getUserSummary(client, "u9"), null);
+  const record = {
+    v: SUMMARY_SCHEMA_V,
+    userId: "u9",
+    sessionId: "old-session",
+    fromSeq: 1,
+    throughSeq: 4,
+    text: "summary text ".repeat(2_500),
+    createdAt: "2026-01-01T00:00:00.000Z",
+  };
+  await storage.saveUserSummary(client, "u9", { ...record, text: record.text.slice(0, 6_000) });
+  assert.equal((await storage.getUserSummary(client, "u9")).sessionId, "old-session");
+  await client.upsertEntity({ partitionKey: "EDA_userSummary", rowKey: "u8", summaryJson: JSON.stringify({ v: 99, text: "x" }) });
+  assert.equal(await storage.getUserSummary(client, "u8"), null);
 });

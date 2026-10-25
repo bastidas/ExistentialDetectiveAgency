@@ -40,7 +40,7 @@ async function roundTrip(threadTextChars, orchestrationChars) {
     sessionSeq: 1,
     baselineCompleted: true,
     detectiveIntroSent: true,
-    conversationSummaries: null,
+    conversationSummary: null,
     detectiveHistoryText: "",
     orchestrationRuntime: { v: 2, blob: "y".repeat(orchestrationChars) },
   });
@@ -92,7 +92,7 @@ test("P-02: an orchestration blob near the entity budget is saved, not rejected 
     sessionSeq: 1,
     baselineCompleted: true,
     detectiveIntroSent: true,
-    conversationSummaries: null,
+    conversationSummary: null,
     detectiveHistoryText: "",
     orchestrationRuntime: { v: 2, detectiveChatHistory: history, marker: "keep" },
   });

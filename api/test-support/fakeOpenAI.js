@@ -132,7 +132,9 @@ async function startFakeOpenAI(options = {}) {
 
       const custom = state.respond ? state.respond(body, index) : undefined;
       let refusal = null;
-      if (custom && typeof custom === "object") {
+      if (typeof custom === "string") {
+        content = custom;
+      } else if (custom && typeof custom === "object") {
         if (Object.prototype.hasOwnProperty.call(custom, "__status")) {
           res.statusCode = Number(custom.__status) || 500;
           res.setHeader("content-type", "application/json");

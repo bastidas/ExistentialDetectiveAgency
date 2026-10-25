@@ -17,6 +17,8 @@ const logger = require("./logger");
 const { getDebugStateLevel } = logger;
 const durableTableStorage = require("./storage/durableTableStorage");
 const threadEvents = require("./storage/threadEvents");
+const conversationSummary = require("./dossier/conversationSummary");
+const summarization = require("./dossier/summarization");
 const usageLimits = require("./usage/usageLimits");
 const dailyUsageStores = require("./usage/dailyUsageStore");
 const { createRateLimiter, clientKeyFromHeaders } = require("./usage/rateLimiter");
@@ -60,6 +62,21 @@ const threadEventsBySession = new Map();
 /** @type {Map<string, number>} */
 const threadSeqBySession = new Map();
 const hydratedDurableSessions = new Set();
+/**
+ * Exchanges of each session's log that the summarizer may still need, oldest first (`seq` is the
+ * thread row key). Seeded from the thread rows on hydrate and appended every exchange.
+ *
+ * @type {Map<string, Array<{ seq: number, events: Array<object> }>>}
+ */
+const logTurnsBySession = new Map();
+const MAX_LOG_TURNS_KEPT = 200;
+/**
+ * `own` is this session's summary record (its `fromSeq`/`throughSeq` are rows of this session's log);
+ * `inherited` is the user's latest summary from an earlier session, carried over until `own` exists.
+ *
+ * @type {Map<string, { own: object|null, inherited: object|null }>}
+ */
+const summaryStateBySession = new Map();
 /**
  * Process-wide view of durable storage health. A failed read or write never fails a chat turn; it
  * flips `degraded` so operators and `/api/config` can see that state is only in memory, and the
@@ -112,6 +129,79 @@ function recordDurableOk(operation, reducedContent) {
   durableHealth.lastOkAt = new Date().toISOString();
   reducedContentByOperation.set(operation, Array.isArray(reducedContent) ? reducedContent.slice() : []);
   durableHealth.lastReducedContent = [...reducedContentByOperation.values()].flat();
+}
+
+function recordLogTurn(sessionId, seq, events) {
+  const turns = logTurnsBySession.get(sessionId) || [];
+  turns.push({ seq, events });
+  if (turns.length > MAX_LOG_TURNS_KEPT) turns.splice(0, turns.length - MAX_LOG_TURNS_KEPT);
+  logTurnsBySession.set(sessionId, turns);
+}
+
+function publishConversationSummary(sessionId) {
+  const state = summaryStateBySession.get(sessionId);
+  const record = state && (state.own || state.inherited);
+  chatService.setConversationSummaryForSession(sessionId, record ? record.text : "");
+}
+
+/**
+ * Pick this session's summary and the one carried over from the user's earlier sessions from what
+ * hydrate found: the row's `conversationSummariesJson` and the per-user summary row. For the same
+ * session the record covering more of the log wins (the user row is written as soon as a summary is
+ * made, the session row only at a checkpoint).
+ */
+function adoptStoredSummaries(sessionId, sessionRecord, userRecord) {
+  const sameSessionUser = userRecord && userRecord.sessionId === sessionId ? userRecord : null;
+  let own = sessionRecord || null;
+  if (sameSessionUser && (!own || sameSessionUser.throughSeq > own.throughSeq)) own = sameSessionUser;
+  const inherited = !own && userRecord && userRecord.sessionId !== sessionId ? userRecord : null;
+  summaryStateBySession.set(sessionId, { own, inherited });
+  publishConversationSummary(sessionId);
+}
+
+/**
+ * Extend the session's summary with exchanges it does not cover yet, once enough of them have piled up.
+ * Costs one extra model call and only when the uncovered text passes
+ * `CONVERSATION_CHAR_THRESHOLD_BEFORE_SUMMARY`. Never throws; a failure leaves the old summary and the
+ * exchanges stay in the log for the next try.
+ *
+ * @returns {Promise<boolean>} whether a new summary record was made
+ */
+async function maybeExtendConversationSummary(sessionId, userId, options) {
+  if (!apiConfig.ENABLE_CONVERSATION_SUMMARY || apiConfig.OFFLINE) return false;
+  const summarizer = options && typeof options.summarizeConversation === "function" ? options.summarizeConversation : null;
+  const openai = options && options.openaiClient;
+  if (!summarizer && !openai) return false;
+  const state = summaryStateBySession.get(sessionId) || { own: null, inherited: null };
+  try {
+    const next = await conversationSummary.extendSummary({
+      turns: logTurnsBySession.get(sessionId) || [],
+      previous: state.own,
+      priorText: state.inherited ? state.inherited.text : "",
+      userId: userId || "",
+      sessionId,
+      thresholdChars: apiConfig.CONVERSATION_CHAR_THRESHOLD_BEFORE_SUMMARY,
+      summarize: summarizer || ((input) => summarization.summarizeHistory(openai, input, { fallbackToTruncation: false })),
+    });
+    if (!next) return false;
+    summaryStateBySession.set(sessionId, { own: next, inherited: null });
+    publishConversationSummary(sessionId);
+    if (userId && isDurableStorageEnabled() && hydratedDurableSessions.has(sessionId)) {
+      const client = durableTableStorage.getTableClient();
+      if (client) {
+        try {
+          await durableTableStorage.saveUserSummary(client, userId, next);
+          recordDurableOk("summary_write", []);
+        } catch (err) {
+          recordDurableFailure("summary_write", err);
+        }
+      }
+    }
+    return true;
+  } catch (err) {
+    logger.warn("shared", "conversationSummary", err && err.message ? err.message : String(err));
+    return false;
+  }
 }
 
 function getDurableHealth() {
@@ -193,7 +283,7 @@ function isDurableStorageEnabled() {
   return apiConfig.resolveDurableStorageMode() !== "off";
 }
 
-async function hydrateSessionFromDurable(sessionId) {
+async function hydrateSessionFromDurable(sessionId, userIdHint) {
   if (!isDurableStorageEnabled()) return null;
   const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
   if (!id || hydratedDurableSessions.has(id)) return null;
@@ -220,7 +310,23 @@ async function hydrateSessionFromDurable(sessionId) {
         );
       }
     }
+    chatService.restoreSessionFromRowColumns(id, hydrated);
     chatService.restorePhilosopherHistoriesFromThread(id, hydrated.threadEvents);
+    if (hydrated.lastActivityAt && !lastActivityAtBySession.has(id)) {
+      const at = Date.parse(hydrated.lastActivityAt);
+      if (Number.isFinite(at)) lastActivityAtBySession.set(id, at);
+    }
+    logTurnsBySession.set(id, (hydrated.threadTurns || []).slice(-MAX_LOG_TURNS_KEPT));
+    const summaryUserId = hydrated.userId || (typeof userIdHint === "string" && userIdHint ? userIdHint : null);
+    let userRecord = null;
+    if (summaryUserId) {
+      try {
+        userRecord = await durableTableStorage.getUserSummary(client, summaryUserId);
+      } catch (err) {
+        logger.warn("shared", "conversationSummary", `could not read the user's summary: ${err && err.message ? err.message : err}`);
+      }
+    }
+    adoptStoredSummaries(id, hydrated.conversationSummary, userRecord);
   } catch (err) {
     // Not marked hydrated: it is retried on the next request, and checkpoints are held back until it
     // succeeds so an empty in-memory session can never overwrite the stored one.
@@ -228,7 +334,10 @@ async function hydrateSessionFromDurable(sessionId) {
     return null;
   }
   hydratedDurableSessions.add(id);
-  recordDurableOk("hydrate", []);
+  recordDurableOk(
+    "hydrate",
+    (hydrated.degraded || []).map((reason) => `stored_checkpoint_${reason}`)
+  );
   return hydrated;
 }
 
@@ -303,14 +412,19 @@ async function saveSessionCheckpointToDurable(sessionId, userId, envelope) {
     userId: userId || null,
     sessionSeq: threadSeqBySession.get(id) || 0,
     baselineCompleted: !!(envelope && envelope.baseline_completed),
-    detectiveIntroSent: !!(envelope && envelope.active_agent === "detective"),
-    conversationSummaries: null,
-    detectiveHistoryText: "",
+    detectiveIntroSent: chatService.getDetectiveIntroSentForSession(id),
+    conversationSummary: (summaryStateBySession.get(id) || {}).own || null,
+    detectiveHistoryText: chatService.exportDetectiveHistoryText(id),
     orchestrationRuntime,
   };
   try {
     const written = await durableTableStorage.saveSessionCheckpoint(client, payload);
     recordDurableOk("checkpoint", written && written.degraded);
+    if (!written || !written.degraded || written.degraded.length === 0) {
+      // The row was rewritten in full, so a reduced checkpoint noticed at hydrate no longer applies.
+      reducedContentByOperation.delete("hydrate");
+      durableHealth.lastReducedContent = [...reducedContentByOperation.values()].flat();
+    }
     return { ok: true };
   } catch (err) {
     recordDurableFailure("checkpoint", err);
@@ -368,7 +482,7 @@ function setMockLastActivityGapForSession(sessionId, msSinceLastVisit) {
  * @param {string|null|undefined} [userId] — echoed for client cache invalidation (opaque; HttpOnly cookie).
  */
 async function getChatStateForSession(sessionId, userId) {
-  await hydrateSessionFromDurable(sessionId);
+  await hydrateSessionFromDurable(sessionId, userId);
   const env =
     typeof sessionId === "string" && sessionId.length > 0
       ? getChatEnvelopeForSession(sessionId)
@@ -395,6 +509,7 @@ async function getChatStateForSession(sessionId, userId) {
       pendingBaselineRefresh: false,
       returningPersisted: transcriptHidden || hasChatSnapshot,
     },
+    detectiveIntroSent: sid != null && chatService.getDetectiveIntroSentForSession(sid),
     edaUserIdEcho: uid || undefined,
     orchestration:
       sid != null
@@ -450,7 +565,7 @@ async function handleChatRequest(sessionId, trimmed, options) {
   const burst = rejectBurst(options);
   if (burst) return burst;
 
-  await hydrateSessionFromDurable(sessionId);
+  await hydrateSessionFromDurable(sessionId, options && options.userId);
 
   const dailyStore = options && options.dailyUsageStore;
   const spendsModelTurn = !apiConfig.OFFLINE && !!(options && options.openaiClient);
@@ -514,7 +629,13 @@ async function handleChatRequest(sessionId, trimmed, options) {
     threadSeqBySession.set(sessionId, nextSeq);
     out.body.serverSeq = nextSeq;
     queueThreadTurn(sessionId, nextSeq, turnEvents);
+    recordLogTurn(sessionId, nextSeq, turnEvents);
     await flushThreadTurnsToDurable(sessionId, options && options.userId ? options.userId : null);
+    await maybeExtendConversationSummary(
+      sessionId,
+      options && options.userId ? options.userId : null,
+      options
+    );
     const dirty = (dirtyTurnsSinceCheckpoint.get(sessionId) || 0) + 1;
     dirtyTurnsSinceCheckpoint.set(sessionId, dirty);
     const now = Date.now();
@@ -560,7 +681,7 @@ async function handleChatStream(sessionId, trimmed, options, onEvent) {
  */
 async function handleChatSync(sessionId, userId, payload, options) {
   if (rejectBurst(options)) return { ok: false, reason: "rate_limited" };
-  await hydrateSessionFromDurable(sessionId);
+  await hydrateSessionFromDurable(sessionId, userId);
   const clientSeq =
     payload && typeof payload.clientSeq === "number" && Number.isFinite(payload.clientSeq)
       ? Math.max(0, Math.floor(payload.clientSeq))
@@ -583,6 +704,7 @@ async function handleChatSync(sessionId, userId, payload, options) {
   threadEventsBySession.set(sessionId, threadEvents.trimEvents(current.concat(tail)));
   threadSeqBySession.set(sessionId, nextSeq);
   queueThreadTurn(sessionId, nextSeq, tail);
+  recordLogTurn(sessionId, nextSeq, tail);
   await flushThreadTurnsToDurable(sessionId, userId);
   return { ok: true, serverSeq: nextSeq };
 }
