@@ -130,7 +130,7 @@ function computeCurrentPhaseId(state) {
 }
 
 /**
- * Pure transition (see attacheOrchestrator-plan.md).
+ * Pure transition.
  * Third arg: `asked_baseline_question` from the attaché LLM JSON this turn.
  * When true, baseline `question_index` advances (or moves to the next baseline phase
  * after the last question in the current one). When false, baseline state is unchanged.

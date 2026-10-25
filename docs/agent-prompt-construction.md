@@ -1,6 +1,6 @@
 # How agent prompts are constructed today
 
-**Lumen / Umbra (envelope slice 1):** frozen `composeStaticSystemPrompt` (persona + instructions + Structured Outputs reminder) + native history roles + a this-turn user channel (`packet JSON` + `---QUERENT---` + raw querent). See `.cursor/plans/frozen_packet_envelope_16a5398b.plan.md`.
+**Lumen / Umbra (envelope slice 1):** frozen `composeStaticSystemPrompt` (persona + instructions + Structured Outputs reminder) + native history roles + a this-turn user channel (`packet JSON` + `---QUERENT---` + raw querent). See `plans/frozen_packet_envelope_16a5398b.plan.md`.
 
 Detective and attaché still use `composeAgentPrompt` (catalog / `# TURN INSTRUCTIONS` tails). All four agents share native history in `buildChatCompletionMessages`.
 

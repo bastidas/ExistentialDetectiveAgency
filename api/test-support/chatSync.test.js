@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * POST /api/chat-sync (docs/XSTATE-MERGE-PLAN.md, P-04). Sync is a recovery path: it may append
+ * POST /api/chat-sync (plans/XSTATE-MERGE-PLAN.md, P-04). Sync is a recovery path: it may append
  * transcript lines the server lost, but it must not rewrite what the server holds, accept arbitrary
  * event kinds, or let the client choose the sequence number.
  */

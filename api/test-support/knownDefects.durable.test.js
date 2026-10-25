@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * Durable-storage defects that need Azurite (docs/XSTATE-MERGE-PLAN.md, P-02). Skipped locally
+ * Durable-storage defects that need Azurite (plans/XSTATE-MERGE-PLAN.md, P-02). Skipped locally
  * when Azurite is not configured; required in CI. Checkpoint settings must be in the environment
  * before `shared.js` loads, hence the separate file.
  */
