@@ -11,7 +11,7 @@ Greenfield schema: **drop or recreate** the table when deploying a breaking chan
 | `DURABLE_STORAGE_MODE` | `off` \| `azurite` \| `azure-cloud` |
 | `ENABLE_DURABLE_STORAGE` | Legacy toggle (fallback only when `DURABLE_STORAGE_MODE` is unset) |
 | `MAX_THREAD_EVENTS` | Max thread events kept (default `400`) |
-| `MAX_THREAD_JSON_CHARS` | Max serialized size of `threadEventsJson` (default `800000`, under 1 MB entity limit) |
+| `MAX_THREAD_JSON_CHARS` | Max serialized size of the in-memory thread (default `800000`). What is persisted is bounded separately by the per-entity budget (see Chunked values) |
 | `CONVERSATION_CHAR_THRESHOLD_BEFORE_SUMMARY` | Char threshold before summarization |
 | `DETECTIVE_HISTORY_STORAGE_CHAR_LIMIT` | Max persisted detective transcript chars |
 | `LAST_N_MESSAGES_FOR_DOSSIER` | Number of recent messages passed to dossier analyzer |
@@ -105,6 +105,14 @@ Greenfield schema: **drop or recreate** the table when deploying a breaking chan
 | `sideTranscripts.philosophers` | Lumen/Umbra thread lines for a future folder UI (not main chat). |
 | `returnClassification` | `{ returnCategory, timeAwayMs, needsBaselineRefresh, baselineReason, lastActivityAtIso }` when `ENABLE_RETURN_POLICY` is on. |
 | `detectiveIntroSent` | Boolean |
+
+## Chunked values and degraded mode
+
+Azure Table rejects string properties over 32,768 UTF-16 characters and entities over 1 MiB. Session and dossier JSON is therefore written as chunked properties: `name`, `name__1`, `name__2`, ... with the piece count in `<name>Chunks` (each piece at most 30,000 characters, never splitting a surrogate pair). Readers still accept older rows that hold the value in a single property.
+
+- Per-entity budget: about 400,000 characters across the chunked session fields. The orchestration blob may use up to 200,000 of them; over that, chat-history tails are halved (newest kept), and if it still does not fit it is not persisted. The thread keeps the newest events that fit. Each lossy write is logged and recorded in the row's `degradedReason`.
+- Row version: every session row carries `schemaV` (currently `2`). The orchestration blob carries `v` (`ORCHESTRATION_RUNTIME_V`, currently `2`). A blob with another `v` is ignored on restore (logged); the transcript in `threadEventsJson` is still read.
+- Failures are non-fatal. A failed checkpoint is logged and retried on the next turn; a failed read leaves the session unhydrated and holds back checkpoints until a read succeeds, so an empty in-memory session never overwrites the stored one. `GET /api/config` reports `durableStorageDegraded` while writes or reads are failing.
 
 ## Maintenance
 

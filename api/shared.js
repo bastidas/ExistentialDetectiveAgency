@@ -13,7 +13,8 @@ const {
 const { classifyTimeAway } = require("./orchestration/timeAwayClassification");
 const apiConfig = require("./config");
 const { createChatStateSnapshotBody, buildChatPostErrorBody } = require("./contracts/chatApiContract");
-const { getDebugStateLevel } = require("./logger");
+const logger = require("./logger");
+const { getDebugStateLevel } = logger;
 const durableTableStorage = require("./storage/durableTableStorage");
 const threadEvents = require("./storage/threadEvents");
 const usageLimits = require("./usage/usageLimits");
@@ -59,6 +60,44 @@ const threadEventsBySession = new Map();
 /** @type {Map<string, number>} */
 const threadSeqBySession = new Map();
 const hydratedDurableSessions = new Set();
+/**
+ * Process-wide view of durable storage health. A failed read or write never fails a chat turn; it
+ * flips `degraded` so operators and `/api/config` can see that state is only in memory, and the
+ * next successful write clears it.
+ */
+const durableHealth = {
+  degraded: false,
+  consecutiveFailures: 0,
+  lastOperation: null,
+  lastError: null,
+  lastErrorAt: null,
+  lastOkAt: null,
+  lastReducedContent: [],
+};
+
+function recordDurableFailure(operation, err) {
+  durableHealth.degraded = true;
+  durableHealth.consecutiveFailures += 1;
+  durableHealth.lastOperation = operation;
+  durableHealth.lastError = err && err.message ? String(err.message).slice(0, 500) : String(err).slice(0, 500);
+  durableHealth.lastErrorAt = new Date().toISOString();
+  logger.warn(
+    "shared",
+    "durableStorage",
+    `${operation} failed (${durableHealth.consecutiveFailures} in a row); continuing with in-memory state: ${durableHealth.lastError}`
+  );
+}
+
+function recordDurableOk(reducedContent) {
+  durableHealth.degraded = false;
+  durableHealth.consecutiveFailures = 0;
+  durableHealth.lastOkAt = new Date().toISOString();
+  durableHealth.lastReducedContent = Array.isArray(reducedContent) ? reducedContent.slice() : [];
+}
+
+function getDurableHealth() {
+  return { ...durableHealth, lastReducedContent: durableHealth.lastReducedContent.slice() };
+}
 const dirtyTurnsSinceCheckpoint = new Map();
 const lastCheckpointMsBySession = new Map();
 const SESSION_ID_COOKIE_NAME = "sessionId";
@@ -141,27 +180,43 @@ async function hydrateSessionFromDurable(sessionId) {
   if (!id || hydratedDurableSessions.has(id)) return null;
   const client = durableTableStorage.getTableClient();
   if (!client) return null;
-  const hydrated = await durableTableStorage.hydrateSession(client, id);
-  if (Array.isArray(hydrated.threadEvents)) {
-    threadEventsBySession.set(id, threadEvents.trimEvents(hydrated.threadEvents));
-  }
-  threadSeqBySession.set(id, Number(hydrated.sessionSeq || 0));
-  if (hydrated.userId) {
-    await chatService.mergeDossierFromTableIfNewer(id, hydrated.userId, client);
-  }
-  if (hydrated.orchestrationRuntime && typeof hydrated.orchestrationRuntime === "object") {
-    chatService.restoreSessionRuntimeFromDurable(id, hydrated.orchestrationRuntime);
+  let hydrated;
+  try {
+    hydrated = await durableTableStorage.hydrateSession(client, id);
+    if (Array.isArray(hydrated.threadEvents)) {
+      threadEventsBySession.set(id, threadEvents.trimEvents(hydrated.threadEvents));
+    }
+    threadSeqBySession.set(id, Number(hydrated.sessionSeq || 0));
+    if (hydrated.userId) {
+      await chatService.mergeDossierFromTableIfNewer(id, hydrated.userId, client);
+    }
+    if (hydrated.orchestrationRuntime && typeof hydrated.orchestrationRuntime === "object") {
+      chatService.restoreSessionRuntimeFromDurable(id, hydrated.orchestrationRuntime);
+    }
+  } catch (err) {
+    // Not marked hydrated: it is retried on the next request, and checkpoints are held back until it
+    // succeeds so an empty in-memory session can never overwrite the stored one.
+    recordDurableFailure("hydrate", err);
+    return null;
   }
   hydratedDurableSessions.add(id);
   return hydrated;
 }
 
+/**
+ * Best-effort checkpoint: never throws. Resolves `{ ok: true }` when the row was written and
+ * `{ ok: false }` when it was skipped or failed, so the caller keeps the session marked dirty and
+ * retries on the next turn.
+ *
+ * @returns {Promise<{ ok: boolean, skipped?: string, error?: string }>}
+ */
 async function saveSessionCheckpointToDurable(sessionId, userId, envelope) {
-  if (!isDurableStorageEnabled()) return;
+  if (!isDurableStorageEnabled()) return { ok: false, skipped: "disabled" };
   const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
-  if (!id) return;
+  if (!id) return { ok: false, skipped: "no_session" };
   const client = durableTableStorage.getTableClient();
-  if (!client) return;
+  if (!client) return { ok: false, skipped: "no_client" };
+  if (!hydratedDurableSessions.has(id)) return { ok: false, skipped: "not_hydrated" };
   const orchestrationRuntime = chatService.exportSessionRuntimeForDurable(id);
   const payload = {
     sessionId: id,
@@ -174,7 +229,14 @@ async function saveSessionCheckpointToDurable(sessionId, userId, envelope) {
     detectiveHistoryText: "",
     orchestrationRuntime,
   };
-  await durableTableStorage.saveSessionCheckpoint(client, payload);
+  try {
+    const written = await durableTableStorage.saveSessionCheckpoint(client, payload);
+    recordDurableOk(written && written.degraded);
+    return { ok: true };
+  } catch (err) {
+    recordDurableFailure("checkpoint", err);
+    return { ok: false, error: durableHealth.lastError };
+  }
 }
 
 /**
@@ -380,13 +442,15 @@ async function handleChatRequest(sessionId, trimmed, options) {
     const minMs = apiConfig.SESSION_CHECKPOINT_MIN_INTERVAL_MS;
     const forceCheckpoint = dirty >= k || now - last >= minMs;
     if (forceCheckpoint) {
-      await saveSessionCheckpointToDurable(
+      const saved = await saveSessionCheckpointToDurable(
         sessionId,
         options && options.userId ? options.userId : null,
         envelope
       );
-      dirtyTurnsSinceCheckpoint.set(sessionId, 0);
-      lastCheckpointMsBySession.set(sessionId, now);
+      if (saved.ok || saved.skipped === "disabled" || saved.skipped === "no_client") {
+        dirtyTurnsSinceCheckpoint.set(sessionId, 0);
+        lastCheckpointMsBySession.set(sessionId, now);
+      }
     }
   }
   return { status: 200, body: out.body };
@@ -482,6 +546,7 @@ module.exports = {
   hydrateSessionFromDurable,
   reloadSessionFromDurable: hydrateSessionFromDurable,
   saveSessionCheckpointToDurable,
+  getDurableHealth,
   getMsSinceLastVisitForSession,
   setMockLastActivityGapForSession,
   getChatStateForSession,

@@ -37,7 +37,7 @@ async function roundTrip(threadTextChars, orchestrationChars) {
     detectiveIntroSent: true,
     conversationSummaries: null,
     detectiveHistoryText: "",
-    orchestrationRuntime: { v: 1, blob: "y".repeat(orchestrationChars) },
+    orchestrationRuntime: { v: 2, blob: "y".repeat(orchestrationChars) },
   });
   return storage.hydrateSession(client, sessionId);
 }
@@ -49,12 +49,33 @@ test("checkpoint round-trips a session well under the property limit", { skip: s
   assert.equal(h.orchestrationRuntime.blob.length, 5_000);
 });
 
-test(
-  "P-02: a session larger than one table property (about 32K characters) still round-trips",
-  { skip: skipAzurite, todo: "P-02: values are written as single properties; Azure rejects them above about 32K characters" },
-  async () => {
-    const h = await roundTrip(60_000, 60_000);
-    assert.equal(h.threadEvents[0].text.length, 60_000);
-    assert.equal(h.orchestrationRuntime.blob.length, 60_000);
+test("P-02: a session larger than one table property (about 32K characters) round-trips", { skip: skipAzurite }, async () => {
+  const h = await roundTrip(60_000, 60_000);
+  assert.equal(h.threadEvents[0].text.length, 60_000);
+  assert.equal(h.orchestrationRuntime.blob.length, 60_000);
+});
+
+test("P-02: a session near the entity budget is saved, not rejected as EntityTooLarge", { skip: skipAzurite }, async () => {
+  const storage = require("./durableTableStorage");
+  const client = storage.getTableClient();
+  const sessionId = newSessionId();
+  const events = [];
+  for (let i = 0; i < 400; i += 1) {
+    events.push({ ts: i, phase: "detective", kind: "user", text: "z".repeat(2500), agent: "user" });
   }
-);
+  const result = await storage.saveSessionCheckpoint(client, {
+    sessionId,
+    userId: "u_limits",
+    sessionSeq: 400,
+    threadEvents: events,
+    baselineCompleted: true,
+    detectiveIntroSent: true,
+    conversationSummaries: null,
+    detectiveHistoryText: "",
+    orchestrationRuntime: { v: 2, blob: "y".repeat(150_000) },
+  });
+  assert.ok(result.degraded.some((r) => r.startsWith("thread_oldest_")));
+  const h = await storage.hydrateSession(client, sessionId);
+  assert.equal(h.orchestrationRuntime.blob.length, 150_000);
+  assert.equal(h.threadEvents[h.threadEvents.length - 1].ts, 399);
+});

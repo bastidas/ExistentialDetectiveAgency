@@ -198,7 +198,8 @@ function bumpDetectiveTurnCount(sessionId) {
   detectiveTurnCountByChatSessionId.set(id, getDetectiveTurnCount(sessionId) + 1);
 }
 
-const ORCHESTRATION_RUNTIME_V = 1;
+/** Bump when the stored orchestration shape changes; blobs with another `v` are ignored on restore. v2: chunked storage layout and native-history chat histories. */
+const ORCHESTRATION_RUNTIME_V = 2;
 const DURABLE_EXPORT_HISTORY_MAX = 120;
 
 /**
@@ -303,7 +304,14 @@ function exportSessionRuntimeForDurable(sessionId) {
 function restoreSessionRuntimeFromDurable(sessionId, blob) {
   if (!blob || typeof blob !== "object") return;
   const o = /** @type {{ v?: number, truncated?: boolean }} */ (blob);
-  if (o.v !== ORCHESTRATION_RUNTIME_V || o.truncated) return;
+  if (o.v !== ORCHESTRATION_RUNTIME_V || o.truncated) {
+    logger.warn(
+      "chatService",
+      "restoreSessionRuntimeFromDurable",
+      `ignoring stored orchestration runtime (v=${String(o.v)}, expected ${ORCHESTRATION_RUNTIME_V}${o.truncated ? ", truncated" : ""})`
+    );
+    return;
+  }
   const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
   if (!id) return;
   const b = /** @type {{

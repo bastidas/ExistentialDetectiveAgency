@@ -94,6 +94,7 @@ app.get("/api/config", (req, res) => {
     sessionCheckpointEveryKTurns: apiConfig.SESSION_CHECKPOINT_EVERY_K_TURNS,
     sessionCheckpointMinIntervalMs: apiConfig.SESSION_CHECKPOINT_MIN_INTERVAL_MS,
     durableStorageMode: apiConfig.resolveDurableStorageMode(),
+    durableStorageDegraded: shared.getDurableHealth().degraded,
   });
 });
 

@@ -25,22 +25,23 @@ if (skipAzurite && /^(1|true)$/i.test(process.env.CI || "")) {
   });
 }
 
-test(
-  "P-02: a failing storage checkpoint does not fail the user's turn",
-  {
-    skip: skipAzurite,
-    todo: "P-02: the checkpoint is awaited without a catch; long conversations exceed one table property and the request throws",
-  },
-  async () => {
-    const fake = await startFakeOpenAI({ replyChars: 1500 });
-    try {
-      const { results } = await driveSession({ client: fake.createClient(), turns: 30 });
-      assert.deepEqual(
-        results.map((r) => r.status).filter((s) => s !== 200),
-        []
-      );
-    } finally {
-      await fake.close();
-    }
+test("P-02: 30 long-reply turns with a checkpoint every turn all succeed and the row reads back", { skip: skipAzurite }, async () => {
+  const fake = await startFakeOpenAI({ replyChars: 1500 });
+  try {
+    const { sessionId, results } = await driveSession({ client: fake.createClient(), turns: 30 });
+    assert.deepEqual(
+      results.map((r) => r.status).filter((s) => s !== 200),
+      []
+    );
+    const storage = require("../storage/durableTableStorage");
+    const hydrated = await storage.hydrateSession(storage.getTableClient(), sessionId);
+    assert.equal(hydrated.schemaV, storage.SESSION_SCHEMA_V);
+    assert.deepEqual(hydrated.problems, []);
+    assert.ok(hydrated.sessionSeq >= 30, `sessionSeq ${hydrated.sessionSeq}`);
+    assert.ok(hydrated.threadEvents.length >= 30, `thread events ${hydrated.threadEvents.length}`);
+    assert.equal(hydrated.orchestrationRuntime && hydrated.orchestrationRuntime.v, 2);
+    assert.equal(require("../shared").getDurableHealth().degraded, false);
+  } finally {
+    await fake.close();
   }
-);
+});
