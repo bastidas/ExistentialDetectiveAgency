@@ -126,7 +126,7 @@ Baseline behavior measured on the base (45 user turns against a fake OpenAI endp
 | F-06 | No CI | Open. Now P-05. | `.github/workflows` has only the SWA deploy. |
 | F-07 | xstate complexity | Closed as a decision: keep XState (envelope plan, "Out of scope"). Machines exist in 8 production files. | Search for `require("xstate")` under `api/`. |
 | F-08 | Config and documentation drift | Open, larger. Now P-08. | See P-08. |
-| F-09 | Dead and deprecated code | Partly open. Retired by envelope slices, not before. | `philosophersCustomPrompt.js`, `attacheCustomPrompt.js`, `detectiveCustomPromptDEPRECATED.js` still present. |
+| F-09 | Dead and deprecated code | Partly open. Retired by envelope slices, not before. | `philosophersCustomPrompt.js` was deleted on the native-history branch (slice 1). `attacheCustomPrompt.js` and `detectiveCustomPromptDEPRECATED.js` remain until slices 2 and 3. |
 | F-10 | Stray files | Mostly resolved by the restructure. Two prompt files may be unreferenced (P-09). | `closing_instructions.md`, `narrative/stages.md`. |
 | F-11 | Two deploy workflows | Resolved in the repo (one workflow). The second Static Web App resource may still exist in Azure. | Workflow list. |
 | F-12 | Merge history not bisectable | Moot. The restructure rewrote paths; use a merge commit for PR #4 and keep history. | |

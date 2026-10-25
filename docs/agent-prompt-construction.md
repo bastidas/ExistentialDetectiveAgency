@@ -56,7 +56,7 @@ persona.md
 | **`custom` argument** | Extra tail passed into `composeAgentPrompt` | Philosophers: mock dump. Detective/attaché live path: unused or empty |
 | **State slice** | `llmSafeState` | Computed, **not sent to the model** |
 
-The user-facing idea of “custom prompt creation” maps to **catalog-driven `# TURN INSTRUCTIONS`** (detective, attaché) plus **`buildPhilosophersCustomPrompt`** (Umbra/Lumen). The old wrapper [`detectiveCustomPromptDEPRECATED.js`](../api/agents/detective/detectiveCustomPromptDEPRECATED.js) has **no importers**.
+The user-facing idea of “custom prompt creation” maps to **catalog-driven `# TURN INSTRUCTIONS`** (detective, attaché) plus, for Umbra/Lumen, nothing: they use the frozen system prompt and the user packet. The old wrapper [`detectiveCustomPromptDEPRECATED.js`](../api/agents/detective/detectiveCustomPromptDEPRECATED.js) has **no importers**.
 
 ---
 
@@ -118,27 +118,21 @@ Same pipeline for both. They run **in parallel with detective** in [`chatService
 
 **Catalogs:** both [`lumen/prompt_catalog.json`](../api/prompts/lumen/prompt_catalog.json) and [`umbra/prompt_catalog.json`](../api/prompts/umbra/prompt_catalog.json) are `{ "entries": {} }`. `selectSpecialInstructions` returns `[]`. No `# TURN INSTRUCTIONS` builder.
 
-**The only “custom” today** is [`buildPhilosophersCustomPrompt`](../api/agents/philosophers/philosophersCustomPrompt.js):
-
-```
-[mock custom lumen] voice=lumen
-+ truncated lumen_prompts.md   (status: mock placeholder)
-```
-
-Same for Umbra. Session/narrative/dossier are **ignored** by that function (`_session`). `narrative_phase` and `dossier_summary` are computed into `llmSafeState` and **not** put in the system string — even though the instructions tell the model to use “dossier or narrative context.”
+**No custom tail.** Lumen and Umbra send `composeStaticSystemPrompt` (persona + instructions + schema appendix) as a frozen system message, and per-turn state goes in the JSON/QUERENT user packet (`api/prompting/packetRegistry.js`, `userChannel.js`). The old `buildPhilosophersCustomPrompt` (a `[mock custom ...]` head plus a truncated `*_prompts.md` placeholder) was deleted; nothing calls it. `lumen_prompts.md` / `umbra_prompts.md` are no longer part of the live prompt.
 
 Difference between Umbra and Lumen is **file content and JSON field names**, not assembly.
 
 ---
 
-## What “remove custom prompt creation” would actually delete
+## What “remove custom prompt creation” deleted for Umbra/Lumen
 
-For **Umbra/Lumen**, the cut is small and already labeled mock:
+Done on the native-history branch:
 
-- Stop passing `custom` from `buildPhilosophersCustomPrompt`
-- Drop or stop loading `lumen_prompts.md` / `umbra_prompts.md`
-- Universal prompt becomes persona + instructions + schema appendix only
-- Remaining work is **how** to pass `narrative_phase`, `dossier_summary`, secrets, etc.
+- `buildPhilosophersCustomPrompt` and its file are gone; `custom` is no longer passed for philosophers
+- Universal prompt is persona + instructions + schema appendix only
+- `narrative_phase`, `dossier_summary` and similar fields travel in the user packet
+
+Still open: the `lumen_prompts.md` / `umbra_prompts.md` placeholder files remain registered, and detective and attaché still use catalog-driven `# TURN INSTRUCTIONS` (envelope slices 2 and 3).
 
 For **detective**, the cut is the live product behavior:
 
