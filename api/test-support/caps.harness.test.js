@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * Cap behavior (docs/XSTATE-MERGE-PLAN.md, P-01). `shared.js` reads the limits when it loads, so they are set
+ * Cap behavior (plans/XSTATE-MERGE-PLAN.md, P-01). `shared.js` reads the limits when it loads, so they are set
  * here first and this lives in its own file (one process per test file). The session cap works when configured
  * (default 40); the daily cap (default 300) counts LLM-backed turns across sessions.
  */

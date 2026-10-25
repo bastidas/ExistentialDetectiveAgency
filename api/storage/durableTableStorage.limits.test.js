@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * Azure Table property limits (docs/XSTATE-MERGE-PLAN.md, P-02). Runs against Azurite; skipped
+ * Azure Table property limits (plans/XSTATE-MERGE-PLAN.md, P-02). Runs against Azurite; skipped
  * locally when it is not configured, required in CI.
  */
 

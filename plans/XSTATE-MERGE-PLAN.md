@@ -251,7 +251,7 @@ Remediation: a retention job (timer-triggered Function or table TTL strategy) ma
 
 ## 6. Critical review of the envelope plan
 
-The plan (`.cursor/plans/frozen_packet_envelope_16a5398b.plan.md`) is sound in direction and grounded in the code. Every existing path it names exists; the only missing paths are the new files it proposes. All six todos are `pending`, so this is a design, not an implementation.
+The plan (`plans/frozen_packet_envelope_16a5398b.plan.md`) is sound in direction and grounded in the code. Every existing path it names exists; the only missing paths are the new files it proposes. All six todos are `pending`, so this is a design, not an implementation.
 
 What it gets right:
 

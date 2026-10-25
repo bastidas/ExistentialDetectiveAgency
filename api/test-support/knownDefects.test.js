@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * Executable list of known defects (see docs/XSTATE-MERGE-PLAN.md, findings P-xx and slices E-x).
+ * Executable list of known defects (see plans/XSTATE-MERGE-PLAN.md, findings P-xx and slices E-x).
  *
  * Each test states the behavior we want and is marked `todo`: it runs on every CI build, a failure
  * is reported as `# TODO` and does not fail the suite, and a pass is reported too. When the fix for

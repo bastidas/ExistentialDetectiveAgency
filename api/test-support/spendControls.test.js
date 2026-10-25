@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * Spend and abuse controls on handleChatRequest (docs/XSTATE-MERGE-PLAN.md, P-01): message length,
+ * Spend and abuse controls on handleChatRequest (plans/XSTATE-MERGE-PLAN.md, P-01): message length,
  * per-client burst limit, and that a closed session never spends a daily-cap reservation.
  * Limits are read when shared.js loads, so they are set first.
  */
