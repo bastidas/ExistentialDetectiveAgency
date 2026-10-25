@@ -159,6 +159,8 @@ Keep a **lab overlay** (instruction ids, machine snapshot, timestamps) that is n
 
 ## Minimal packets (no telemetry)
 
+**Which phase?** Three different phases appear below: `phase` (attaché phase, attaché packet only), `existential_therapy_phase` (the detective's therapy stage) and `narrative_phase` (Lumen and Umbra's story phase, held as `currentStoryPhase`). They are separate state, advanced by different parts; see [`docs/phases.md`](../docs/phases.md).
+
 **Attaché:** `packet_version`, `phase`, `ask_question_id` (optional), `deliver_baseline_preamble` (optional), `opening_line_id` (optional), `greeting_mode` (single derived enum — see below), `baseline_paused` (explore after interrupting baseline). No `turn_task` markdown if the handbook covers start/explore/close.
 
 **Detective (locked: handbook-stages, not free-improv-only):** `packet_version`, `existential_therapy_phase`, `greeting_mode`, `closure_phase`, `opening_line_id` (first-scene only), `dossier_summary`, `summary`. Frozen persona **plus** a short handbook per stage under `api/prompts/detective/` (initial / middle / final, return, close) keyed by those flags. Stance and constraints, not verbatim lines. Catalogs shrink; do not dump remaining rows into `turn_task` as a permanent home.

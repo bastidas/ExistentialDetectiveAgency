@@ -145,20 +145,22 @@ The two philosophers share one `currentStoryPhase` and have no other stored stat
 
 ## `currentStoryPhase`: writers and readers
 
+This is the story phase, one of five separate phase concepts; see [`phases.md`](phases.md) for the others (attaché phase, therapy phase, closure phase, routing).
+
 One XState snapshot per session (machine `philosophersNarrativeMachine` in `api/agents/philosophers/philosophersMachine.js`, context `{ narrativeTurn }`), held in `currentStoryPhaseBySessionId` in `api/chatService.js`. Neither Lumen nor Umbra writes it; `chatService` does.
 
 Writers:
-- `advanceCurrentStoryPhase(sessionId)`: restores the actor from the stored snapshot, sends `NARRATIVE_TURN` (adds 1 to `narrativeTurn`), stores the new persisted snapshot. Called once at the end of every user turn in `composeChatResponse`: after the attaché reply on attaché turns (next to `bumpAttacheExchangeCount`), and after the three model calls on detective turns, online or offline. `narrativeTurn` therefore equals the number of user turns so far, attaché and detective together. It is also called by the dev lab step `CURRENT_STORY_PHASE_ADVANCE` in `runOrchestrationLabStep` (`api/orchestration/orchestrationLabSnapshot.js`, route `POST /api/dev/orchestration-step` in `server-dev.js`).
+- `advanceCurrentStoryPhase(sessionId)`: restores the actor from the stored snapshot, sends `NARRATIVE_TURN` (adds 1 to `narrativeTurn`), stores the new persisted snapshot. Called once at the end of every detective turn in `composeChatResponse`, online or offline, after the three model calls. Attaché turns do not advance it. `narrativeTurn` therefore equals the number of detective turns so far. The advance is unconditional; no agent decides it (see `phases.md`). It is also called by the dev lab step `CURRENT_STORY_PHASE_ADVANCE` in `runOrchestrationLabStep` (`api/orchestration/orchestrationLabSnapshot.js`, route `POST /api/dev/orchestration-step` in `server-dev.js`).
 - `setCurrentStoryPhaseTurnForLabSession(sessionId, targetTurn)`: dev only; deletes the snapshot and replays `NARRATIVE_TURN` up to the target. Called by `syncLabDetectiveOrchestrationFromPreset`, which `seedSessionScenario` (`api/lab/chatTestSeed.js`, route `POST /api/dev/chat-scenario`) calls when the preset puts the session in the detective.
 - `restoreSessionRuntimeFromDurable`: sets it from the blob field `currentStoryPhase` on hydrate.
 - `clearSessionForAttacheRebaseline`: deletes it when a returning visitor is sent back to the attaché.
 
 Readers:
-- `buildPhilosopherComposeSession` (via `getStoryTurnFromCurrentStoryPhase`): turns `narrativeTurn` into `narrative_phase` with `narrativePhaseFromTurn` (`api/narrativePhases.js`: Exposition, Rising Action, Climax, Falling Action, Denouement, Coda, repeating) and, with the dossier summary, builds the packet for Lumen and Umbra each detective turn. Because the story turn also counts attaché turns, the first detective turn already sees a later phase than Exposition. The detective and attaché do not read it.
+- `buildPhilosopherComposeSession` (via `getStoryTurnFromCurrentStoryPhase`): turns `narrativeTurn` into `narrative_phase` with `narrativePhaseFromTurn` (`api/narrativePhases.js`: Exposition, Rising Action, Climax, Falling Action, Denouement, Coda, repeating) and, with the dossier summary, builds the packet for Lumen and Umbra each detective turn. The first detective turn sees `Exposition`. The detective and attaché do not read it.
 - `exportSessionRuntimeForDurable`: copies it into the checkpoint blob, called from `saveSessionCheckpointToDurable` in `api/shared.js`.
 - `getCurrentStoryPhaseForSession`: used by `buildOrchestrationLabSnapshot` for the dev lab view (`narrativeTurn`, `narrative_phase`).
 
-Consequence for recovery: the story turn is written to the checkpoint only, not the log. If the checkpoint lags the log by n turns, the restored `narrativeTurn` is n turns behind, so Lumen and Umbra can be in an earlier story phase than before the restart. Since it now counts every user turn, it equals the number of `user` events in the log (`sessionSeq`) and could be rebuilt from there; that is not done today.
+Consequence for recovery: the story turn is written to the checkpoint only, not the log. If the checkpoint lags the log by n turns, the restored `narrativeTurn` is n turns behind, so Lumen and Umbra can be in an earlier story phase than before the restart. Since it counts detective turns, it equals the number of detective-phase `user` events in the log and could be rebuilt from there; that is not done today.
 
 Names kept on purpose: the machine `philosophersNarrativeMachine`, its context field `narrativeTurn`, and the prompt packet field `narrative_phase` (with `api/narrativePhases.js`). They are part of the persisted snapshot shape and the Lumen and Umbra prompt contract, and only the stored snapshot itself is called `currentStoryPhase`.
 

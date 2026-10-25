@@ -114,6 +114,20 @@ Baseline behavior measured on the base (45 user turns against a fake OpenAI endp
 | Tests | 131 pass via `npm test`; 133 pass via `node --test` (the hand-maintained list skips `dossierPresence.test.js`) |
 | Browser smoke test | Landing, chat route, three exchanges, reload restores the transcript, no console errors (one expected 404 on `/api/debug` when debug is off) |
 
+### Phase vocabulary (read before touching any "phase")
+
+The system has five unrelated phase values, advanced by different parts and read by different agents. Full map, with storage and read sites, in [`docs/phases.md`](../docs/phases.md).
+
+| Name | Values | Advanced by | Stored in the checkpoint as | Model sees |
+|------|--------|-------------|-----------------------------|------------|
+| Attaché phase | start, explore, baseline1 to 3, close | the attaché's output, through the pure `transition()` | `attacheSession.attacheState` | phase prompt text and question |
+| Therapy phase | initial, middle, final | the detective suggests; the server applies after two matching turns and dossier rules | `detectiveRuntime` | `existential_therapy_phase` |
+| Story phase | Exposition to Coda | the server (`chatService`), once per detective turn; no agent decides | `currentStoryPhase` | `narrative_phase` (Lumen, Umbra) |
+| Closure phase | penultimate, ultimate | derived from exchange counters | not stored | `closure_phase` |
+| Routing | attache, detective | `chatMachine` events (handoff, dossier loaded, long absence) | `chatMachineSnapshot` | not shown to the model |
+
+Rules for later work: a change to one phase must not be described as a change to another; the bare word `phase` in the attaché packet means the attaché phase; whether the story phase should stay automatic or be decided by an agent is an open question (see the end of `docs/phases.md`), not a decision.
+
 ## 4. Status of the previous findings
 
 | ID | Old finding | Status on the base | Evidence |

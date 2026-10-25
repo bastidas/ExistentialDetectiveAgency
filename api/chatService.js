@@ -804,7 +804,6 @@ async function composeChatResponse(sessionId, message, options = {}) {
       llmRefusalMetas.push(attRefusal);
     }
     bumpAttacheExchangeCount(sessionId);
-    advanceCurrentStoryPhase(sessionId);
   } else if (envelope.active_agent === "detective") {
     const detTurn = getDetectiveTurnCount(sessionId);
     const closurePhase = detectiveClosurePhaseFromExchangeSum(sumBefore, maxEx);
