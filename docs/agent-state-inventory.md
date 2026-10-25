@@ -13,7 +13,7 @@ Read it with [`durable-user-state.md`](durable-user-state.md) (tables, retention
 | Dossier row | partition `EDA_dossier`, row `userId` | the per-user dossier (`dossierJson`) | at the dossier interval; shared by all agents, not owned by one |
 | Process memory | `Map`s keyed by `sessionId` | everything else | n/a |
 
-Chunking: a string larger than 30,000 characters is split across `name`, `name__1`, `name__2`, ... with the count in `<name>Chunks`. The orchestration blob is capped at 300,000 characters and the whole session row at 400,000 characters (Azure counts 2 bytes per character, so 1 MiB is about 524,000 characters). Over budget, `fitOrchestration` halves only `detectiveChatHistory`, `lumenChatHistory` and `umbraChatHistory` (newest kept); other fields are never trimmed.
+Chunking: a string larger than 30,000 characters is split across `name`, `name__1`, `name__2`, ... with the count in `<name>Chunks`. The orchestration blob is capped at 300,000 characters and the whole session row at 400,000 characters (Azure counts 2 bytes per character, so 1 MiB is about 524,000 characters). Over budget, `fitOrchestration` halves only `detectiveChatHistory` (newest kept); other fields are never trimmed.
 
 ## The session row (checkpoint envelope)
 
@@ -48,7 +48,7 @@ Source: `exportSessionRuntimeForDurable` in `api/chatService.js`, version consta
 | `detectiveRuntime` | object | about 250 chars | detective | `{ orchestratorSnapshot, phaseSuggestionStreak }`, below |
 | `historyRef` | `{sessionId, fromSeq, toSeq}` | about 75 chars | Lumen and Umbra | Points at the thread rows the philosopher histories are rebuilt from. Added at write time in `shared.js`, not by the exporter |
 
-Not in the blob any more: `lumenChatHistory` and `umbraChatHistory`. Older blobs that still carry them are accepted on restore.
+Not in the blob: `lumenChatHistory` and `umbraChatHistory`. They are rebuilt from the thread rows on hydrate, and a blob that still contains them is not read for them (`restoreSessionRuntimeFromDurable` ignores those keys; the test `a stored blob that still carries philosopher histories does not supply them` covers it).
 
 ## Detective agent
 
@@ -120,8 +120,8 @@ Sources: `api/chatService.js` (`lumenChatHistoryBySessionId`, `philosopherNarrat
 
 | # | Field | Type | Bound / size | Purpose | Checkpoint? |
 |---|-------|------|--------------|---------|-------------|
-| 1 | `lumenChatHistoryBySessionId` | `{role, content}[]` | 2 per detective turn; in the previous design capped at 120 entries and about as large as `detectiveChatHistory` (42K chars at 30 turns) | LLM context for Lumen | **No (removed from the blob).** Rebuilt on hydrate from log rows by `rebuildPhilosopherHistory` (`user` events paired with `lumen_user`, detective phase only, last 120). Legacy blobs that still contain it are honoured |
-| 2 | `philosopherNarrativeSnapshotBySessionId` | XState snapshot, context `{ narrativeTurn: number }` | about 100 chars | Narrative turn; `narrativePhaseFromTurn` turns it into the narrative phase in Lumen's packet | Yes, `philosopherNarrativeSnapshot`. **Shared with Umbra** |
+| 1 | `lumenChatHistoryBySessionId` | `{role, content}[]` | 2 per detective turn; rebuilt list is capped at 120 entries (`DURABLE_EXPORT_HISTORY_MAX`) and is about as large as `detectiveChatHistory` (42K chars at 30 turns) | LLM context for Lumen | **No (removed from the blob).** Rebuilt on hydrate from log rows by `rebuildPhilosopherHistory` (`user` events paired with `lumen_user`, detective phase only, last 120). A stored copy in an old blob is ignored |
+| 2 | `philosopherNarrativeSnapshotBySessionId` | XState snapshot, context `{ narrativeTurn: number }` | about 100 chars | Narrative turn; `narrativePhaseFromTurn` turns it into the narrative phase in Lumen's packet | Yes, `philosopherNarrativeSnapshot`. **Shared with Umbra**; written by `chatService`, not by Lumen (see the next section) |
 | 3 | `historyRef` | object | about 75 chars | Tells hydrate which log rows exist | Yes |
 | 4 | per-turn output: `lumenUserResponse`, `lumenOtherResponse`, `lumenNotes`, `lumenCallouts`, `llmRefusal` | string, string, string[], array, object | per request only | The reply and side material returned to the client | No. Only `lumenUserResponse` is logged, as `kind: lumen_user`. `lumenOtherResponse`, notes and callouts are not stored anywhere |
 | 5 | system prompt | static | composed each turn by `composeStaticSystemPrompt("lumen")` | Persona | Not state; rebuilt from files |
@@ -142,6 +142,23 @@ Same shape as Lumen, from `umbraChatHistoryBySessionId` and the same narrative s
 | 5, 6 | system prompt, user packet | as Lumen | | | Not state |
 
 The two philosophers share one narrative snapshot and have no other stored state of their own, so the history is the only per-agent field.
+
+## The shared narrative snapshot: writers and readers
+
+One XState snapshot per session (machine `philosophersNarrativeMachine` in `api/agents/philosophers/philosophersMachine.js`, context `{ narrativeTurn }`), held in `philosopherNarrativeSnapshotBySessionId` in `api/chatService.js`. Neither Lumen nor Umbra writes it; `chatService` does.
+
+Writers:
+- `advancePhilosopherNarrative(sessionId)`: restores the actor from the stored snapshot, sends `NARRATIVE_TURN` (adds 1 to `narrativeTurn`), stores the new persisted snapshot. Called once at the end of every detective turn in `composeChatResponse`, online or offline, after the three model calls. It is also called by the dev lab step `PHILOSOPHER_NARRATIVE_TURN` in `runOrchestrationLabStep` (`api/orchestration/orchestrationLabSnapshot.js`, route `POST /api/dev/orchestration-step` in `server-dev.js`).
+- `setPhilosopherNarrativeTurnForLabSession(sessionId, targetTurn)`: dev only; deletes the snapshot and replays `NARRATIVE_TURN` up to the target. Called by `syncLabDetectiveOrchestrationFromPreset`, which `seedSessionScenario` (`api/lab/chatTestSeed.js`, route `POST /api/dev/chat-scenario`) calls when the preset puts the session in the detective.
+- `restoreSessionRuntimeFromDurable`: sets it from the blob field `philosopherNarrativeSnapshot` on hydrate.
+- `clearSessionForAttacheRebaseline`: deletes it when a returning visitor is sent back to the attaché.
+
+Readers:
+- `buildPhilosopherComposeSession` (via `getNarrativeTurnFromSnapshot`): turns `narrativeTurn` into `narrative_phase` with `narrativePhaseFromTurn` (`api/narrativePhases.js`: Exposition, Rising Action, Climax, Falling Action, Denouement, Coda, repeating) and, with the dossier summary, builds the packet for Lumen and Umbra each detective turn. The detective and attaché do not read it.
+- `exportSessionRuntimeForDurable`: copies it into the checkpoint blob, called from `saveSessionCheckpointToDurable` in `api/shared.js`.
+- `getPhilosopherNarrativeSnapshotForSession`: used by `buildOrchestrationLabSnapshot` for the dev lab view (`narrativeTurn`, `narrative_phase`).
+
+Consequence for recovery: the narrative turn is written to the checkpoint only, not the log. If the checkpoint lags the log by n detective turns, restored `narrativeTurn` is n turns behind, so Lumen and Umbra can be in an earlier narrative phase than before the restart. The turn count is also not derivable from the log without counting detective-phase `user` events.
 
 ## Process-memory state that is not an agent field
 
@@ -171,7 +188,8 @@ Typical sessions fit comfortably. The worst case is dominated by `detectiveChatH
 
 ## What this means for recovery
 
-- Rebuildable from the log: Lumen history, Umbra history, the client transcript, and the sequence number.
+- Rebuilt from the log on hydrate: Lumen history, Umbra history (not stored in the checkpoint at all);
+- Also derivable from the log: the client transcript, and the sequence number.
 - Only in the checkpoint: routing snapshot, attaché session, detective history, detective phase and streak, narrative snapshot, counters. A checkpoint can lag the log by up to `SESSION_CHECKPOINT_EVERY_K_TURNS - 1` turns, and `historyRef.toSeq` against `sessionSeq` shows how many.
 - Only in the dossier row: the user's dossier.
 - Not stored at all: `lumenOtherResponse`, Lumen and Umbra notes and callouts, `lastMockReply` outside the snapshot, and the process-memory table above.

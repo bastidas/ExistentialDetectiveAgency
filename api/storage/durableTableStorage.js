@@ -33,7 +33,7 @@ const MAX_ORCHESTRATION_CHARS = 300_000;
 /** Azure caps a partition key at 1,024 characters; stay well under it. */
 const MAX_PARTITION_KEY_CHARS = 900;
 
-const HISTORY_KEYS = ["detectiveChatHistory", "lumenChatHistory", "umbraChatHistory"];
+const HISTORY_KEYS = ["detectiveChatHistory"];
 
 let _client = null;
 let _tableReady = false;

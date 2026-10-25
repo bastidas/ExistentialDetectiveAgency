@@ -155,3 +155,15 @@ test("after a cold start the philosophers see the earlier exchanges, rebuilt fro
     Object.assign(storage, originals);
   }
 });
+
+test("a stored blob that still carries philosopher histories does not supply them", () => {
+  const chatService = require("../chatService");
+  const sessionId = "stored-history-ignored";
+  chatService.restoreSessionRuntimeFromDurable(sessionId, {
+    v: 2,
+    lumenChatHistory: [{ role: "user", content: "stale" }],
+    umbraChatHistory: [{ role: "user", content: "stale" }],
+    detectiveTurnCount: 3,
+  });
+  assert.deepEqual(chatService.peekPhilosopherHistories(sessionId), { lumen: [], umbra: [] });
+});

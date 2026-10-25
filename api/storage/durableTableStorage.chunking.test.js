@@ -209,7 +209,7 @@ test("a small checkpoint stays in single properties", async () => {
 test("an oversized orchestration blob sheds history instead of being replaced by a truncated marker", async () => {
   const client = makeLimitedClient();
   const history = Array.from({ length: 300 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: "h".repeat(2000) + i }));
-  const orch = { v: 2, detectiveChatHistory: history, lumenChatHistory: [], umbraChatHistory: [], marker: "keep" };
+  const orch = { v: 2, detectiveChatHistory: history, marker: "keep" };
   const result = await storage.saveSessionCheckpoint(client, checkpoint({ orchestrationRuntime: orch }));
   assert.deepEqual(result.degraded, ["orchestration_history_trimmed"]);
   const h = await storage.hydrateSession(client, "s1");

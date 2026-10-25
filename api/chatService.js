@@ -315,8 +315,8 @@ function peekPhilosopherHistories(sessionId) {
 }
 
 /**
- * After hydrate, fill the Lumen and Umbra histories from the log unless a checkpoint written by an
- * earlier layout already supplied them.
+ * After hydrate, rebuild the Lumen and Umbra histories from the per-exchange log. The checkpoint
+ * does not store them, and a live in-process history is never overwritten.
  *
  * @param {string|null|undefined} sessionId
  * @param {unknown[]} threadEvents
@@ -374,8 +374,6 @@ function restoreSessionRuntimeFromDurable(sessionId, blob) {
     chatMachineSnapshot?: unknown,
     attacheSession?: object | null,
     detectiveChatHistory?: unknown[],
-    lumenChatHistory?: unknown[],
-    umbraChatHistory?: unknown[],
     philosopherNarrativeSnapshot?: unknown,
     detectiveTurnCount?: number,
     attacheExchangeCount?: number,
@@ -389,12 +387,6 @@ function restoreSessionRuntimeFromDurable(sessionId, blob) {
   }
   if (Array.isArray(b.detectiveChatHistory)) {
     detectiveChatHistoryBySessionId.set(id, b.detectiveChatHistory);
-  }
-  if (Array.isArray(b.lumenChatHistory)) {
-    lumenChatHistoryBySessionId.set(id, b.lumenChatHistory);
-  }
-  if (Array.isArray(b.umbraChatHistory)) {
-    umbraChatHistoryBySessionId.set(id, b.umbraChatHistory);
   }
   if (b.philosopherNarrativeSnapshot != null) {
     philosopherNarrativeSnapshotBySessionId.set(id, b.philosopherNarrativeSnapshot);
