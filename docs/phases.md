@@ -4,6 +4,32 @@ The code and the plans use the word "phase" for several unrelated state values. 
 
 Written from the code on the PR 13 branch. Function names are given instead of line numbers.
 
+## The three that matter most are totally separate
+
+The attaché phase, the therapy phase and the story phase (the Lumen and Umbra narrative phase) are three separate concepts. They share a word and nothing else: different values, different storage, different controllers, different readers. None is derived from, or reacts to, another.
+
+| | Attaché phase | Therapy phase | Story phase |
+|---|---|---|---|
+| Belongs to | The attaché | The detective | Lumen and Umbra |
+| Who drives it | The attaché's own output. Its intents (`user_intends_explore`, `user_intends_close`, `asked_baseline_question`) go through the pure `transition()` function | The detective suggests it (`suggest_existential_phase`); the server gates it: two matching suggestions in a row, one step at a time, dossier rules for `middle` and `final` | The server. `chatService` advances it automatically after every detective turn. No agent input: not the detective, not Lumen, not Umbra |
+| Can an agent veto or time it? | Yes, it is the attaché's decision | Partly: the detective proposes, the server can refuse | No. It ticks on every detective turn regardless of the conversation |
+
+## TO-DO (future work, not implemented): the story phase needs a decider
+
+> **Status: not implemented.** Today the story phase moves by itself, once per detective turn, because the server says so. Nothing decides whether the story should move. This section records the work that is still to do; no code for it exists on this branch.
+
+The Lumen and Umbra story phase (`currentStoryPhase`, labelled `narrative_phase` in their packets) needs a **decider**: an agent that decides when the phase advances, under special conditions that agent defines, instead of the phase ticking on a clock.
+
+What is needed:
+- A decider with authority over advancement. Candidates are the detective, an orchestrator rule, or a dedicated agent. Which one is undecided.
+- A definition of the special conditions under which it advances (what counts as a turning point), and when it must not.
+- Server-side gating of the decider's request, in the same spirit as the therapy phase (agent proposes, server enforces limits such as a minimum number of detective turns between advances).
+- A separate counter for detective turns, so the number of turns that have passed stays known while the phase itself moves only when decided.
+- Tests for the conditional advancement, and an update to the one that today pins the automatic behavior (`api/test-support/currentStoryPhase.test.js`).
+- Prompt and output-schema changes if the detective is the decider, and a decision on what the decider is told about the current story phase.
+
+Until this is done, treat the automatic per-detective-turn advance as a placeholder, not as the intended design. The related open questions are listed at the end of this page.
+
 ## At a glance
 
 | Name used here | Values | What it is | Moved by | Stored as | Seen by the model as |
@@ -77,6 +103,8 @@ Also not phases, but easy to confuse with them: the time-away bin (`visit_bin`: 
 A checkpoint can trail the log by up to `SESSION_CHECKPOINT_EVERY_K_TURNS - 1` turns, so each stored phase can be that many turns behind after a restart.
 
 ## Open questions this map raises (not decided)
+
+See also the to-do section near the top: the story phase needs a decider.
 
 - Whether the story phase should keep advancing automatically each detective turn, or only when some agent or rule decides. Today it is automatic and belongs to `chatService`. No advancement logic was changed while writing this page.
 - If an agent should own it, which one: the detective (as with the therapy phase) or an orchestrator rule. The two existing patterns are "agent proposes, server gates" (therapy phase) and "agent output drives a pure transition" (attaché phase).
