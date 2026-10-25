@@ -2,6 +2,8 @@
 
 Greenfield schema: **drop or recreate** the table when deploying a breaking change (`DOSSIER_TABLE_NAME`). No legacy partition keys or property names are supported.
 
+Per-agent field inventory (what is checkpointed, rebuilt from the log, or memory-only): [`agent-state-inventory.md`](agent-state-inventory.md).
+
 ## Environment
 
 | Variable | Purpose |
@@ -16,8 +18,8 @@ Greenfield schema: **drop or recreate** the table when deploying a breaking chan
 | `DETECTIVE_HISTORY_STORAGE_CHAR_LIMIT` | Max persisted detective transcript chars |
 | `LAST_N_MESSAGES_FOR_DOSSIER` | Number of recent messages passed to dossier analyzer |
 | `LAST_N_CLIENT_TRANSCRIPT_TURNS` | Client localStorage transcript tail (also exposed on `GET /api/config`) |
-| `SESSION_CHECKPOINT_EVERY_K_TURNS` | Upsert session row after this many dirty user turns (default `5`) |
-| `SESSION_CHECKPOINT_MIN_INTERVAL_MS` | Minimum ms between checkpoints when dirty (default `300000`, ~5 min) |
+| `SESSION_CHECKPOINT_EVERY_K_TURNS` | Upsert session row after this many dirty user turns (default `1`: every turn) |
+| `SESSION_CHECKPOINT_MIN_INTERVAL_MS` | Also checkpoint when the last write is older than this (default `300000`); with the default of one turn per checkpoint it never fires |
 
 ### Local Azurite
 
