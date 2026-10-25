@@ -13,9 +13,9 @@ const {
   getDetectivePromptInstructionIdsForSession,
 } = require("../agents/detective/detectiveExistentialSession");
 const {
-  getPhilosopherNarrativeSnapshotForSession,
+  getCurrentStoryPhaseForSession,
   getAttacheSessionForDevSession,
-  advancePhilosopherNarrative,
+  advanceCurrentStoryPhase,
   simulateAttacheLabStep,
   simulateAttacheLabAdvanceQuestionIndexWithinPhase,
 } = require("../chatService");
@@ -29,7 +29,7 @@ const {
  * @param {unknown} snapshot
  * @returns {number}
  */
-function narrativeTurnFromPhilosopherSnapshot(snapshot) {
+function storyTurnFromCurrentStoryPhase(snapshot) {
   if (!snapshot || typeof snapshot !== "object") return 0;
   const ctx = /** @type {{ context?: { narrativeTurn?: number } }} */ (snapshot).context;
   if (!ctx || typeof ctx !== "object") return 0;
@@ -92,8 +92,8 @@ function buildOrchestrationLabSnapshot(sessionId) {
         }
       : null;
 
-  const philRaw = getPhilosopherNarrativeSnapshotForSession(sid);
-  const nTurn = narrativeTurnFromPhilosopherSnapshot(philRaw);
+  const philRaw = getCurrentStoryPhaseForSession(sid);
+  const nTurn = storyTurnFromCurrentStoryPhase(philRaw);
   const philosophers =
     philRaw != null
       ? {
@@ -145,8 +145,8 @@ function runOrchestrationLabStep(sessionId, step) {
     runDetectivePromptPolicyTurn(sid, payload);
   } else if (t === "DETECTIVE_PHASE_ADVANCE") {
     advanceExistentialPhaseOneStepForLab(sid);
-  } else if (t === "PHILOSOPHER_NARRATIVE_TURN") {
-    advancePhilosopherNarrative(sid);
+  } else if (t === "CURRENT_STORY_PHASE_ADVANCE") {
+    advanceCurrentStoryPhase(sid);
   } else if (t === "ATTACHE_ADVANCE_QUESTION_INDEX") {
     simulateAttacheLabAdvanceQuestionIndexWithinPhase(sid);
   } else if (t === "ATTACHE_TURN_BASELINE" || t === "ATTACHE_TURN_EXPLORE" || t === "ATTACHE_TURN_CLOSE") {

@@ -163,8 +163,11 @@ const detectiveChatHistoryBySessionId = new Map();
 const lumenChatHistoryBySessionId = new Map();
 const umbraChatHistoryBySessionId = new Map();
 
-/** Persisted XState snapshot for [`philosophersNarrativeMachine`](./philosophers/philosophersMachine.js). */
-const philosopherNarrativeSnapshotBySessionId = new Map();
+/**
+ * `currentStoryPhase`: persisted XState snapshot of [`philosophersNarrativeMachine`](./agents/philosophers/philosophersMachine.js).
+ * Its `narrativeTurn` counts user turns (attaché and detective); `narrativePhaseFromTurn` maps it to the story phase Lumen and Umbra see.
+ */
+const currentStoryPhaseBySessionId = new Map();
 
 /** Per chat session: how many detective turns have run (for first-turn TURN INSTRUCTIONS + opening line). */
 const detectiveTurnCountByChatSessionId = new Map();
@@ -346,7 +349,7 @@ function exportSessionRuntimeForDurable(sessionId) {
     chatMachineSnapshot: getPersistedChatMachineSnapshot(id),
     attacheSession: attacheSessionByChatSessionId.get(id) ?? null,
     detectiveChatHistory: sliceHistoryTail(detectiveChatHistoryBySessionId.get(id), DURABLE_EXPORT_HISTORY_MAX),
-    philosopherNarrativeSnapshot: philosopherNarrativeSnapshotBySessionId.get(id) ?? null,
+    currentStoryPhase: currentStoryPhaseBySessionId.get(id) ?? null,
     detectiveTurnCount: detectiveTurnCountByChatSessionId.get(id) ?? 0,
     attacheExchangeCount: attacheExchangeCountByChatSessionId.get(id) ?? 0,
     detectiveRuntime: exportDetectiveRuntimeForDurable(id),
@@ -374,7 +377,7 @@ function restoreSessionRuntimeFromDurable(sessionId, blob) {
     chatMachineSnapshot?: unknown,
     attacheSession?: object | null,
     detectiveChatHistory?: unknown[],
-    philosopherNarrativeSnapshot?: unknown,
+    currentStoryPhase?: unknown,
     detectiveTurnCount?: number,
     attacheExchangeCount?: number,
     detectiveRuntime?: unknown,
@@ -388,8 +391,8 @@ function restoreSessionRuntimeFromDurable(sessionId, blob) {
   if (Array.isArray(b.detectiveChatHistory)) {
     detectiveChatHistoryBySessionId.set(id, b.detectiveChatHistory);
   }
-  if (b.philosopherNarrativeSnapshot != null) {
-    philosopherNarrativeSnapshotBySessionId.set(id, b.philosopherNarrativeSnapshot);
+  if (b.currentStoryPhase != null) {
+    currentStoryPhaseBySessionId.set(id, b.currentStoryPhase);
   }
   if (typeof b.detectiveTurnCount === "number" && b.detectiveTurnCount >= 0) {
     detectiveTurnCountByChatSessionId.set(id, Math.floor(b.detectiveTurnCount));
@@ -433,7 +436,7 @@ function clearSessionForAttacheRebaseline(sessionId, opts = {}) {
   detectiveChatHistoryBySessionId.delete(id);
   lumenChatHistoryBySessionId.delete(id);
   umbraChatHistoryBySessionId.delete(id);
-  philosopherNarrativeSnapshotBySessionId.delete(id);
+  currentStoryPhaseBySessionId.delete(id);
   detectiveTurnCountByChatSessionId.delete(id);
   attacheExchangeCountByChatSessionId.delete(id);
   dossierBySessionId.delete(id);
@@ -470,7 +473,7 @@ function temporalGreetingModeForDetective(visitBin, dossierStaleByAge, hasDossie
  * @param {unknown} snapshot
  * @returns {number}
  */
-function getNarrativeTurnFromSnapshot(snapshot) {
+function getStoryTurnFromCurrentStoryPhase(snapshot) {
   if (!snapshot || typeof snapshot !== "object") return 0;
   const ctx = /** @type {{ context?: { narrativeTurn?: number } }} */ (snapshot).context;
   if (!ctx || typeof ctx !== "object") return 0;
@@ -484,8 +487,8 @@ function getNarrativeTurnFromSnapshot(snapshot) {
  * @returns {Record<string, unknown>}
  */
 function buildPhilosopherComposeSession(sessionId, dossier) {
-  const snap = sessionId ? philosopherNarrativeSnapshotBySessionId.get(sessionId) : undefined;
-  const narrativeTurn = getNarrativeTurnFromSnapshot(snap);
+  const snap = sessionId ? currentStoryPhaseBySessionId.get(sessionId) : undefined;
+  const narrativeTurn = getStoryTurnFromCurrentStoryPhase(snap);
   /** @type {Record<string, unknown>} */
   const session = {
     narrative_phase: narrativePhaseFromTurn(narrativeTurn),
@@ -499,10 +502,10 @@ function buildPhilosopherComposeSession(sessionId, dossier) {
 /**
  * @param {string|null} sessionId
  */
-function advancePhilosopherNarrative(sessionId) {
+function advanceCurrentStoryPhase(sessionId) {
   const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
   if (!id) return;
-  const prev = philosopherNarrativeSnapshotBySessionId.get(id);
+  const prev = currentStoryPhaseBySessionId.get(id);
   const actor = createActor(philosophersNarrativeMachine, prev ? { snapshot: prev } : {});
   actor.start();
   actor.send({ type: "NARRATIVE_TURN" });
@@ -515,7 +518,7 @@ function advancePhilosopherNarrative(sessionId) {
   } catch (_) {
     next = actor.getSnapshot();
   }
-  philosopherNarrativeSnapshotBySessionId.set(id, next);
+  currentStoryPhaseBySessionId.set(id, next);
   actor.stop();
 }
 
@@ -525,14 +528,14 @@ function advancePhilosopherNarrative(sessionId) {
  * @param {string|null|undefined} sessionId
  * @param {number} targetTurn — non-negative; 0 = Exposition, etc.
  */
-function setPhilosopherNarrativeTurnForLabSession(sessionId, targetTurn) {
+function setCurrentStoryPhaseTurnForLabSession(sessionId, targetTurn) {
   const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
   if (!id) return;
   const n =
     typeof targetTurn === "number" && Number.isFinite(targetTurn) && targetTurn >= 0
       ? Math.floor(targetTurn)
       : 0;
-  philosopherNarrativeSnapshotBySessionId.delete(id);
+  currentStoryPhaseBySessionId.delete(id);
   const actor = createActor(philosophersNarrativeMachine);
   actor.start();
   for (let i = 0; i < n; i += 1) {
@@ -547,7 +550,7 @@ function setPhilosopherNarrativeTurnForLabSession(sessionId, targetTurn) {
   } catch (_) {
     next = actor.getSnapshot();
   }
-  philosopherNarrativeSnapshotBySessionId.set(id, next);
+  currentStoryPhaseBySessionId.set(id, next);
   actor.stop();
 }
 
@@ -576,7 +579,7 @@ function syncLabDetectiveOrchestrationFromPreset(sessionId, preset) {
 
   const narrLabel = pickNarrativePhase(p);
   const turns = narrativeTurnForPhaseLabel(narrLabel);
-  setPhilosopherNarrativeTurnForLabSession(sessionId, turns);
+  setCurrentStoryPhaseTurnForLabSession(sessionId, turns);
 }
 
 /**
@@ -801,6 +804,7 @@ async function composeChatResponse(sessionId, message, options = {}) {
       llmRefusalMetas.push(attRefusal);
     }
     bumpAttacheExchangeCount(sessionId);
+    advanceCurrentStoryPhase(sessionId);
   } else if (envelope.active_agent === "detective") {
     const detTurn = getDetectiveTurnCount(sessionId);
     const closurePhase = detectiveClosurePhaseFromExchangeSum(sumBefore, maxEx);
@@ -973,7 +977,7 @@ async function composeChatResponse(sessionId, message, options = {}) {
       umbraChatHistoryBySessionId.set(sessionId, uh);
     }
 
-    advancePhilosopherNarrative(sessionId);
+    advanceCurrentStoryPhase(sessionId);
     bumpDetectiveTurnCount(sessionId);
 
     const detCountAfter = getDetectiveTurnCount(sessionId);
@@ -1089,15 +1093,15 @@ function getAttacheSessionForDevSession(sessionId) {
 }
 
 /**
- * Dev / lab: persisted philosophers narrative machine snapshot (or null).
+ * Dev / lab: the persisted `currentStoryPhase` snapshot (or null).
  *
  * @param {string|null|undefined} sessionId
  * @returns {unknown|null}
  */
-function getPhilosopherNarrativeSnapshotForSession(sessionId) {
+function getCurrentStoryPhaseForSession(sessionId) {
   const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
   if (!id) return null;
-  const snap = philosopherNarrativeSnapshotBySessionId.get(id);
+  const snap = currentStoryPhaseBySessionId.get(id);
   return snap !== undefined ? snap : null;
 }
 
@@ -1212,9 +1216,9 @@ module.exports = {
   setDossierForDevSession,
   setAttacheSessionForDevSession,
   getAttacheSessionForDevSession,
-  getPhilosopherNarrativeSnapshotForSession,
-  advancePhilosopherNarrative,
-  setPhilosopherNarrativeTurnForLabSession,
+  getCurrentStoryPhaseForSession,
+  advanceCurrentStoryPhase,
+  setCurrentStoryPhaseTurnForLabSession,
   syncLabDetectiveOrchestrationFromPreset,
   simulateAttacheLabStep,
   simulateAttacheLabAdvanceQuestionIndexWithinPhase,

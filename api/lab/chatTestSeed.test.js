@@ -5,7 +5,7 @@ const assert = require("node:assert/strict");
 const { clearPersistedChatMachineSnapshot } = require("../orchestration/chatMachine");
 const { seedSessionScenario } = require("./chatTestSeed");
 const { getExistentialTherapyPhaseForSession } = require("../agents/detective/detectiveExistentialSession");
-const { getPhilosopherNarrativeSnapshotForSession } = require("../chatService");
+const { getCurrentStoryPhaseForSession } = require("../chatService");
 const { narrativePhaseFromTurn } = require("../narrativePhases");
 const { buildDetectiveOrchestrationFacts } = require("../agents/detective/buildDetectiveOrchestrationFacts");
 
@@ -50,7 +50,7 @@ test("seedSessionScenario: detective preset syncs lab orchestrator state (therap
     timeAwayBin: "brief",
   });
   assert.equal(getExistentialTherapyPhaseForSession(sid), "middle");
-  const phil = getPhilosopherNarrativeSnapshotForSession(sid);
+  const phil = getCurrentStoryPhaseForSession(sid);
   const ctx = phil && typeof phil === "object" ? phil.context : null;
   const turn = ctx && typeof ctx.narrativeTurn === "number" ? ctx.narrativeTurn : -1;
   assert.equal(narrativePhaseFromTurn(turn), "Climax");
