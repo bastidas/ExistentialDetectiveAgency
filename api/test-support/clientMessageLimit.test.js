@@ -43,11 +43,11 @@ test("the server-reported limit is adopted but can never exceed the ceiling", ()
 });
 
 test("the user-facing message names the length, the limit and how much to cut", () => {
-  limit.setMax(2000);
-  const msg = limit.messageFor(limit.check("a".repeat(2341)));
+  limit.setMax(10000);
+  const msg = limit.messageFor(limit.check("a".repeat(10341)));
   assert.match(msg, /too long/);
-  assert.match(msg, /2,341 characters/);
-  assert.match(msg, /limit is 2,000/);
+  assert.match(msg, /10,341 characters/);
+  assert.match(msg, /limit is 10,000/);
   assert.match(msg, /shorten it by 341 characters/);
-  assert.match(limit.messageFor(limit.check("a".repeat(2001))), /by 1 character\./);
+  assert.match(limit.messageFor(limit.check("a".repeat(10001))), /by 1 character\./);
 });

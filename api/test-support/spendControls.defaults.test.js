@@ -15,5 +15,5 @@ const shared = require("../shared");
 test("shared.js applies the default limits when nothing is configured", () => {
   assert.equal(shared.MAX_USER_EXCHANGES, 40);
   assert.equal(shared.MAX_DAILY_USAGE, 300);
-  assert.equal(shared.MAX_MESSAGE_CHARS, 2000);
+  assert.equal(shared.MAX_MESSAGE_CHARS, 10000);
 });

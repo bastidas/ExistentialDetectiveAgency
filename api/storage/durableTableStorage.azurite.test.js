@@ -35,11 +35,16 @@ test(
     assert.ok(client, "TableClient required (AZURE_STORAGE_CONNECTION_STRING + DOSSIER_TABLE_NAME)");
     const sid = `test_session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const orch = { v: 2, chatMachineSnapshot: null, truncated: false };
+    await durableTableStorage.saveThreadTurn(client, {
+      sessionId: sid,
+      userId: "u_test",
+      seq: 3,
+      events: [{ ts: 1, phase: "detective", kind: "user", text: "hi", agent: "user" }],
+    });
     await durableTableStorage.saveSessionCheckpoint(client, {
       sessionId: sid,
       userId: "u_test",
       sessionSeq: 3,
-      threadEvents: [{ ts: 1, phase: "detective", kind: "user", text: "hi", agent: "user" }],
       baselineCompleted: true,
       detectiveIntroSent: true,
       conversationSummaries: null,

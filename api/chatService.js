@@ -275,6 +275,64 @@ async function mergeDossierFromTableIfNewer(sessionId, userId, client) {
 }
 
 /**
+ * Lumen and Umbra each see the querent's message and their own user-facing reply. That is exactly
+ * what the per-exchange log already holds, so the checkpoint does not copy it; it is rebuilt from
+ * the log on hydrate. Only detective-phase exchanges involve the philosophers.
+ *
+ * @param {Array<{ phase?: string, kind?: string, text?: string }>} events — oldest first
+ * @param {"lumen_user"|"umbra_user"} kind
+ * @returns {Array<{ role: "user"|"assistant", content: string }>}
+ */
+function rebuildPhilosopherHistory(events, kind) {
+  const out = [];
+  let open = false;
+  for (const e of Array.isArray(events) ? events : []) {
+    if (!e || e.phase !== "detective") continue;
+    if (e.kind === "user") {
+      if (open) out.push({ role: "assistant", content: "" });
+      out.push({ role: "user", content: String(e.text || "") });
+      open = true;
+    } else if (e.kind === kind && open) {
+      out.push({ role: "assistant", content: String(e.text || "") });
+      open = false;
+    }
+  }
+  if (open) out.push({ role: "assistant", content: "" });
+  return sliceHistoryTail(out, DURABLE_EXPORT_HISTORY_MAX);
+}
+
+/**
+ * Read-only view of the in-memory Lumen and Umbra histories for one session (tests, lab).
+ *
+ * @param {string} sessionId
+ * @returns {{ lumen: object[], umbra: object[] }}
+ */
+function peekPhilosopherHistories(sessionId) {
+  return {
+    lumen: (lumenChatHistoryBySessionId.get(sessionId) || []).slice(),
+    umbra: (umbraChatHistoryBySessionId.get(sessionId) || []).slice(),
+  };
+}
+
+/**
+ * After hydrate, fill the Lumen and Umbra histories from the log unless a checkpoint written by an
+ * earlier layout already supplied them.
+ *
+ * @param {string|null|undefined} sessionId
+ * @param {unknown[]} threadEvents
+ */
+function restorePhilosopherHistoriesFromThread(sessionId, threadEvents) {
+  const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
+  if (!id || !Array.isArray(threadEvents) || threadEvents.length === 0) return;
+  if (!lumenChatHistoryBySessionId.has(id)) {
+    lumenChatHistoryBySessionId.set(id, rebuildPhilosopherHistory(threadEvents, "lumen_user"));
+  }
+  if (!umbraChatHistoryBySessionId.has(id)) {
+    umbraChatHistoryBySessionId.set(id, rebuildPhilosopherHistory(threadEvents, "umbra_user"));
+  }
+}
+
+/**
  * Allowlisted orchestration snapshot for Azure Table (versioned).
  *
  * @param {string|null|undefined} sessionId
@@ -288,8 +346,6 @@ function exportSessionRuntimeForDurable(sessionId) {
     chatMachineSnapshot: getPersistedChatMachineSnapshot(id),
     attacheSession: attacheSessionByChatSessionId.get(id) ?? null,
     detectiveChatHistory: sliceHistoryTail(detectiveChatHistoryBySessionId.get(id), DURABLE_EXPORT_HISTORY_MAX),
-    lumenChatHistory: sliceHistoryTail(lumenChatHistoryBySessionId.get(id), DURABLE_EXPORT_HISTORY_MAX),
-    umbraChatHistory: sliceHistoryTail(umbraChatHistoryBySessionId.get(id), DURABLE_EXPORT_HISTORY_MAX),
     philosopherNarrativeSnapshot: philosopherNarrativeSnapshotBySessionId.get(id) ?? null,
     detectiveTurnCount: detectiveTurnCountByChatSessionId.get(id) ?? 0,
     attacheExchangeCount: attacheExchangeCountByChatSessionId.get(id) ?? 0,
@@ -1158,6 +1214,9 @@ module.exports = {
   mergeDossierFromTableIfNewer,
   exportSessionRuntimeForDurable,
   restoreSessionRuntimeFromDurable,
+  restorePhilosopherHistoriesFromThread,
+  rebuildPhilosopherHistory,
+  peekPhilosopherHistories,
   setDossierForDevSession,
   setAttacheSessionForDevSession,
   getAttacheSessionForDevSession,

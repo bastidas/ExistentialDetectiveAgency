@@ -1,11 +1,13 @@
 "use strict";
 
-const { TableClient } = require("@azure/data-tables");
+const { TableClient, odata } = require("@azure/data-tables");
 const config = require("../config");
 const logger = require("../logger");
 
 const PK = {
   session: "EDA_session",
+  /** Prefix only: each session's chat history lives in partition `EDA_thread_<sessionId>`, one row per exchange. */
+  thread: "EDA_thread",
   dossier: "EDA_dossier",
   usageDaily: "EDA_usageDaily",
 };
@@ -25,8 +27,11 @@ const MAX_PROPERTY_CHARS = 30_000;
  */
 const MAX_ENTITY_CHARS = 400_000;
 
-/** The orchestration blob may use at most this share of the entity budget before it is shrunk. */
-const MAX_ORCHESTRATION_CHARS = 200_000;
+/** The orchestration blob may use at most this much of the entity budget before it is shrunk. */
+const MAX_ORCHESTRATION_CHARS = 300_000;
+
+/** Azure caps a partition key at 1,024 characters; stay well under it. */
+const MAX_PARTITION_KEY_CHARS = 900;
 
 const HISTORY_KEYS = ["detectiveChatHistory", "lumenChatHistory", "umbraChatHistory"];
 
@@ -203,12 +208,13 @@ function fitThreadEvents(events, maxChars) {
 }
 
 /**
- * Decide what actually gets written, and say so when something had to give. Nothing here throws on
- * size: an oversized session degrades (older events or orchestration history are not persisted) and
- * the reasons are returned and stored on the row instead of failing the checkpoint.
+ * Decide what the full state checkpoint writes (orchestration, summaries, detective text), and say
+ * so when something had to give. Nothing here throws on size: an oversized blob degrades (older
+ * history is not persisted) and the reasons are returned and stored on the row instead of failing.
+ * The chat history is not part of this row; it is written per exchange (see `saveThreadTurn`).
  *
  * @param {object} payload
- * @returns {{ threadJson: string, orchJson: string, summariesJson: string, detectiveText: string, degraded: string[] }}
+ * @returns {{ orchJson: string, summariesJson: string, detectiveText: string, degraded: string[] }}
  */
 function planSessionWrite(payload) {
   const degraded = [];
@@ -218,7 +224,11 @@ function planSessionWrite(payload) {
   let orchJson = "";
   const orch = payload.orchestrationRuntime;
   if (orch != null && typeof orch === "object") {
-    const fitted = fitOrchestration(orch, MAX_ORCHESTRATION_CHARS);
+    const budget = Math.min(
+      MAX_ORCHESTRATION_CHARS,
+      MAX_ENTITY_CHARS - summariesJson.length - detectiveText.length
+    );
+    const fitted = fitOrchestration(orch, budget);
     if (fitted) {
       orchJson = fitted.json;
       if (fitted.shrunk) degraded.push("orchestration_history_trimmed");
@@ -227,14 +237,76 @@ function planSessionWrite(payload) {
     }
   }
 
-  const threadBudget = Math.max(
-    10_000,
-    MAX_ENTITY_CHARS - orchJson.length - summariesJson.length - detectiveText.length
-  );
-  const thread = fitThreadEvents(payload.threadEvents, threadBudget);
-  if (thread.dropped > 0) degraded.push(`thread_oldest_${thread.dropped}_events_not_persisted`);
+  return { orchJson, summariesJson, detectiveText, degraded };
+}
 
-  return { threadJson: thread.json, orchJson, summariesJson, detectiveText, degraded };
+function threadPartitionKey(sessionId) {
+  const pk = `${PK.thread}_${encodeURIComponent(String(sessionId))}`;
+  return pk.length <= MAX_PARTITION_KEY_CHARS ? pk : null;
+}
+
+function threadRowKey(seq) {
+  return String(Math.max(0, Math.floor(Number(seq) || 0))).padStart(8, "0");
+}
+
+/**
+ * Write one exchange to the session's history: the user's message and every agent reply for that
+ * turn (attaché, detective, Lumen, Umbra), plus the minimum needed to read it back (session in the
+ * partition key, sequence in the row key, user id, timestamp, schema version). Idempotent per
+ * sequence number, so a retry is safe. Throws on a storage error; the caller keeps the exchange
+ * queued and retries.
+ *
+ * @param {import("@azure/data-tables").TableClient} client
+ * @param {{ sessionId: string, userId?: string|null, seq: number, events: Array<object> }} turn
+ * @returns {Promise<{ degraded: string[] } | undefined>}
+ */
+async function saveThreadTurn(client, turn) {
+  if (!client || !turn || !turn.sessionId) return undefined;
+  const partitionKey = threadPartitionKey(turn.sessionId);
+  if (!partitionKey) return undefined;
+  await ensureTable(client);
+  const events = Array.isArray(turn.events) ? turn.events : [];
+  const fitted = fitThreadEvents(events, MAX_ENTITY_CHARS);
+  const degraded = fitted.dropped > 0 ? [`turn_oldest_${fitted.dropped}_events_not_persisted`] : [];
+  const entity = {
+    partitionKey,
+    rowKey: threadRowKey(turn.seq),
+    schemaV: SESSION_SCHEMA_V,
+    userId: turn.userId ? String(turn.userId) : "",
+    ts: new Date().toISOString(),
+  };
+  writeChunked(entity, "eventsJson", fitted.json);
+  await client.upsertEntity(entity, "Replace");
+  if (degraded.length > 0) {
+    logger.warn("durableTableStorage", "saveThreadTurn", `session ${turn.sessionId} turn ${turn.seq}: ${degraded.join(", ")}`);
+  }
+  return { degraded };
+}
+
+/**
+ * Read a session's whole chat history back, oldest exchange first.
+ *
+ * @param {import("@azure/data-tables").TableClient} client
+ * @param {string} sessionId
+ * @returns {Promise<{ events: Array<object>, lastSeq: number, userId: string|null, rows: number, problems: string[] }>}
+ */
+async function loadThread(client, sessionId) {
+  const out = { events: [], lastSeq: 0, userId: null, rows: 0, problems: [] };
+  const partitionKey = threadPartitionKey(sessionId);
+  if (!client || !partitionKey) return out;
+  await ensureTable(client);
+  const rows = [];
+  const iter = client.listEntities({ queryOptions: { filter: odata`PartitionKey eq ${partitionKey}` } });
+  for await (const entity of iter) rows.push(entity);
+  rows.sort((a, b) => (a.rowKey < b.rowKey ? -1 : a.rowKey > b.rowKey ? 1 : 0));
+  for (const row of rows) {
+    const events = parseChunked(row, "eventsJson", [], out.problems);
+    if (Array.isArray(events)) out.events.push(...events);
+    out.lastSeq = Math.max(out.lastSeq, Number(row.rowKey) || 0);
+    if (row.userId) out.userId = String(row.userId);
+  }
+  out.rows = rows.length;
+  return out;
 }
 
 async function hydrateSession(client, sessionId) {
@@ -250,28 +322,32 @@ async function hydrateSession(client, sessionId) {
   if (!client || !sessionId) return empty;
   await ensureTable(client);
   const entity = await getEntity(client, PK.session, sessionId);
-  if (!entity) return empty;
-  const problems = [];
-  const schemaV = entity.schemaV == null ? null : Number(entity.schemaV);
-  const threadEvents = parseChunked(entity, "threadEventsJson", [], problems);
-  const orchestrationRuntime = parseChunked(entity, "orchestrationRuntimeJson", null, problems);
+  const thread = await loadThread(client, sessionId);
+  if (!entity && thread.rows === 0) return empty;
+  const problems = thread.problems.slice();
+  const row = entity || {};
+  const orchestrationRuntime = entity ? parseChunked(row, "orchestrationRuntimeJson", null, problems) : null;
+  // Rows written before the per-exchange thread rows kept the history inside the session row.
+  const legacyThread = thread.rows === 0 && entity ? parseChunked(row, "threadEventsJson", [], problems) : [];
+  const threadEvents = thread.rows > 0 ? thread.events : Array.isArray(legacyThread) ? legacyThread : [];
   if (problems.length > 0) {
-    logger.warn("durableTableStorage", "hydrateSession", `session row has unreadable values: ${problems.join(", ")}`);
+    logger.warn("durableTableStorage", "hydrateSession", `session has unreadable values: ${problems.join(", ")}`);
   }
   return {
-    threadEvents: Array.isArray(threadEvents) ? threadEvents : [],
-    updatedAt: entity.updatedAt ? String(entity.updatedAt) : null,
-    sessionSeq: Number(entity.sessionSeq || 0),
-    userId: entity.userId ? String(entity.userId) : null,
+    threadEvents,
+    updatedAt: row.updatedAt ? String(row.updatedAt) : null,
+    sessionSeq: Math.max(Number(row.sessionSeq || 0), thread.lastSeq),
+    userId: row.userId ? String(row.userId) : thread.userId,
     orchestrationRuntime,
-    schemaV,
+    schemaV: row.schemaV == null ? null : Number(row.schemaV),
     problems,
   };
 }
 
 /**
- * Upsert the session row. Large values are written as chunked properties within the per-entity
- * budget. Returns `{ degraded }` so the caller can surface a lossy write; throws only on a real
+ * Upsert the session state row (orchestration, summaries, flags). Large values are written as
+ * chunked properties within the per-entity budget. The chat history is written separately, every
+ * exchange, by `saveThreadTurn`. Returns `{ degraded }` so the caller can surface a lossy write; throws only on a real
  * storage error (the caller decides whether that is fatal; in the chat path it is not).
  *
  * @returns {Promise<{ degraded: string[] } | undefined>}
@@ -292,7 +368,6 @@ async function saveSessionCheckpoint(client, payload) {
     detectiveHistoryText: plan.detectiveText,
     degradedReason: plan.degraded.join(";"),
   };
-  writeChunked(entity, "threadEventsJson", plan.threadJson);
   writeChunked(entity, "conversationSummariesJson", plan.summariesJson);
   writeChunked(entity, "orchestrationRuntimeJson", plan.orchJson);
   await client.upsertEntity(entity, "Replace");
@@ -346,6 +421,9 @@ module.exports = {
   getEntity,
   hydrateSession,
   saveSessionCheckpoint,
+  saveThreadTurn,
+  loadThread,
+  threadPartitionKey,
   saveDossierByUserId,
   getDossierByUserId,
   splitIntoChunks,

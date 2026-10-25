@@ -109,7 +109,7 @@ const HISTORY_TURN_MAX_CHARS = Math.max(
   200,
   parseInt(process.env.HISTORY_TURN_MAX_CHARS, 10) || 4000
 );
-/** Upsert session row to Azure Table at least every K user turns (if dirty). */
+/** Full state checkpoint (orchestration) at least every K user turns (if dirty). The chat history itself is written every turn as a thread row. */
 const SESSION_CHECKPOINT_EVERY_K_TURNS = Math.max(
   1,
   parseInt(process.env.SESSION_CHECKPOINT_EVERY_K_TURNS, 10) || 5

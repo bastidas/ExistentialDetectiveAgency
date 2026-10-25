@@ -145,7 +145,7 @@ test("POST chat answers 429 rate_limit once a client IP exceeds the per-minute l
 });
 
 test("POST chat rejects an over-long message with 400 bad_request", async () => {
-  const res = await registered.chat.handler(request({ body: { message: "x".repeat(5000) } }));
+  const res = await registered.chat.handler(request({ body: { message: "x".repeat(10_001) } }));
   assert.equal(res.status, 400);
   assert.equal(res.jsonBody.errorKind, "bad_request");
 });

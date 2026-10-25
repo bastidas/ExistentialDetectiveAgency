@@ -9,7 +9,7 @@
   "use strict";
 
   /** Matches the server default (`DEFAULT_MAX_MESSAGE_CHARS` in api/usage/usageLimits.js). */
-  var DEFAULT_MAX_CHARS = 2000;
+  var DEFAULT_MAX_CHARS = 10000;
 
   /**
    * Never allow more than this, whatever the server reports. Azure Table rejects string properties

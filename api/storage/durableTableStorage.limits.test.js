@@ -28,11 +28,16 @@ async function roundTrip(threadTextChars, orchestrationChars) {
   const client = storage.getTableClient();
   assert.ok(client, "TableClient required");
   const sessionId = newSessionId();
+  await storage.saveThreadTurn(client, {
+    sessionId,
+    userId: "u_limits",
+    seq: 1,
+    events: [{ ts: 1, phase: "detective", kind: "detective", text: "x".repeat(threadTextChars), agent: "detective" }],
+  });
   await storage.saveSessionCheckpoint(client, {
     sessionId,
     userId: "u_limits",
     sessionSeq: 1,
-    threadEvents: [{ ts: 1, phase: "detective", kind: "detective", text: "x".repeat(threadTextChars), agent: "detective" }],
     baselineCompleted: true,
     detectiveIntroSent: true,
     conversationSummaries: null,
@@ -55,27 +60,43 @@ test("P-02: a session larger than one table property (about 32K characters) roun
   assert.equal(h.orchestrationRuntime.blob.length, 60_000);
 });
 
-test("P-02: a session near the entity budget is saved, not rejected as EntityTooLarge", { skip: skipAzurite }, async () => {
+test("P-02: a long thread is one small row per exchange, so no row nears the entity limit", { skip: skipAzurite }, async () => {
   const storage = require("./durableTableStorage");
   const client = storage.getTableClient();
   const sessionId = newSessionId();
-  const events = [];
-  for (let i = 0; i < 400; i += 1) {
-    events.push({ ts: i, phase: "detective", kind: "user", text: "z".repeat(2500), agent: "user" });
+  for (let seq = 1; seq <= 40; seq += 1) {
+    await storage.saveThreadTurn(client, {
+      sessionId,
+      userId: "u_limits",
+      seq,
+      events: [
+        { ts: seq, phase: "detective", kind: "user", text: "z".repeat(10_000), agent: "user" },
+        { ts: seq, phase: "detective", kind: "detective", text: "d".repeat(3_000), agent: "detective" },
+      ],
+    });
   }
+  const h = await storage.hydrateSession(client, sessionId);
+  assert.equal(h.sessionSeq, 40);
+  assert.equal(h.threadEvents.length, 80);
+  assert.equal(h.threadEvents[h.threadEvents.length - 1].ts, 40);
+});
+
+test("P-02: an orchestration blob near the entity budget is saved, not rejected as EntityTooLarge", { skip: skipAzurite }, async () => {
+  const storage = require("./durableTableStorage");
+  const client = storage.getTableClient();
+  const sessionId = newSessionId();
+  const history = Array.from({ length: 200 }, (_, i) => ({ role: "user", content: "y".repeat(3000) + i }));
   const result = await storage.saveSessionCheckpoint(client, {
     sessionId,
     userId: "u_limits",
-    sessionSeq: 400,
-    threadEvents: events,
+    sessionSeq: 1,
     baselineCompleted: true,
     detectiveIntroSent: true,
     conversationSummaries: null,
     detectiveHistoryText: "",
-    orchestrationRuntime: { v: 2, blob: "y".repeat(150_000) },
+    orchestrationRuntime: { v: 2, detectiveChatHistory: history, marker: "keep" },
   });
-  assert.ok(result.degraded.some((r) => r.startsWith("thread_oldest_")));
+  assert.deepEqual(result.degraded, ["orchestration_history_trimmed"]);
   const h = await storage.hydrateSession(client, sessionId);
-  assert.equal(h.orchestrationRuntime.blob.length, 150_000);
-  assert.equal(h.threadEvents[h.threadEvents.length - 1].ts, 399);
+  assert.equal(h.orchestrationRuntime.marker, "keep");
 });

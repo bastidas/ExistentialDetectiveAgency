@@ -9,7 +9,7 @@ test("defaults apply when nothing is configured", () => {
   assert.deepEqual(r, {
     maxUserExchanges: 40,
     maxDailyUsage: 300,
-    maxMessageChars: 2000,
+    maxMessageChars: 10000,
     maxRequestsPerMinute: 30,
   });
 });
@@ -29,7 +29,7 @@ test("invalid, empty, negative and zero values fall back to the default (never t
     const r = limits.resolveLimits({ MAX_USER_EXCHANGES: bad, MAX_DAILY_USAGE: bad, MAX_MESSAGE_CHARS: bad });
     assert.equal(r.maxUserExchanges, 40, `exchanges for ${bad}`);
     assert.equal(r.maxDailyUsage, 300, `daily for ${bad}`);
-    assert.equal(r.maxMessageChars, 2000, `chars for ${bad}`);
+    assert.equal(r.maxMessageChars, 10000, `chars for ${bad}`);
   }
 });
 

@@ -75,9 +75,24 @@ const durableHealth = {
   lastReducedContent: [],
 };
 
+/**
+ * Exchanges not yet written to the thread table, per session, oldest first. A turn stays here until
+ * its row is written, so a failed write is retried on the next turn and nothing is skipped.
+ *
+ * @type {Map<string, Array<{ seq: number, events: Array<object> }>>}
+ */
+const pendingThreadTurnsBySession = new Map();
+const MAX_PENDING_THREAD_TURNS = 200;
+
+const failingDurableOperations = new Set();
+/** What each kind of write last had to leave out, so a clean thread write cannot hide a lossy checkpoint. */
+const reducedContentByOperation = new Map();
+
 function recordDurableFailure(operation, err) {
+  failingDurableOperations.add(operation);
   durableHealth.degraded = true;
-  durableHealth.consecutiveFailures += 1;
+  durableHealth.consecutiveFailures =
+    durableHealth.lastOperation === operation ? durableHealth.consecutiveFailures + 1 : 1;
   durableHealth.lastOperation = operation;
   durableHealth.lastError = err && err.message ? String(err.message).slice(0, 500) : String(err).slice(0, 500);
   durableHealth.lastErrorAt = new Date().toISOString();
@@ -88,11 +103,15 @@ function recordDurableFailure(operation, err) {
   );
 }
 
-function recordDurableOk(reducedContent) {
-  durableHealth.degraded = false;
-  durableHealth.consecutiveFailures = 0;
+function recordDurableOk(operation, reducedContent) {
+  failingDurableOperations.delete(operation);
+  if (failingDurableOperations.size === 0) {
+    durableHealth.degraded = false;
+    durableHealth.consecutiveFailures = 0;
+  }
   durableHealth.lastOkAt = new Date().toISOString();
-  durableHealth.lastReducedContent = Array.isArray(reducedContent) ? reducedContent.slice() : [];
+  reducedContentByOperation.set(operation, Array.isArray(reducedContent) ? reducedContent.slice() : []);
+  durableHealth.lastReducedContent = [...reducedContentByOperation.values()].flat();
 }
 
 function getDurableHealth() {
@@ -192,7 +211,16 @@ async function hydrateSessionFromDurable(sessionId) {
     }
     if (hydrated.orchestrationRuntime && typeof hydrated.orchestrationRuntime === "object") {
       chatService.restoreSessionRuntimeFromDurable(id, hydrated.orchestrationRuntime);
+      const ref = hydrated.orchestrationRuntime.historyRef;
+      if (ref && Number(ref.toSeq) > Number(hydrated.sessionSeq || 0)) {
+        logger.warn(
+          "shared",
+          "durableStorage",
+          `session ${id}: checkpoint points at log rows through seq ${ref.toSeq}, but the log ends at ${hydrated.sessionSeq}`
+        );
+      }
     }
+    chatService.restorePhilosopherHistoriesFromThread(id, hydrated.threadEvents);
   } catch (err) {
     // Not marked hydrated: it is retried on the next request, and checkpoints are held back until it
     // succeeds so an empty in-memory session can never overwrite the stored one.
@@ -200,7 +228,54 @@ async function hydrateSessionFromDurable(sessionId) {
     return null;
   }
   hydratedDurableSessions.add(id);
+  recordDurableOk("hydrate", []);
   return hydrated;
+}
+
+function queueThreadTurn(sessionId, seq, events) {
+  if (!isDurableStorageEnabled() || !Array.isArray(events) || events.length === 0) return;
+  const queue = pendingThreadTurnsBySession.get(sessionId) || [];
+  queue.push({ seq, events });
+  if (queue.length > MAX_PENDING_THREAD_TURNS) {
+    queue.splice(0, queue.length - MAX_PENDING_THREAD_TURNS);
+    logger.warn("shared", "durableStorage", `session ${sessionId}: pending thread writes capped at ${MAX_PENDING_THREAD_TURNS}`);
+  }
+  pendingThreadTurnsBySession.set(sessionId, queue);
+}
+
+/**
+ * Write every queued exchange to the thread table, oldest first. Runs on every turn. Never throws:
+ * on a storage error the failed exchange and the ones after it stay queued for the next turn.
+ *
+ * @returns {Promise<{ ok: boolean, written: number, skipped?: string }>}
+ */
+async function flushThreadTurnsToDurable(sessionId, userId) {
+  if (!isDurableStorageEnabled()) return { ok: false, written: 0, skipped: "disabled" };
+  const queue = pendingThreadTurnsBySession.get(sessionId);
+  if (!queue || queue.length === 0) return { ok: true, written: 0 };
+  const client = durableTableStorage.getTableClient();
+  if (!client) return { ok: false, written: 0, skipped: "no_client" };
+  if (!hydratedDurableSessions.has(sessionId)) return { ok: false, written: 0, skipped: "not_hydrated" };
+  let written = 0;
+  while (queue.length > 0) {
+    const turn = queue[0];
+    try {
+      const result = await durableTableStorage.saveThreadTurn(client, {
+        sessionId,
+        userId: userId || null,
+        seq: turn.seq,
+        events: turn.events,
+      });
+      recordDurableOk("thread_write", result && result.degraded);
+    } catch (err) {
+      recordDurableFailure("thread_write", err);
+      return { ok: false, written };
+    }
+    queue.shift();
+    written += 1;
+  }
+  pendingThreadTurnsBySession.delete(sessionId);
+  return { ok: true, written };
 }
 
 /**
@@ -217,12 +292,16 @@ async function saveSessionCheckpointToDurable(sessionId, userId, envelope) {
   const client = durableTableStorage.getTableClient();
   if (!client) return { ok: false, skipped: "no_client" };
   if (!hydratedDurableSessions.has(id)) return { ok: false, skipped: "not_hydrated" };
-  const orchestrationRuntime = chatService.exportSessionRuntimeForDurable(id);
+  const exported = chatService.exportSessionRuntimeForDurable(id);
+  // Lumen and Umbra history is not copied into the checkpoint; this points at the log rows it is
+  // rebuilt from (partition `EDA_thread_<sessionId>`, row keys `fromSeq`..`toSeq`).
+  const orchestrationRuntime = exported
+    ? { ...exported, historyRef: { sessionId: id, fromSeq: 1, toSeq: threadSeqBySession.get(id) || 0 } }
+    : exported;
   const payload = {
     sessionId: id,
     userId: userId || null,
     sessionSeq: threadSeqBySession.get(id) || 0,
-    threadEvents: threadEventsBySession.get(id) || [],
     baselineCompleted: !!(envelope && envelope.baseline_completed),
     detectiveIntroSent: !!(envelope && envelope.active_agent === "detective"),
     conversationSummaries: null,
@@ -231,7 +310,7 @@ async function saveSessionCheckpointToDurable(sessionId, userId, envelope) {
   };
   try {
     const written = await durableTableStorage.saveSessionCheckpoint(client, payload);
-    recordDurableOk(written && written.degraded);
+    recordDurableOk("checkpoint", written && written.degraded);
     return { ok: true };
   } catch (err) {
     recordDurableFailure("checkpoint", err);
@@ -423,17 +502,19 @@ async function handleChatRequest(sessionId, trimmed, options) {
     const envelope = out.body && out.body.envelope ? out.body.envelope : null;
     const phase = envelope && envelope.active_agent === "attache" ? "baseline" : "detective";
     const prior = threadEventsBySession.get(sessionId) || [];
-    const next = threadEvents.appendTurn(prior, {
+    const turnEvents = threadEvents.buildTurnEvents({
       phase,
       userMessage: trimmed,
       reply: out.body.reply,
       lumenUserResponse: out.body.lumenUserResponse,
       umbraUserResponse: out.body.umbraUserResponse,
     });
-    threadEventsBySession.set(sessionId, next);
+    threadEventsBySession.set(sessionId, threadEvents.trimEvents(prior.concat(turnEvents)));
     const nextSeq = (threadSeqBySession.get(sessionId) || 0) + 1;
     threadSeqBySession.set(sessionId, nextSeq);
     out.body.serverSeq = nextSeq;
+    queueThreadTurn(sessionId, nextSeq, turnEvents);
+    await flushThreadTurnsToDurable(sessionId, options && options.userId ? options.userId : null);
     const dirty = (dirtyTurnsSinceCheckpoint.get(sessionId) || 0) + 1;
     dirtyTurnsSinceCheckpoint.set(sessionId, dirty);
     const now = Date.now();
@@ -501,7 +582,8 @@ async function handleChatSync(sessionId, userId, payload, options) {
   const nextSeq = Math.min(clientSeq, currentSeq + userTurnsAppended);
   threadEventsBySession.set(sessionId, threadEvents.trimEvents(current.concat(tail)));
   threadSeqBySession.set(sessionId, nextSeq);
-  await saveSessionCheckpointToDurable(sessionId, userId, getChatEnvelopeForSession(sessionId));
+  queueThreadTurn(sessionId, nextSeq, tail);
+  await flushThreadTurnsToDurable(sessionId, userId);
   return { ok: true, serverSeq: nextSeq };
 }
 
@@ -547,6 +629,7 @@ module.exports = {
   reloadSessionFromDurable: hydrateSessionFromDurable,
   saveSessionCheckpointToDurable,
   getDurableHealth,
+  flushThreadTurnsToDurable,
   getMsSinceLastVisitForSession,
   setMockLastActivityGapForSession,
   getChatStateForSession,

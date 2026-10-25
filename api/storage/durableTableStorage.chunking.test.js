@@ -28,6 +28,16 @@ function makeLimitedClient() {
       }
       return JSON.parse(JSON.stringify(e));
     },
+    listEntities(opts) {
+      const filter = String((opts && opts.queryOptions && opts.queryOptions.filter) || "");
+      const m = /PartitionKey eq '(.*)'$/.exec(filter);
+      assert.ok(m, `unsupported filter: ${filter}`);
+      const pk = m[1].replace(/''/g, "'");
+      const matches = [...rows.values()].filter((e) => e.partitionKey === pk).map((e) => JSON.parse(JSON.stringify(e)));
+      return (async function* () {
+        for (const e of matches) yield e;
+      })();
+    },
     async upsertEntity(entity) {
       const keys = Object.keys(entity);
       assert.ok(keys.length <= 252, `too many properties: ${keys.length}`);
@@ -50,7 +60,6 @@ function checkpoint(overrides) {
     sessionId: "s1",
     userId: "u1",
     sessionSeq: 3,
-    threadEvents: [{ ts: 1, phase: "detective", kind: "detective", text: "hi", agent: "detective" }],
     baselineCompleted: true,
     detectiveIntroSent: true,
     conversationSummaries: null,
@@ -74,46 +83,132 @@ test("splitIntoChunks never cuts a surrogate pair and rejoins losslessly", () =>
   assert.equal(parts.join(""), text);
 });
 
-test("a session far larger than one property round-trips through chunked properties", async () => {
+function ev(kind, text, extra) {
+  return { ts: 1, phase: "detective", kind, text, agent: kind, ...extra };
+}
+
+function exchange(seq, textChars) {
+  return [
+    ev("user", `u${seq}:` + "m".repeat(textChars)),
+    ev("detective", `d${seq}`),
+    ev("lumen_user", `l${seq}`),
+    ev("umbra_user", `x${seq}`),
+  ];
+}
+
+test("an exchange row holds the user message and every agent reply, and little else", async () => {
   const client = makeLimitedClient();
-  const event = { ts: 1, phase: "detective", kind: "detective", text: "x".repeat(60_000), agent: "detective" };
-  const result = await storage.saveSessionCheckpoint(
-    client,
-    checkpoint({ threadEvents: [event], orchestrationRuntime: { v: 2, blob: "y".repeat(60_000) } })
-  );
+  const events = [
+    ev("user", "hello"),
+    ev("attache", "welcome"),
+    ev("lumen_user", "lumen says"),
+    ev("umbra_user", "umbra says"),
+  ];
+  const result = await storage.saveThreadTurn(client, { sessionId: "s1", userId: "u1", seq: 1, events });
   assert.deepEqual(result.degraded, []);
-  const h = await storage.hydrateSession(client, "s1");
-  assert.equal(h.threadEvents[0].text.length, 60_000);
-  assert.equal(h.orchestrationRuntime.blob.length, 60_000);
-  assert.equal(h.schemaV, storage.SESSION_SCHEMA_V);
-  assert.deepEqual(h.problems, []);
+  const [key, row] = [...client.rows.entries()][0];
+  assert.equal(key, "EDA_thread_s1|00000001");
+  assert.deepEqual(
+    Object.keys(row).sort(),
+    ["eventsJson", "eventsJsonChunks", "partitionKey", "rowKey", "schemaV", "ts", "userId"].sort()
+  );
+  assert.deepEqual(JSON.parse(row.eventsJson).map((e) => e.kind), ["user", "attache", "lumen_user", "umbra_user"]);
 });
 
-test("a small session stays in single properties", async () => {
+test("exchanges read back in order across rows, and sessions never mix", async () => {
+  const client = makeLimitedClient();
+  for (let seq = 1; seq <= 12; seq += 1) {
+    await storage.saveThreadTurn(client, { sessionId: "s1", userId: "u1", seq, events: exchange(seq, 10) });
+  }
+  await storage.saveThreadTurn(client, { sessionId: "s2", userId: "u2", seq: 1, events: exchange(99, 10) });
+  const t = await storage.loadThread(client, "s1");
+  assert.equal(t.rows, 12);
+  assert.equal(t.lastSeq, 12);
+  assert.equal(t.userId, "u1");
+  assert.deepEqual(t.events.filter((e) => e.kind === "user").map((e) => e.text.split(":")[0]), Array.from({ length: 12 }, (_, i) => `u${i + 1}`));
+  assert.ok(t.events.every((e) => !String(e.text).startsWith("u99")));
+});
+
+test("writing the same exchange twice is idempotent", async () => {
+  const client = makeLimitedClient();
+  await storage.saveThreadTurn(client, { sessionId: "s1", userId: "u1", seq: 1, events: exchange(1, 5) });
+  await storage.saveThreadTurn(client, { sessionId: "s1", userId: "u1", seq: 1, events: exchange(1, 5) });
+  const t = await storage.loadThread(client, "s1");
+  assert.equal(t.rows, 1);
+  assert.equal(t.events.length, 4);
+});
+
+test("an exchange larger than one property round-trips through chunked properties", async () => {
+  const client = makeLimitedClient();
+  await storage.saveThreadTurn(client, { sessionId: "s1", userId: "u1", seq: 1, events: exchange(1, 60_000) });
+  const t = await storage.loadThread(client, "s1");
+  assert.equal(t.events[0].text.length, 60_000 + 3);
+  assert.deepEqual(t.problems, []);
+});
+
+test("a session id with partition-key-hostile characters is encoded, not rejected", async () => {
+  const client = makeLimitedClient();
+  const sid = "a/b#c?d\\e";
+  await storage.saveThreadTurn(client, { sessionId: sid, userId: "u", seq: 1, events: exchange(1, 3) });
+  const [key] = [...client.rows.keys()];
+  assert.ok(!/[\/\\#?]/.test(key.split("|")[0]), key);
+  assert.equal((await storage.loadThread(client, sid)).rows, 1);
+});
+
+test("hydrate rebuilds a session from exchange rows alone, before any full checkpoint exists", async () => {
+  const client = makeLimitedClient();
+  for (let seq = 1; seq <= 3; seq += 1) {
+    await storage.saveThreadTurn(client, { sessionId: "s1", userId: "u1", seq, events: exchange(seq, 5) });
+  }
+  const h = await storage.hydrateSession(client, "s1");
+  assert.equal(h.sessionSeq, 3);
+  assert.equal(h.userId, "u1");
+  assert.equal(h.threadEvents.length, 12);
+  assert.equal(h.orchestrationRuntime, null);
+});
+
+test("hydrate uses the exchange rows for history and the checkpoint for orchestration, which may lag", async () => {
+  const client = makeLimitedClient();
+  await storage.saveSessionCheckpoint(client, checkpoint({ sessionSeq: 2, orchestrationRuntime: { v: 2, turns: 2 } }));
+  for (let seq = 1; seq <= 5; seq += 1) {
+    await storage.saveThreadTurn(client, { sessionId: "s1", userId: "u1", seq, events: exchange(seq, 5) });
+  }
+  const h = await storage.hydrateSession(client, "s1");
+  assert.equal(h.sessionSeq, 5, "history is ahead of the checkpoint");
+  assert.equal(h.orchestrationRuntime.turns, 2);
+  assert.equal(h.threadEvents.filter((e) => e.kind === "user").length, 5);
+});
+
+test("the full checkpoint does not write the chat history", async () => {
   const client = makeLimitedClient();
   await storage.saveSessionCheckpoint(client, checkpoint());
   const row = client.rows.get("EDA_session|s1");
-  assert.equal(row.threadEventsJsonChunks, 1);
-  assert.equal(row.threadEventsJson__1, undefined);
+  assert.equal(row.threadEventsJson, undefined);
+  assert.equal(row.threadEventsJsonChunks, undefined);
 });
 
-test("an oversized thread keeps the newest events within the entity budget and says so", async () => {
+test("an oversized exchange keeps its newest events within the entity budget and says so", async () => {
   const client = makeLimitedClient();
   const events = [];
-  for (let i = 0; i < 600; i += 1) {
-    events.push({ ts: i, phase: "detective", kind: "user", text: `${i}:` + "z".repeat(2000), agent: "user" });
-  }
-  const result = await storage.saveSessionCheckpoint(client, checkpoint({ threadEvents: events }));
-  assert.ok(result.degraded.some((r) => r.startsWith("thread_oldest_")), JSON.stringify(result.degraded));
-  const h = await storage.hydrateSession(client, "s1");
-  assert.ok(h.threadEvents.length > 0 && h.threadEvents.length < events.length);
-  assert.equal(h.threadEvents[h.threadEvents.length - 1].ts, 599, "newest event is kept");
-  assert.match(client.rows.get("EDA_session|s1").degradedReason, /thread_oldest_/);
+  for (let i = 0; i < 300; i += 1) events.push(ev("user", `${i}:` + "z".repeat(2000)));
+  const result = await storage.saveThreadTurn(client, { sessionId: "s1", userId: "u1", seq: 1, events });
+  assert.ok(result.degraded.some((r) => r.startsWith("turn_oldest_")), JSON.stringify(result.degraded));
+  const t = await storage.loadThread(client, "s1");
+  assert.ok(t.events.length > 0 && t.events.length < events.length);
+  assert.equal(t.events[t.events.length - 1].text.startsWith("299:"), true, "newest event is kept");
+});
+
+test("a small checkpoint stays in single properties", async () => {
+  const client = makeLimitedClient();
+  await storage.saveSessionCheckpoint(client, checkpoint());
+  const row = client.rows.get("EDA_session|s1");
+  assert.equal(row.orchestrationRuntimeJsonChunks, 1);
+  assert.equal(row.orchestrationRuntimeJson__1, undefined);
 });
 
 test("an oversized orchestration blob sheds history instead of being replaced by a truncated marker", async () => {
   const client = makeLimitedClient();
-  const history = Array.from({ length: 200 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: "h".repeat(2000) + i }));
+  const history = Array.from({ length: 300 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: "h".repeat(2000) + i }));
   const orch = { v: 2, detectiveChatHistory: history, lumenChatHistory: [], umbraChatHistory: [], marker: "keep" };
   const result = await storage.saveSessionCheckpoint(client, checkpoint({ orchestrationRuntime: orch }));
   assert.deepEqual(result.degraded, ["orchestration_history_trimmed"]);
@@ -129,27 +224,24 @@ test("an orchestration blob that cannot be shrunk is not persisted, explicitly",
   const client = makeLimitedClient();
   const result = await storage.saveSessionCheckpoint(
     client,
-    checkpoint({ orchestrationRuntime: { v: 2, huge: "q".repeat(300_000) } })
+    checkpoint({ orchestrationRuntime: { v: 2, huge: "q".repeat(390_000) } })
   );
   assert.deepEqual(result.degraded, ["orchestration_not_persisted"]);
   const h = await storage.hydrateSession(client, "s1");
   assert.equal(h.orchestrationRuntime, null);
-  assert.equal(h.threadEvents.length, 1);
 });
 
-test("rewriting a smaller session leaves no stale chunks readable", async () => {
+test("rewriting a smaller checkpoint leaves no stale chunks readable", async () => {
   const client = makeLimitedClient();
-  const big = { ts: 1, phase: "detective", kind: "detective", text: "x".repeat(100_000), agent: "detective" };
-  await storage.saveSessionCheckpoint(client, checkpoint({ threadEvents: [big] }));
+  await storage.saveSessionCheckpoint(client, checkpoint({ orchestrationRuntime: { v: 2, blob: "x".repeat(100_000) } }));
   await storage.saveSessionCheckpoint(client, checkpoint());
   const row = client.rows.get("EDA_session|s1");
-  assert.equal(row.threadEventsJson__1, undefined);
+  assert.equal(row.orchestrationRuntimeJson__1, undefined);
   const h = await storage.hydrateSession(client, "s1");
-  assert.equal(h.threadEvents.length, 1);
-  assert.equal(h.threadEvents[0].text, "hi");
+  assert.equal(h.orchestrationRuntime.blob, "ok");
 });
 
-test("a row written before chunking (single property, no schemaV) still hydrates", async () => {
+test("a session row written before exchange rows (history inside the row) still hydrates", async () => {
   const client = makeLimitedClient();
   client.rows.set("EDA_session|old", {
     partitionKey: "EDA_session",
@@ -166,14 +258,13 @@ test("a row written before chunking (single property, no schemaV) still hydrates
   assert.equal(h.orchestrationRuntime.v, 1);
 });
 
-test("a row with a missing chunk is reported, not thrown or half-read", async () => {
+test("an exchange row with a missing chunk is reported, not thrown or half-read", async () => {
   const client = makeLimitedClient();
-  const big = { ts: 1, phase: "detective", kind: "detective", text: "x".repeat(100_000), agent: "detective" };
-  await storage.saveSessionCheckpoint(client, checkpoint({ threadEvents: [big] }));
-  delete client.rows.get("EDA_session|s1").threadEventsJson__2;
-  const h = await storage.hydrateSession(client, "s1");
-  assert.deepEqual(h.threadEvents, []);
-  assert.deepEqual(h.problems, ["threadEventsJson_missing_chunk"]);
+  await storage.saveThreadTurn(client, { sessionId: "s1", userId: "u1", seq: 1, events: exchange(1, 100_000) });
+  delete client.rows.get("EDA_thread_s1|00000001").eventsJson__2;
+  const t = await storage.loadThread(client, "s1");
+  assert.deepEqual(t.events, []);
+  assert.deepEqual(t.problems, ["eventsJson_missing_chunk"]);
 });
 
 test("a large dossier is chunked and read back whole", async () => {
