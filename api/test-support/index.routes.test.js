@@ -95,7 +95,7 @@ test("no production route is registered for dev-only tooling", () => {
 test("config handler returns the client bootstrap fields", async () => {
   const res = await registered.config.handler(request());
   assert.equal(res.status, 200);
-  for (const k of ["devMode", "lastNClientTranscriptTurns", "durableStorageMode"]) {
+  for (const k of ["devMode", "lastNClientTranscriptTurns", "durableStorageMode", "maxMessageChars"]) {
     assert.ok(k in res.jsonBody, `config missing ${k}`);
   }
 });

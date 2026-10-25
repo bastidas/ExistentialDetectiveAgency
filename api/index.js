@@ -50,6 +50,7 @@ app.http("config", {
 				sessionCheckpointMinIntervalMs: config.SESSION_CHECKPOINT_MIN_INTERVAL_MS,
 				durableStorageMode: config.resolveDurableStorageMode(),
 				durableStorageDegraded: shared.getDurableHealth().degraded,
+				maxMessageChars: shared.MAX_MESSAGE_CHARS,
 			},
 		};
 	},

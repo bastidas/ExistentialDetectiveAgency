@@ -735,6 +735,11 @@
     options = options || {};
     var deferInputClear = options.deferInputClear === true;
     if (sending) return;
+    var limitCheck = global.EDAChatMessageLimit && global.EDAChatMessageLimit.check(messageToSend);
+    if (limitCheck && !limitCheck.ok) {
+      EDAMessageUI.setStatus(global.EDAChatMessageLimit.messageFor(limitCheck), true);
+      return;
+    }
     sending = true;
 
     var submitBtn = document.getElementById("submit");

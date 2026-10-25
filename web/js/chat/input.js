@@ -322,6 +322,12 @@
 
     editor.addEventListener("input", function () {
       applyLiveTypewriter();
+      var limit = global.EDAChatMessageLimit;
+      var status = document.getElementById("status");
+      if (limit && status && status.classList.contains("error") && limit.check(getValue()).ok) {
+        status.textContent = "";
+        status.className = "status";
+      }
     });
 
     editor.addEventListener("selectionchange", function () {
