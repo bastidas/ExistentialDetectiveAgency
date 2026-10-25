@@ -3,23 +3,23 @@ name: Frozen packet envelope
 overview: "Frozen system + pointer packets + native history. Attaché bank in system with ask_question_id; server stamps the question unless a mercy/script-break flag is set (distress, fatigue, done, frustration). Detective uses stage handbooks. Phased rollout, no same-pass delete."
 todos:
   - id: envelope-core
-    content: "api/prompting: composeStaticSystemPrompt + field-registry packets + formatUserChannelMessage; api/agents/shared/buildChatCompletionMessages = system + native history + this-turn JSON/QUERENT; invariance tests (not SHA)"
-    status: pending
+    content: "api/prompting: composeStaticSystemPrompt + field-registry packets + formatUserChannelMessage; api/agents/shared/buildChatCompletionMessages = system + native history + this-turn JSON/QUERENT; invariance tests (not SHA) STATUS: Slice 1 done for Lumen/Umbra (composeStaticSystemPrompt, packetRegistry, userChannel, stable-system test) and native history is wired for all three agents. Detective and attaché still need their frozen system and packets (slices 2 and 3); E-3 (attaché system identical every turn) is the open invariance test."
+    status: in_progress
   - id: attache-bank-pointers
-    content: "Numbered question/opening-line bank in api/prompts/attache; packet phase + ask_question_id + deliver_baseline_preamble; greeting_mode enum; server inject unless suspend_script; add suspend_script to turn schema; mercy tests (no inject, no advance)"
+    content: "Numbered question/opening-line bank in api/prompts/attache; packet phase + ask_question_id + deliver_baseline_preamble; greeting_mode enum; server inject unless suspend_script; add suspend_script to turn schema; mercy tests (no inject, no advance) STATUS: Not started: no ask_question_id, suspend_script or greeting_mode enum for the attaché yet."
     status: pending
   - id: authoring-handbooks
-    content: "Write frozen Attaché room handbook (incl. mercy/high-bar suspend_script) and Detective stage handbooks (stance, not lines); apply authoring rule: every-turn vs room vs visit vs person vs code"
+    content: "Write frozen Attaché room handbook (incl. mercy/high-bar suspend_script) and Detective stage handbooks (stance, not lines); apply authoring rule: every-turn vs room vs visit vs person vs code STATUS: Not started."
     status: pending
   - id: handbooks-shrink-catalogs
-    content: "Move attaché/detective phase copy into frozen handbooks under api/prompts/; expire catalogs instead of dumping them into turn_task"
+    content: "Move attaché/detective phase copy into frozen handbooks under api/prompts/; expire catalogs instead of dumping them into turn_task STATUS: Not started; detective and attaché still use catalog-driven TURN INSTRUCTIONS."
     status: pending
   - id: wire-calls-phased
-    content: "Philosophers first, then detective, then attaché, then api/dossier helpers (json_object for dossier; keep secrets_revealed)"
-    status: pending
+    content: "Philosophers first, then detective, then attaché, then api/dossier helpers (json_object for dossier; keep secrets_revealed) STATUS: Philosophers done. Detective and attaché calls use native history but not packets; dossier helpers not started."
+    status: in_progress
   - id: lab-docs-then-delete
-    content: "Retarget api/lab + logger tests and docs/agent-prompt-construction.md; only then delete old turn-tail/custom/extract paths in api/prompting"
-    status: pending
+    content: "Retarget api/lab + logger tests and docs/agent-prompt-construction.md; only then delete old turn-tail/custom/extract paths in api/prompting STATUS: Philosopher lab and docs retargeted and philosophersCustomPrompt.js deleted. Remaining: detective, attaché and summarizer paths, then the final deletes in Rollout step 5."
+    status: in_progress
 isProject: false
 ---
 
@@ -214,11 +214,11 @@ Update [`docs/agent-prompt-construction.md`](docs/agent-prompt-construction.md) 
 
 ## Rollout (do not delete everything in one pass)
 
-1. **Envelope + invariance tests** with philosophers (empty catalogs, mock custom only). Prove frozen system + packet + native history.
-2. **Detective** handbook + flags; drop live `# TURN INSTRUCTIONS` tail in `promptComposer` / [`api/prompting/orchestration/buildAgentTurnInstructions.js`](api/prompting/orchestration/buildAgentTurnInstructions.js).
-3. **Attaché** bank + `ask_question_id` + server inject **gated by `suspend_script`**; then delete catalog-driven turn block.
-4. **Summarizer / dossier** helper API under `api/dossier/` + `api/prompts/{summarizer,dossier}/`.
-5. Then delete: system-tail assembly in `promptComposer`, `buildPhilosophersCustomPrompt`, dead `custom` / `turnInstruction` args, `SAFE_VIEW_KEYS` as model payload (lab overlay replaces it).
+1. **Envelope + invariance tests** with philosophers (empty catalogs, mock custom only). Prove frozen system + packet + native history. *Status: done.*
+2. **Detective** handbook + flags; drop live `# TURN INSTRUCTIONS` tail in `promptComposer` / [`api/prompting/orchestration/buildAgentTurnInstructions.js`](api/prompting/orchestration/buildAgentTurnInstructions.js). *Status: not started.*
+3. **Attaché** bank + `ask_question_id` + server inject **gated by `suspend_script`**; then delete catalog-driven turn block. *Status: not started (E-3 todo test marks the target).*
+4. **Summarizer / dossier** helper API under `api/dossier/` + `api/prompts/{summarizer,dossier}/`. *Status: not started.*
+5. Then delete: system-tail assembly in `promptComposer`, `buildPhilosophersCustomPrompt`, dead `custom` / `turnInstruction` args, `SAFE_VIEW_KEYS` as model payload (lab overlay replaces it). *Status: `buildPhilosophersCustomPrompt` deleted; the rest waits on slices 2 to 4.*
 
 ## Out of scope
 
