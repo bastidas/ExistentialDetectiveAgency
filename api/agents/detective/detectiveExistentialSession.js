@@ -338,15 +338,14 @@ function restoreDetectiveRuntimeFromDurable(sessionId, data) {
   if (d.orchestratorSnapshot != null) {
     detectiveOrchestratorSnapshotBySessionId.set(key, d.orchestratorSnapshot);
   }
-  if (
-    d.phaseSuggestionStreak != null &&
-    typeof d.phaseSuggestionStreak === "object" &&
-    d.phaseSuggestionStreak !== null
-  ) {
+  if (d.phaseSuggestionStreak != null && typeof d.phaseSuggestionStreak === "object") {
     phaseSuggestionStreakBySessionId.set(
       key,
       /** @type {{ lastSuggested: string | null, runLength: number }} */ (d.phaseSuggestionStreak)
     );
+  } else if ("phaseSuggestionStreak" in d) {
+    // An exported `null` means "no streak yet"; an older in-memory streak must not outlive it.
+    phaseSuggestionStreakBySessionId.delete(key);
   }
 }
 

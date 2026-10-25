@@ -79,7 +79,14 @@ A summary is derived from the append-only log and says which part of it it cover
 
 ### Thread rows (`partitionKey=EDA_thread_<sessionId>`, `rowKey=seq`)
 
-`schemaV`, `userId`, `ts`, `eventsJson` (+ chunks). `ts` of the newest row is the last-activity time used after a restart.
+`schemaV`, `userId`, `ts`, `eventsJson` (+ chunks), and `stateJson` (+ chunks) when the turn carried agent state. `ts` of the newest row is the last-activity time used after a restart.
+
+`stateJson` is `{ attache?, therapy? }` as of the end of that turn, written in the same upsert as the events, so it is never older than the log:
+
+- `therapy`: the detective runtime (`orchestratorSnapshot`, which holds the therapy phase, and `phaseSuggestionStreak`). About 260 characters, on every row.
+- `attache`: the attaché session without its `chat_history` (phase, question progress, question order, counters, stats, orchestrator snapshot). About 1,500 characters, on attaché turns only. The `chat_history` is rebuilt from the log (`rebuildAttacheChatHistory`).
+
+State over 40,000 characters is left off and reported as `turn_state_not_persisted`. Hydrate takes the newest row that has each part and applies it over the blob's copy.
 
 ### Thread event `kind` values
 
@@ -137,13 +144,17 @@ The blob is written at checkpoints and is not persisted when it is over budget, 
 |-------|--------|--------|
 | Routing (detective has the floor) | `baselineCompleted` column | Yes |
 | Detective history | `detectiveHistoryText` column | Up to the checkpoint; can trail the log by up to `SESSION_CHECKPOINT_EVERY_K_TURNS - 1` turns |
+| Attaché session (phase, question progress, question order, counters, stats) | `stateJson` on the newest attaché log row; `chat_history` rebuilt from the log | Yes, as of the last attaché turn |
+| Therapy phase, phase-suggestion streak | `stateJson` on the newest log row | Yes, as of the last turn |
 | Detective turn count, attaché exchange count | The log: `attache` and `detective` reply events after the last attaché run began (`deriveCountsFromLog`), raised never lowered | Yes while the log keeps those events |
 | Story turn (`currentStoryPhase`) | Follows the detective turn count, as live | Yes |
 | Lumen and Umbra history | The log | Yes (unchanged) |
 | Summary | `conversationSummariesJson`, then the user's `EDA_userSummary` row | Yes |
 | Last activity | `updatedAt` and the newest log row | Yes |
 
-Not recoverable without the blob: the attaché session itself (phase, question progress, random question order, its own `chat_history`), the therapy phase and its streak, and `orchestrationUserTurnCount`. Those depend on model flags that are not logged. Restoring the attaché counters on their own does not recreate an attaché session, so a session whose blob was lost after the baseline simply continues with the detective, which is what `baselineCompleted` already says. Logging a compact attaché state snapshot with each attaché reply would make the attaché session recoverable.
+The attaché session, the therapy phase and the phase-suggestion streak are restored from the newest log rows' `stateJson` (see Thread rows), not from the blob, so they are exact as of the last logged turn and survive a missing, dropped or stale blob. Rows written before `stateJson` existed have none; for those the blob's copy is used if there is one.
+
+Not recoverable without the blob: `orchestrationUserTurnCount` and the routing snapshot's own counters (routing itself is rebuilt from `baselineCompleted`).
 
 ## Chunked values and degraded mode
 

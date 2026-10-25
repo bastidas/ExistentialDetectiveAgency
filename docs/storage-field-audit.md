@@ -69,7 +69,7 @@ Attaché state lives in `attacheSession.attacheState` (phase, `baseline_number`,
 
 ### Thread rows: partition `EDA_thread_<encodeURIComponent(sessionId)>`, row key `seq` padded to 8 digits
 
-Stored names: `schemaV`, `userId`, `ts`, `eventsJson` (+ `eventsJsonChunks`, `__N`). All read by `loadThread`. Each event is `{ ts, phase, kind, text, agent }`.
+Stored names: `schemaV`, `userId`, `ts`, `eventsJson` (+ `eventsJsonChunks`, `__N`), and later `stateJson` (+ chunks; the attaché session, therapy phase and streak as of that turn). All read by `loadThread`. Each event is `{ ts, phase, kind, text, agent }`.
 
 ### Dossier row: partition `EDA_dossier`, row key `userId`
 

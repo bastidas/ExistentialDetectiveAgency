@@ -35,6 +35,9 @@ const MAX_ORCHESTRATION_CHARS = 300_000;
 
 /** Longest detective transcript stored in the session row (the `detectiveHistoryText` column). */
 const MAX_DETECTIVE_TEXT_CHARS = 60_000;
+const AGENT_STATE_PARTS = ["attache", "therapy"];
+/** Agent state that rides on a log row (see `saveThreadTurn`); over this it is left off and reported. */
+const MAX_TURN_STATE_CHARS = 40_000;
 
 /** Azure caps a partition key at 1,024 characters; stay well under it. */
 const MAX_PARTITION_KEY_CHARS = 900;
@@ -232,8 +235,12 @@ function threadRowKey(seq) {
  * sequence number, so a retry is safe. Throws on a storage error; the caller keeps the exchange
  * queued and retries.
  *
+ * `turn.state` is the agent state as of the end of this turn (`{ attache?, therapy? }`, see
+ * `chatService.exportTurnState`). It is stored beside the events in `stateJson`, so it is written
+ * with every exchange and is never older than the log. Hydrate uses the newest row that has each part.
+ *
  * @param {import("@azure/data-tables").TableClient} client
- * @param {{ sessionId: string, userId?: string|null, seq: number, events: Array<object> }} turn
+ * @param {{ sessionId: string, userId?: string|null, seq: number, events: Array<object>, state?: { attache?: object, therapy?: object }|null }} turn
  * @returns {Promise<{ degraded: string[] } | undefined>}
  */
 async function saveThreadTurn(client, turn) {
@@ -242,8 +249,17 @@ async function saveThreadTurn(client, turn) {
   if (!partitionKey) return undefined;
   await ensureTable(client);
   const events = Array.isArray(turn.events) ? turn.events : [];
-  const fitted = fitThreadEvents(events, MAX_ENTITY_CHARS);
-  const degraded = fitted.dropped > 0 ? [`turn_oldest_${fitted.dropped}_events_not_persisted`] : [];
+  const degraded = [];
+  let stateJson = "";
+  if (turn.state && typeof turn.state === "object" && Object.keys(turn.state).length > 0) {
+    stateJson = JSON.stringify(turn.state);
+    if (stateJson.length > MAX_TURN_STATE_CHARS) {
+      stateJson = "";
+      degraded.push("turn_state_not_persisted");
+    }
+  }
+  const fitted = fitThreadEvents(events, MAX_ENTITY_CHARS - stateJson.length);
+  if (fitted.dropped > 0) degraded.push(`turn_oldest_${fitted.dropped}_events_not_persisted`);
   const entity = {
     partitionKey,
     rowKey: threadRowKey(turn.seq),
@@ -252,6 +268,7 @@ async function saveThreadTurn(client, turn) {
     ts: new Date().toISOString(),
   };
   writeChunked(entity, "eventsJson", fitted.json);
+  if (stateJson) writeChunked(entity, "stateJson", stateJson);
   await client.upsertEntity(entity, "Replace");
   if (degraded.length > 0) {
     logger.warn("durableTableStorage", "saveThreadTurn", `session ${turn.sessionId} turn ${turn.seq}: ${degraded.join(", ")}`);
@@ -264,10 +281,10 @@ async function saveThreadTurn(client, turn) {
  *
  * @param {import("@azure/data-tables").TableClient} client
  * @param {string} sessionId
- * @returns {Promise<{ events: Array<object>, turns: Array<{ seq: number, events: Array<object> }>, lastTurnAt: string|null, lastSeq: number, userId: string|null, rows: number, problems: string[] }>}
+ * @returns {Promise<{ events: Array<object>, turns: Array<{ seq: number, events: Array<object> }>, agentState: { attache?: object, therapy?: object }, lastTurnAt: string|null, lastSeq: number, userId: string|null, rows: number, problems: string[] }>}
  */
 async function loadThread(client, sessionId) {
-  const out = { events: [], turns: [], lastTurnAt: null, lastSeq: 0, userId: null, rows: 0, problems: [] };
+  const out = { events: [], turns: [], agentState: {}, lastTurnAt: null, lastSeq: 0, userId: null, rows: 0, problems: [] };
   const partitionKey = threadPartitionKey(sessionId);
   if (!client || !partitionKey) return out;
   await ensureTable(client);
@@ -281,6 +298,12 @@ async function loadThread(client, sessionId) {
       out.events.push(...events);
       out.turns.push({ seq: Number(row.rowKey) || 0, events });
     }
+    const state = parseChunked(row, "stateJson", null, out.problems);
+    if (state && typeof state === "object") {
+      for (const part of AGENT_STATE_PARTS) {
+        if (state[part] && typeof state[part] === "object") out.agentState[part] = state[part];
+      }
+    }
     out.lastSeq = Math.max(out.lastSeq, Number(row.rowKey) || 0);
     if (row.userId) out.userId = String(row.userId);
     if (row.ts && (out.lastTurnAt == null || String(row.ts) > out.lastTurnAt)) out.lastTurnAt = String(row.ts);
@@ -293,6 +316,7 @@ function emptyHydratedSession() {
   return {
     threadEvents: [],
     threadTurns: [],
+    agentState: {},
     updatedAt: null,
     lastActivityAt: null,
     sessionSeq: 0,
@@ -333,6 +357,7 @@ async function hydrateSession(client, sessionId) {
     ...emptyHydratedSession(),
     threadEvents,
     threadTurns: thread.turns,
+    agentState: thread.agentState,
     updatedAt,
     lastActivityAt: [updatedAt, thread.lastTurnAt].filter(Boolean).sort().pop() || null,
     sessionSeq: Math.max(Number(row.sessionSeq || 0), thread.lastSeq),

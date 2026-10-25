@@ -453,6 +453,73 @@ function restoreSessionFromRowColumns(sessionId, row) {
 }
 
 /**
+ * The attaché session's own `chat_history` is the user message and the user-facing reply of every
+ * attaché turn, which is what the log holds for the latest attaché run.
+ *
+ * @param {unknown[]} events
+ * @returns {Array<{ role: "user"|"assistant", content: string }>}
+ */
+function rebuildAttacheChatHistory(events) {
+  const replies = agentRepliesFromLog(events);
+  const run = lastAttacheRun(replies);
+  if (!run) return [];
+  return replies.slice(run.start, run.end + 1).flatMap((r) => [
+    { role: "user", content: r.user },
+    { role: "assistant", content: r.text },
+  ]);
+}
+
+/**
+ * The agent state to store on a log row, as of the end of the turn just run: the therapy phase and
+ * its streak on every row (small, and reset on a rebaseline), and the attaché session (without its
+ * `chat_history`, which the log already holds) on attaché turns.
+ *
+ * @param {string|null|undefined} sessionId
+ * @param {{ attache?: boolean }} [opts] — include the attaché session
+ * @returns {{ attache?: object, therapy?: object }}
+ */
+function exportTurnState(sessionId, opts) {
+  const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
+  if (!id) return {};
+  const state = {};
+  const therapy = exportDetectiveRuntimeForDurable(id);
+  if (therapy) state.therapy = therapy;
+  const session = attacheSessionByChatSessionId.get(id);
+  if (opts && opts.attache && session && typeof session === "object") {
+    const { chat_history: _history, ...rest } = /** @type {Record<string, unknown>} */ (session);
+    state.attache = rest;
+  }
+  return state;
+}
+
+/**
+ * Put back what `exportTurnState` stored. The log row is written every turn, the blob only at
+ * checkpoints, so this is never older than the blob and takes precedence over it. Stored state is
+ * only used when it has the shape live code needs; otherwise the blob's copy (if any) stays.
+ *
+ * @param {string|null|undefined} sessionId
+ * @param {{ attache?: any, therapy?: any }|null|undefined} state
+ * @param {unknown[]} events — the session log, for the attaché chat history
+ * @returns {{ attache: boolean, therapy: boolean }} which parts were restored
+ */
+function restoreTurnState(sessionId, state, events) {
+  const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
+  const restored = { attache: false, therapy: false };
+  if (!id || !state || typeof state !== "object") return restored;
+  const attache = state.attache;
+  if (attache && typeof attache === "object" && attache.attacheState && typeof attache.attacheState === "object") {
+    attacheSessionByChatSessionId.set(id, { ...attache, chat_history: rebuildAttacheChatHistory(events) });
+    restored.attache = true;
+  }
+  const therapy = state.therapy;
+  if (therapy && typeof therapy === "object" && therapy.orchestratorSnapshot != null) {
+    restoreDetectiveRuntimeFromDurable(id, therapy);
+    restored.therapy = true;
+  }
+  return restored;
+}
+
+/**
  * What the log says about this session's counters, using the same reset rule as the live code: a return
  * after a long absence starts a new attaché run and clears both counts (`clearSessionForAttacheRebaseline`),
  * so only the most recent attaché run and the detective turns after it count. One attaché or detective
@@ -463,20 +530,52 @@ function restoreSessionFromRowColumns(sessionId, row) {
  * @returns {{ attacheExchangeCount: number, detectiveTurnCount: number }}
  */
 function deriveCountsFromLog(events) {
-  const replies = [];
-  for (const e of Array.isArray(events) ? events : []) {
-    if (e && (e.kind === "attache" || e.kind === "detective")) replies.push(e.kind);
-  }
-  const lastAttache = replies.lastIndexOf("attache");
-  if (lastAttache < 0) {
-    return { attacheExchangeCount: 0, detectiveTurnCount: replies.length };
-  }
-  let runStart = lastAttache;
-  while (runStart > 0 && replies[runStart - 1] === "attache") runStart -= 1;
+  const replies = agentRepliesFromLog(events);
+  const run = lastAttacheRun(replies);
+  if (!run) return { attacheExchangeCount: 0, detectiveTurnCount: replies.length };
   return {
-    attacheExchangeCount: lastAttache - runStart + 1,
-    detectiveTurnCount: replies.length - 1 - lastAttache,
+    attacheExchangeCount: run.end - run.start + 1,
+    detectiveTurnCount: replies.length - 1 - run.end,
   };
+}
+
+/**
+ * The attaché and detective replies in the log, oldest first, each with the user message it answered.
+ *
+ * @param {unknown[]} events
+ * @returns {Array<{ kind: "attache"|"detective", user: string, text: string }>}
+ */
+function agentRepliesFromLog(events) {
+  const replies = [];
+  let user = "";
+  for (const e of Array.isArray(events) ? events : []) {
+    if (!e || typeof e !== "object") continue;
+    if (e.kind === "user") user = String(e.text ?? "");
+    else if (e.kind === "attache" || e.kind === "detective") {
+      replies.push({ kind: e.kind, user, text: String(e.text ?? "") });
+    }
+  }
+  return replies;
+}
+
+/**
+ * Index range (inclusive) of the most recent contiguous run of attaché replies, or null if there is none.
+ *
+ * @param {Array<{ kind: string }>} replies
+ * @returns {{ start: number, end: number } | null}
+ */
+function lastAttacheRun(replies) {
+  let end = -1;
+  for (let i = replies.length - 1; i >= 0; i -= 1) {
+    if (replies[i].kind === "attache") {
+      end = i;
+      break;
+    }
+  }
+  if (end < 0) return null;
+  let start = end;
+  while (start > 0 && replies[start - 1].kind === "attache") start -= 1;
+  return { start, end };
 }
 
 /**
@@ -1376,6 +1475,9 @@ module.exports = {
   restoreSessionRuntimeFromDurable,
   restoreSessionFromRowColumns,
   deriveCountsFromLog,
+  exportTurnState,
+  restoreTurnState,
+  rebuildAttacheChatHistory,
   restoreCountersFromLog,
   exportDetectiveHistoryText,
   getDetectiveIntroSentForSession,

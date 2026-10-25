@@ -296,6 +296,7 @@ function restoreSessionMemoryFromRows(id, hydrated, userRecord) {
       );
     }
   }
+  chatService.restoreTurnState(id, hydrated.agentState, hydrated.threadEvents);
   chatService.restoreSessionFromRowColumns(id, hydrated);
   chatService.restoreCountersFromLog(id, hydrated.threadEvents);
   chatService.restorePhilosopherHistoriesFromThread(id, hydrated.threadEvents);
@@ -351,10 +352,10 @@ async function hydrateSessionFromDurable(sessionId, userIdHint) {
   return hydrated;
 }
 
-function queueThreadTurn(sessionId, seq, events) {
+function queueThreadTurn(sessionId, seq, events, state) {
   if (!isDurableStorageEnabled() || !Array.isArray(events) || events.length === 0) return;
   const queue = pendingThreadTurnsBySession.get(sessionId) || [];
-  queue.push({ seq, events });
+  queue.push({ seq, events, state: state || null });
   if (queue.length > MAX_PENDING_THREAD_TURNS) {
     queue.splice(0, queue.length - MAX_PENDING_THREAD_TURNS);
     logger.warn("shared", "durableStorage", `session ${sessionId}: pending thread writes capped at ${MAX_PENDING_THREAD_TURNS}`);
@@ -384,6 +385,7 @@ async function flushThreadTurnsToDurable(sessionId, userId) {
         userId: userId || null,
         seq: turn.seq,
         events: turn.events,
+        state: turn.state,
       });
       recordDurableOk("thread_write", result && result.degraded);
     } catch (err) {
@@ -638,7 +640,7 @@ async function handleChatRequest(sessionId, trimmed, options) {
     const nextSeq = (threadSeqBySession.get(sessionId) || 0) + 1;
     threadSeqBySession.set(sessionId, nextSeq);
     out.body.serverSeq = nextSeq;
-    queueThreadTurn(sessionId, nextSeq, turnEvents);
+    queueThreadTurn(sessionId, nextSeq, turnEvents, chatService.exportTurnState(sessionId, { attache: phase === "baseline" }));
     recordLogTurn(sessionId, nextSeq, turnEvents);
     await flushThreadTurnsToDurable(sessionId, options && options.userId ? options.userId : null);
     await maybeExtendConversationSummary(

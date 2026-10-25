@@ -9,7 +9,7 @@ Read it with [`durable-user-state.md`](durable-user-state.md) (tables, retention
 | Store | Key | What it holds | Written |
 |-------|-----|---------------|---------|
 | Session row (the checkpoint) | partition `EDA_session`, row `sessionId` | flags, counters, orchestration blob (`orchestrationRuntimeJson`) | first turn, then every `SESSION_CHECKPOINT_EVERY_K_TURNS` turns or `SESSION_CHECKPOINT_MIN_INTERVAL_MS`; a failed write is retried next turn |
-| Thread rows (the chat log) | partition `EDA_thread_<encoded sessionId>`, row `seq` (8 digits) | one row per exchange: `eventsJson` = user message plus every agent reply | every turn |
+| Thread rows (the chat log) | partition `EDA_thread_<encoded sessionId>`, row `seq` (8 digits) | one row per exchange: `eventsJson` = user message plus every agent reply; `stateJson` = therapy phase and streak (every row) and the attaché session without `chat_history` (attaché turns) | every turn |
 | Dossier row | partition `EDA_dossier`, row `userId` | the per-user dossier (`dossierJson`) | at the dossier interval; shared by all agents, not owned by one |
 | Process memory | `Map`s keyed by `sessionId` | everything else | n/a |
 
@@ -69,7 +69,7 @@ Sources: `api/chatService.js`, `api/agents/detective/detectiveExistentialSession
 
 Detective count: 5 stored fields (row 3 has 4 context fields, so 8 leaf values). Rows 1 to 4 (7 leaf values) are checkpointed, row 5 is stored per user elsewhere, and row 6 is per request only.
 
-Recovery: after a restart the detective resumes with phase and streak from the blob, counters from the blob raised to what the log shows, and its history from the `detectiveHistoryText` column. If the checkpoint is older than the last turns, those turns are in the log but are not replayed into the history, so the detective can be a few turns behind.
+Recovery: after a restart the detective resumes with the therapy phase and streak from the newest log row's `stateJson` (the blob's copy is used only when no row has one), counters from the blob raised to what the log shows, and its history from the `detectiveHistoryText` column. If the checkpoint is older than the last turns, those turns are in the log but are not replayed into the history, so the detective can be a few turns behind.
 
 ## Attaché agent
 
@@ -112,7 +112,7 @@ Plus, outside the session object: `attacheExchangeCount` (number, checkpointed) 
 
 Rows 1 to 18 are the 18 top-level fields; 1a to 1j are the 10 fields of `attacheState`. `visit_bin`, `ms_since_last_visit`, `time_away_context_line`, `dossier_stale_by_age` and `temporal_greeting_mode` are stamped from the current request each turn, so a restored value is only a stale copy until the next request overwrites it. `attacheState` is stored twice (in 1 and again inside 18); on restore the machine copy is re-aligned to the runtime copy.
 
-Recovery: everything the attaché needs is in the checkpoint. Its chat is not in the log in the shape the LLM wants, so a checkpoint older than the last turns loses those turns for the attaché's history. The log (`kind: attache`) still holds the text.
+Recovery: the attaché session (everything except `chat_history`) is stored on every attaché log row as `stateJson.attache`, so hydrate restores it exactly as of the last attaché turn, with or without the blob. `chat_history` is the user message and reply of each turn of the latest attaché run, rebuilt from the log (`rebuildAttacheChatHistory`).
 
 ## Lumen
 
@@ -196,8 +196,9 @@ Typical sessions fit comfortably. These blob sizes were measured before the dete
 
 - Rebuilt from the log on hydrate: Lumen history, Umbra history (not stored in the checkpoint at all);
 - Also derivable from the log: the client transcript, and the sequence number.
+- Restored from the newest log rows' `stateJson`, which takes precedence over the blob: the attaché session (its `chat_history` rebuilt from the log), the therapy phase and the phase-suggestion streak.
 - Rebuilt from the log when the blob is missing: detective turn count, attaché exchange count and the story turn (`restoreCountersFromLog`).
-- Only in the checkpoint: routing snapshot (partly rebuilt from `baselineCompleted`), attaché session, detective phase and streak. The detective history is in the `detectiveHistoryText` column. A checkpoint can lag the log by up to `SESSION_CHECKPOINT_EVERY_K_TURNS - 1` turns, and `historyRef.toSeq` against `sessionSeq` shows how many.
+- Only in the checkpoint: routing snapshot (partly rebuilt from `baselineCompleted`) and `orchestrationUserTurnCount`. The detective history is in the `detectiveHistoryText` column. A checkpoint can lag the log by up to `SESSION_CHECKPOINT_EVERY_K_TURNS - 1` turns, and `historyRef.toSeq` against `sessionSeq` shows how many.
 - Only in the dossier row: the user's dossier.
 - Not stored at all: `lumenOtherResponse`, Lumen and Umbra notes and callouts, `lastMockReply` outside the snapshot, and the process-memory table above.
-- Open items for a later change: the attaché `chat_history` could also be rebuilt from the log (the log already has every `attache` and `detective` event), which would shrink the blob to a few thousand characters regardless of session length.
+- Open items for a later change: the blob still carries the attaché session including its unbounded `chat_history`, now a duplicate of the log rows. Once old rows without `stateJson` have aged out it could be dropped from the blob, which would shrink the blob to a few thousand characters regardless of session length.
