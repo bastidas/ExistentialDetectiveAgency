@@ -16,7 +16,6 @@ Per-agent field inventory (what is checkpointed, rebuilt from the log, or memory
 | `MAX_THREAD_JSON_CHARS` | Max serialized size of the in-memory thread (default `800000`). What is persisted is bounded separately by the per-entity budget (see Chunked values) |
 | `CONVERSATION_CHAR_THRESHOLD_BEFORE_SUMMARY` | Length of not-yet-summarized log text (default `6000`) that triggers one summarizer model call |
 | `ENABLE_CONVERSATION_SUMMARY` | `0` / `false` stops that extra model call (default on; never runs OFFLINE) |
-| `DETECTIVE_HISTORY_STORAGE_CHAR_LIMIT` | Cap on the stored `detectiveHistoryText` (also never more than 60,000 characters) |
 | `LAST_N_MESSAGES_FOR_DOSSIER` | Number of recent messages passed to dossier analyzer |
 | `LAST_N_CLIENT_TRANSCRIPT_TURNS` | Client localStorage transcript tail (also exposed on `GET /api/config`) |
 | `SESSION_CHECKPOINT_EVERY_K_TURNS` | Upsert the session row after this many dirty user turns (default `5`; the first turn is always written). The chat log is written every turn regardless |
@@ -56,11 +55,11 @@ Written by `saveSessionCheckpoint`, read by `hydrateSession`. Every column below
 | `updatedAt` | ISO time of this write | Seeds the session's last-activity time (with the newest log row's `ts`), so time-away after a restart is real |
 | `userId` | The `edaUserId` cookie value | Loads the dossier and the user's summary |
 | `sessionSeq` | Highest exchange number checkpointed | The log position (the larger of this and the last log row) |
-| `orchestrationRuntimeJson` (+ chunks) | Versioned blob: chat machine snapshot, attaché session, `detectiveChatHistory`, `currentStoryPhase`, counters, detective runtime, `historyRef` | Primary restore of routing, attaché state, counters and phases |
+| `orchestrationRuntimeJson` (+ chunks) | Versioned blob: chat machine snapshot, attaché session, `currentStoryPhase`, counters, detective runtime, `historyRef`. It no longer carries the detective history | Primary restore of routing, attaché state, counters and phases. When it is missing, routing, the counters and the story turn are rebuilt from the other columns and the log (see Recovery without the blob) |
 | `baselineCompleted` | The attaché baseline is done and the detective has the floor | When no routing snapshot could be restored, routing is rebuilt as detective (`seedPersistedChatMachineFromFlags`) |
 | `detectiveIntroSent` | The detective has spoken at least once (`detectiveTurnCount > 0`) | Floors the detective turn count at 1 so it does not open twice; `GET /api/chat-state` reports it |
-| `detectiveHistoryText` (+ chunks) | The detective transcript, one `role<TAB>JSON string` line per message, newest 60,000 characters at most | Becomes the detective history when the blob has none, or when `degradedReason` says the blob's copy was trimmed and this one is longer |
-| `degradedReason` | `;`-joined reasons the write dropped content (`orchestration_history_trimmed`, `orchestration_not_persisted`) | Surfaced in `GET /api/config` health as `stored_checkpoint_<reason>`, and decides whether `detectiveHistoryText` overrides the blob |
+| `detectiveHistoryText` (+ chunks) | The detective transcript, one `role<TAB>JSON string` line per message, the newest `max(HISTORY_TAIL_TURNS, LAST_N_MESSAGES_FOR_DOSSIER)` messages (12 by default, which is all either model reads), never more than 60,000 characters, cut on whole lines | The only stored copy of the detective history; it becomes the in-memory history. A legacy blob that still has `detectiveChatHistory` is used only when this column is empty |
+| `degradedReason` | `;`-joined reasons the write dropped content (`orchestration_not_persisted`, `detective_text_truncated`) | Surfaced in `GET /api/config` health as `stored_checkpoint_<reason>` |
 | `conversationSummariesJson` (+ chunks) | This session's summary record, or the text `null` | Published to the models as `preceding_conversation_summary` |
 
 The chat history is **not** in this row. It is written every exchange to the session's thread rows (below). Rows from before thread rows kept it in `threadEventsJson` inside the session row; that is still read when a session has no thread rows.
@@ -130,11 +129,27 @@ A summary is derived from the append-only log and says which part of it it cover
 | `sideTranscripts.philosophers` | Lumen/Umbra thread lines for a future folder UI (not main chat). |
 | `returnClassification` | `{ returnCategory, timeAwayMs, needsBaselineRefresh, baselineReason, lastActivityAtIso }` when `ENABLE_RETURN_POLICY` is on. |
 
+## Recovery without the blob
+
+The blob is written at checkpoints and is not persisted when it is over budget, so hydrate does not depend on it. What each piece is rebuilt from when it is missing:
+
+| State | Source | Exact? |
+|-------|--------|--------|
+| Routing (detective has the floor) | `baselineCompleted` column | Yes |
+| Detective history | `detectiveHistoryText` column | Up to the checkpoint; can trail the log by up to `SESSION_CHECKPOINT_EVERY_K_TURNS - 1` turns |
+| Detective turn count, attaché exchange count | The log: `attache` and `detective` reply events after the last attaché run began (`deriveCountsFromLog`), raised never lowered | Yes while the log keeps those events |
+| Story turn (`currentStoryPhase`) | Follows the detective turn count, as live | Yes |
+| Lumen and Umbra history | The log | Yes (unchanged) |
+| Summary | `conversationSummariesJson`, then the user's `EDA_userSummary` row | Yes |
+| Last activity | `updatedAt` and the newest log row | Yes |
+
+Not recoverable without the blob: the attaché session itself (phase, question progress, random question order, its own `chat_history`), the therapy phase and its streak, and `orchestrationUserTurnCount`. Those depend on model flags that are not logged. Restoring the attaché counters on their own does not recreate an attaché session, so a session whose blob was lost after the baseline simply continues with the detective, which is what `baselineCompleted` already says. Logging a compact attaché state snapshot with each attaché reply would make the attaché session recoverable.
+
 ## Chunked values and degraded mode
 
 Azure Table rejects string properties over 32,768 UTF-16 characters and entities over 1 MiB. Session and dossier JSON is therefore written as chunked properties: `name`, `name__1`, `name__2`, ... with the piece count in `<name>Chunks` (each piece at most 30,000 characters, never splitting a surrogate pair). Readers still accept older rows that hold the value in a single property.
 
-- Per-entity budget: about 400,000 characters across the chunked session fields (summary, detective text, orchestration blob). The orchestration blob may use up to 300,000 of them, less what the other two take; over that, `detectiveChatHistory` is halved (newest kept), and if it still does not fit it is not persisted. A thread row keeps the newest events that fit. Each lossy write is logged and recorded in the row's `degradedReason`, which hydrate reads back.
+- Per-entity budget: about 400,000 characters across the chunked session fields (summary, detective text, orchestration blob). The orchestration blob may use up to 300,000 of them, less what the other two take; over that the blob is not persisted (`orchestration_not_persisted`) and the session is rebuilt from the row columns and the log. The blob no longer holds the detective history, so it stays small and nothing is halved. A thread row keeps the newest events that fit. Each lossy write is logged and recorded in the row's `degradedReason`, which hydrate reads back.
 - Row version: every session row carries `schemaV` (currently `2`). The orchestration blob carries `v` (`ORCHESTRATION_RUNTIME_V`, currently `2`). A blob with another `v` is ignored on restore (logged); the thread rows are still read, and the row columns above fill in routing, the detective history and the summary.
 - Failures are non-fatal. A failed checkpoint is logged and retried on the next turn; a failed read leaves the session unhydrated and holds back checkpoints until a read succeeds, so an empty in-memory session never overwrites the stored one. `GET /api/config` reports `durableStorageDegraded` while writes or reads are failing.
 

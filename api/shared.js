@@ -164,14 +164,12 @@ function adoptStoredSummaries(sessionId, sessionRecord, userRecord) {
  * Costs one extra model call and only when the uncovered text passes
  * `CONVERSATION_CHAR_THRESHOLD_BEFORE_SUMMARY`. Never throws; a failure leaves the old summary and the
  * exchanges stay in the log for the next try.
- *
- * @returns {Promise<boolean>} whether a new summary record was made
  */
 async function maybeExtendConversationSummary(sessionId, userId, options) {
-  if (!apiConfig.ENABLE_CONVERSATION_SUMMARY || apiConfig.OFFLINE) return false;
+  if (!apiConfig.ENABLE_CONVERSATION_SUMMARY || apiConfig.OFFLINE) return;
   const summarizer = options && typeof options.summarizeConversation === "function" ? options.summarizeConversation : null;
   const openai = options && options.openaiClient;
-  if (!summarizer && !openai) return false;
+  if (!summarizer && !openai) return;
   const state = summaryStateBySession.get(sessionId) || { own: null, inherited: null };
   try {
     const next = await conversationSummary.extendSummary({
@@ -183,7 +181,7 @@ async function maybeExtendConversationSummary(sessionId, userId, options) {
       thresholdChars: apiConfig.CONVERSATION_CHAR_THRESHOLD_BEFORE_SUMMARY,
       summarize: summarizer || ((input) => summarization.summarizeHistory(openai, input, { fallbackToTruncation: false })),
     });
-    if (!next) return false;
+    if (!next) return;
     summaryStateBySession.set(sessionId, { own: next, inherited: null });
     publishConversationSummary(sessionId);
     if (userId && isDurableStorageEnabled() && hydratedDurableSessions.has(sessionId)) {
@@ -197,10 +195,8 @@ async function maybeExtendConversationSummary(sessionId, userId, options) {
         }
       }
     }
-    return true;
   } catch (err) {
     logger.warn("shared", "conversationSummary", err && err.message ? err.message : String(err));
-    return false;
   }
 }
 
@@ -283,6 +279,34 @@ function isDurableStorageEnabled() {
   return apiConfig.resolveDurableStorageMode() !== "off";
 }
 
+/**
+ * Apply what `hydrateSession` read to the in-memory session. Pure memory work: no storage calls, so a
+ * throw here is a bug, not an outage.
+ */
+function restoreSessionMemoryFromRows(id, hydrated, userRecord) {
+  const blob = hydrated.orchestrationRuntime;
+  if (blob && typeof blob === "object") {
+    chatService.restoreSessionRuntimeFromDurable(id, blob);
+    const ref = blob.historyRef;
+    if (ref && Number(ref.toSeq) > Number(hydrated.sessionSeq || 0)) {
+      logger.warn(
+        "shared",
+        "durableStorage",
+        `session ${id}: checkpoint points at log rows through seq ${ref.toSeq}, but the log ends at ${hydrated.sessionSeq}`
+      );
+    }
+  }
+  chatService.restoreSessionFromRowColumns(id, hydrated);
+  chatService.restoreCountersFromLog(id, hydrated.threadEvents);
+  chatService.restorePhilosopherHistoriesFromThread(id, hydrated.threadEvents);
+  if (hydrated.lastActivityAt && !lastActivityAtBySession.has(id)) {
+    const at = Date.parse(hydrated.lastActivityAt);
+    if (Number.isFinite(at)) lastActivityAtBySession.set(id, at);
+  }
+  logTurnsBySession.set(id, (hydrated.threadTurns || []).slice(-MAX_LOG_TURNS_KEPT));
+  adoptStoredSummaries(id, hydrated.conversationSummary, userRecord);
+}
+
 async function hydrateSessionFromDurable(sessionId, userIdHint) {
   if (!isDurableStorageEnabled()) return null;
   const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
@@ -290,6 +314,7 @@ async function hydrateSessionFromDurable(sessionId, userIdHint) {
   const client = durableTableStorage.getTableClient();
   if (!client) return null;
   let hydrated;
+  let userRecord = null;
   try {
     hydrated = await durableTableStorage.hydrateSession(client, id);
     if (Array.isArray(hydrated.threadEvents)) {
@@ -299,26 +324,7 @@ async function hydrateSessionFromDurable(sessionId, userIdHint) {
     if (hydrated.userId) {
       await chatService.mergeDossierFromTableIfNewer(id, hydrated.userId, client);
     }
-    if (hydrated.orchestrationRuntime && typeof hydrated.orchestrationRuntime === "object") {
-      chatService.restoreSessionRuntimeFromDurable(id, hydrated.orchestrationRuntime);
-      const ref = hydrated.orchestrationRuntime.historyRef;
-      if (ref && Number(ref.toSeq) > Number(hydrated.sessionSeq || 0)) {
-        logger.warn(
-          "shared",
-          "durableStorage",
-          `session ${id}: checkpoint points at log rows through seq ${ref.toSeq}, but the log ends at ${hydrated.sessionSeq}`
-        );
-      }
-    }
-    chatService.restoreSessionFromRowColumns(id, hydrated);
-    chatService.restorePhilosopherHistoriesFromThread(id, hydrated.threadEvents);
-    if (hydrated.lastActivityAt && !lastActivityAtBySession.has(id)) {
-      const at = Date.parse(hydrated.lastActivityAt);
-      if (Number.isFinite(at)) lastActivityAtBySession.set(id, at);
-    }
-    logTurnsBySession.set(id, (hydrated.threadTurns || []).slice(-MAX_LOG_TURNS_KEPT));
     const summaryUserId = hydrated.userId || (typeof userIdHint === "string" && userIdHint ? userIdHint : null);
-    let userRecord = null;
     if (summaryUserId) {
       try {
         userRecord = await durableTableStorage.getUserSummary(client, summaryUserId);
@@ -326,18 +332,22 @@ async function hydrateSessionFromDurable(sessionId, userIdHint) {
         logger.warn("shared", "conversationSummary", `could not read the user's summary: ${err && err.message ? err.message : err}`);
       }
     }
-    adoptStoredSummaries(id, hydrated.conversationSummary, userRecord);
   } catch (err) {
     // Not marked hydrated: it is retried on the next request, and checkpoints are held back until it
     // succeeds so an empty in-memory session can never overwrite the stored one.
     recordDurableFailure("hydrate", err);
     return null;
   }
+  const reasons = (hydrated.degraded || []).map((reason) => `stored_checkpoint_${reason}`);
+  try {
+    restoreSessionMemoryFromRows(id, hydrated, userRecord);
+  } catch (err) {
+    // A restore bug must not loop forever as a failed hydrate; the session continues from what was applied.
+    logger.warn("shared", "durableStorage", `session ${id}: restoring stored state failed: ${err && err.message ? err.message : err}`);
+    reasons.push("restore_failed");
+  }
   hydratedDurableSessions.add(id);
-  recordDurableOk(
-    "hydrate",
-    (hydrated.degraded || []).map((reason) => `stored_checkpoint_${reason}`)
-  );
+  recordDurableOk("hydrate", reasons);
   return hydrated;
 }
 

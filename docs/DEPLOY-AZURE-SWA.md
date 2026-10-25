@@ -52,7 +52,6 @@ In Azure Portal:
 | `MAX_THREAD_EVENTS` | Optional. Max chat events kept in memory per session (default `400`); the full log is stored one row per exchange. | |
 | `MAX_THREAD_JSON_CHARS` | Optional. Serialized JSON size guard for thread events (default `800000`). | |
 | `CONVERSATION_CHAR_THRESHOLD_BEFORE_SUMMARY` | Optional summarization threshold in chars. | `6000` |
-| `DETECTIVE_HISTORY_STORAGE_CHAR_LIMIT` | Optional max chars stored for detective history. | `450000` |
 | `LAST_N_MESSAGES_FOR_DOSSIER` | Optional dossier analyzer recent-message cap. | `12` |
 | `HISTORY_TAIL_TURNS` | Optional. Prior messages sent to the model as native chat history (default `8`, about 4 exchanges). | `8` |
 | `HISTORY_TURN_MAX_CHARS` | Optional. Max characters kept per history message (default `4000`). | `4000` |

@@ -13,7 +13,7 @@ Read it with [`durable-user-state.md`](durable-user-state.md) (tables, retention
 | Dossier row | partition `EDA_dossier`, row `userId` | the per-user dossier (`dossierJson`) | at the dossier interval; shared by all agents, not owned by one |
 | Process memory | `Map`s keyed by `sessionId` | everything else | n/a |
 
-Chunking: a string larger than 30,000 characters is split across `name`, `name__1`, `name__2`, ... with the count in `<name>Chunks`. The orchestration blob is capped at 300,000 characters and the whole session row at 400,000 characters (Azure counts 2 bytes per character, so 1 MiB is about 524,000 characters). Over budget, `fitOrchestration` halves only `detectiveChatHistory` (newest kept); other fields are never trimmed.
+Chunking: a string larger than 30,000 characters is split across `name`, `name__1`, `name__2`, ... with the count in `<name>Chunks`. The orchestration blob is capped at 300,000 characters and the whole session row at 400,000 characters (Azure counts 2 bytes per character, so 1 MiB is about 524,000 characters). Over budget the blob is not persisted (`orchestration_not_persisted`); nothing inside it is trimmed. The blob no longer holds the detective history, so it is small.
 
 ## The session row (checkpoint envelope)
 
@@ -27,9 +27,9 @@ Source: `saveSessionCheckpoint` in `api/storage/durableTableStorage.js`, payload
 | `sessionSeq` | number | 1 to 40 typically | Number of exchanges logged; thread rows run `1..sessionSeq` |
 | `baselineCompleted` | boolean | 1 | Attaché finished, routing is detective. On hydrate, when no routing snapshot could be restored from the blob, routing is rebuilt as detective |
 | `detectiveIntroSent` | boolean | 1 | The detective has spoken (`detectiveTurnCount > 0`). On hydrate it floors the detective turn count at 1 so the detective does not open twice, and `/api/chat-state` reports it |
-| `detectiveHistoryText` | chunked string | at most 60,000 chars | The detective transcript, one `role<TAB>JSON string` line per message. Replaces the in-memory detective history on hydrate when the blob has none, or when `degradedReason` says the blob's copy was trimmed and this one is longer |
+| `detectiveHistoryText` | chunked string | at most 60,000 chars | The detective transcript, one `role<TAB>JSON string` line per message. The only stored copy of the detective history (the blob no longer has one); it becomes the in-memory history on hydrate. Holds the newest `max(HISTORY_TAIL_TURNS, LAST_N_MESSAGES_FOR_DOSSIER)` = 12 messages, cut on whole lines, 60,000 chars at most |
 | `conversationSummariesJson` | chunked string | `"null"` (4 chars) until a summary exists, then a record of at most about 6,200 chars | `{ v, userId, sessionId, fromSeq, throughSeq, text, createdAt }`: a summary of log exchanges `fromSeq..throughSeq`. Read on hydrate and published as `preceding_conversation_summary` (see `durable-user-state.md`) |
-| `degradedReason` | string | 0 to about 100 chars | `;`-joined reasons if the write had to drop content. Read on hydrate: surfaced in durable health and used to decide whether `detectiveHistoryText` overrides the blob |
+| `degradedReason` | string | 0 to about 100 chars | `;`-joined reasons if the write had to drop content. Read on hydrate and surfaced in durable health |
 | `orchestrationRuntimeJson` | chunked string | measured below | The orchestration blob, next section |
 
 ## The orchestration blob
@@ -41,7 +41,7 @@ Source: `exportSessionRuntimeForDurable` in `api/chatService.js`, version consta
 | `v` | number | 1 char | all | Blob version |
 | `chatMachineSnapshot` | XState persisted snapshot | about 670 chars | routing (attaché and detective) | Which agent is active, time-away bin, dossier presence, turn counter, plus the invoked child snapshot |
 | `attacheSession` | object | 3.8K chars at 12 turns, grows 200 to 1,000 chars per attaché turn, **not trimmed** | attaché | Full attaché runtime state (fields below) |
-| `detectiveChatHistory` | `{role, content}[]` | at most 120 entries; 2.4K chars at 12 turns, about 42K at 30 turns of 1,500-char replies | detective | LLM context for the detective |
+| ~~`detectiveChatHistory`~~ | removed from the blob | n/a | detective | Now only in the row's `detectiveHistoryText`. An old blob that still has it is read as a fallback |
 | `currentStoryPhase` | XState persisted snapshot | about 100 chars | Lumen and Umbra | Narrative turn, which sets their narrative phase |
 | `detectiveTurnCount` | number | 1 to 2 chars | detective | Detective turns run (first-turn instructions, dossier interval, closure) |
 | `attacheExchangeCount` | number | 1 to 2 chars | attaché | User messages handled while routed to attaché; adds to detective count for `MAX_USER_EXCHANGES` |
@@ -56,7 +56,7 @@ Sources: `api/chatService.js`, `api/agents/detective/detectiveExistentialSession
 
 | # | Field | Type | Bound / size | Purpose | Checkpoint? |
 |---|-------|------|--------------|---------|-------------|
-| 1 | `detectiveChatHistoryBySessionId` | `{role, content}[]` | exported tail of 120; in memory unbounded (2 per turn, so at most `MAX_USER_EXCHANGES` x 2) | Alternating user and detective messages sent as LLM history | Yes, as `detectiveChatHistory`. Not rebuilt from the log; lost beyond 120 entries |
+| 1 | `detectiveChatHistoryBySessionId` | `{role, content}[]` | exported tail of 120; in memory unbounded (2 per turn, so at most `MAX_USER_EXCHANGES` x 2) | Alternating user and detective messages sent as LLM history | Yes, but in the row's `detectiveHistoryText` (newest 12 messages), not in the blob. Not rebuilt from the log: mock and fallback replies are logged but never enter this history |
 | 2 | `detectiveTurnCountByChatSessionId` | number | small int | Turn count | Yes, `detectiveTurnCount` |
 | 3 | `detectiveOrchestratorSnapshotBySessionId` | XState snapshot of `detectiveMachine` | about 190 chars | Holds the four context fields below | Yes, `detectiveRuntime.orchestratorSnapshot` |
 | 3a | context `ready` | boolean | 1 | Machine seeded | Yes (inside 3) |
@@ -69,7 +69,7 @@ Sources: `api/chatService.js`, `api/agents/detective/detectiveExistentialSession
 
 Detective count: 5 stored fields (row 3 has 4 context fields, so 8 leaf values). Rows 1 to 4 (7 leaf values) are checkpointed, row 5 is stored per user elsewhere, and row 6 is per request only.
 
-Recovery: after a restart the detective resumes with phase, streak, counters and the last 120 history entries from the checkpoint. If the checkpoint is older than the last turns, those turns are in the log but are not replayed into `detectiveChatHistory`, so the detective can be a few turns behind its own history.
+Recovery: after a restart the detective resumes with phase and streak from the blob, counters from the blob raised to what the log shows, and its history from the `detectiveHistoryText` column. If the checkpoint is older than the last turns, those turns are in the log but are not replayed into the history, so the detective can be a few turns behind.
 
 ## Attaché agent
 
@@ -190,13 +190,14 @@ Measured through `api/shared.js` with a fake model.
 | 30 turns, 200-char messages, 1,500-char replies | 55.7K chars | 140.5K chars | 5.0K chars | 132K chars |
 | 40 turns, 9,990-char messages, 4,000-char replies (worst case allowed by the 10,000-character cap) | 565K chars (over the 300K blob cap, so history is halved) | 1.49M chars | 22.3K chars | 836K chars |
 
-Typical sessions fit comfortably. The worst case is dominated by `detectiveChatHistory` (464K chars) and the unbounded attaché `chat_history` (about 100K chars).
+Typical sessions fit comfortably. These blob sizes were measured before the detective history left the blob; the worst case was dominated by it (464K chars), and is now only the unbounded attaché `chat_history` (about 100K chars).
 
 ## What this means for recovery
 
 - Rebuilt from the log on hydrate: Lumen history, Umbra history (not stored in the checkpoint at all);
 - Also derivable from the log: the client transcript, and the sequence number.
-- Only in the checkpoint: routing snapshot, attaché session, detective history, detective phase and streak, `currentStoryPhase`, counters. A checkpoint can lag the log by up to `SESSION_CHECKPOINT_EVERY_K_TURNS - 1` turns, and `historyRef.toSeq` against `sessionSeq` shows how many.
+- Rebuilt from the log when the blob is missing: detective turn count, attaché exchange count and the story turn (`restoreCountersFromLog`).
+- Only in the checkpoint: routing snapshot (partly rebuilt from `baselineCompleted`), attaché session, detective phase and streak. The detective history is in the `detectiveHistoryText` column. A checkpoint can lag the log by up to `SESSION_CHECKPOINT_EVERY_K_TURNS - 1` turns, and `historyRef.toSeq` against `sessionSeq` shows how many.
 - Only in the dossier row: the user's dossier.
 - Not stored at all: `lumenOtherResponse`, Lumen and Umbra notes and callouts, `lastMockReply` outside the snapshot, and the process-memory table above.
-- Open items for a later change: the attaché `chat_history` and `detectiveChatHistory` could also be rebuilt from the log (the log already has every `attache` and `detective` event), which would shrink the blob to a few thousand characters regardless of session length.
+- Open items for a later change: the attaché `chat_history` could also be rebuilt from the log (the log already has every `attache` and `detective` event), which would shrink the blob to a few thousand characters regardless of session length.

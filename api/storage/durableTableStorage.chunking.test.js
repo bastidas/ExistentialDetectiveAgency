@@ -206,18 +206,27 @@ test("a small checkpoint stays in single properties", async () => {
   assert.equal(row.orchestrationRuntimeJson__1, undefined);
 });
 
-test("an oversized orchestration blob sheds history instead of being replaced by a truncated marker", async () => {
+test("an oversized blob is dropped without touching the detective transcript column", async () => {
   const client = makeLimitedClient();
-  const history = Array.from({ length: 300 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: "h".repeat(2000) + i }));
-  const orch = { v: 2, detectiveChatHistory: history, marker: "keep" };
-  const result = await storage.saveSessionCheckpoint(client, checkpoint({ orchestrationRuntime: orch }));
-  assert.deepEqual(result.degraded, ["orchestration_history_trimmed"]);
+  const transcript = Array.from({ length: 40 }, (_, i) => `${i % 2 ? "assistant" : "user"}\t${JSON.stringify("h".repeat(500) + i)}`).join("\n");
+  const orch = { v: 2, marker: "keep", padding: "p".repeat(390_000) };
+  const result = await storage.saveSessionCheckpoint(client, checkpoint({ orchestrationRuntime: orch, detectiveHistoryText: transcript }));
+  assert.deepEqual(result.degraded, ["orchestration_not_persisted"]);
   const h = await storage.hydrateSession(client, "s1");
-  assert.equal(h.orchestrationRuntime.truncated, undefined);
-  assert.equal(h.orchestrationRuntime.marker, "keep");
-  const kept = h.orchestrationRuntime.detectiveChatHistory;
-  assert.ok(kept.length > 0 && kept.length < history.length);
-  assert.equal(kept[kept.length - 1].content, history[history.length - 1].content, "newest history kept");
+  assert.equal(h.orchestrationRuntime, null);
+  assert.equal(h.detectiveHistoryText, transcript, "the transcript has its own column and is unaffected");
+});
+
+test("the detective transcript column keeps the newest whole lines when over its cap", async () => {
+  const client = makeLimitedClient();
+  const lines = Array.from({ length: 200 }, (_, i) => `user\t${JSON.stringify(String(i).padStart(4, "0") + "x".repeat(996))}`);
+  const written = await storage.saveSessionCheckpoint(client, checkpoint({ detectiveHistoryText: lines.join("\n") }));
+  assert.deepEqual(written.degraded, ["detective_text_truncated"]);
+  const h = await storage.hydrateSession(client, "s1");
+  assert.ok(h.detectiveHistoryText.length <= 60_000);
+  const kept = h.detectiveHistoryText.split("\n");
+  assert.equal(kept[kept.length - 1], lines[lines.length - 1], "newest line kept");
+  assert.deepEqual(kept, lines.slice(-kept.length), "no line is cut in half");
 });
 
 test("an orchestration blob that cannot be shrunk is not persisted, explicitly", async () => {
@@ -312,14 +321,14 @@ test("every checkpoint column round-trips through hydrate, including a transcrip
   assert.deepEqual(restored, history.slice(-restored.length));
 });
 
-test("degradedReason comes back as a list, and an empty summary column reads as no summary", async () => {
+test("degraded reasons come back as a list, and an empty summary column reads as no summary", async () => {
   const client = makeLimitedClient();
-  const big = { v: 2, detectiveChatHistory: Array.from({ length: 300 }, () => ({ role: "user", content: "y".repeat(2_000) })) };
+  const big = { v: 2, padding: "y".repeat(390_000) };
   const written = await storage.saveSessionCheckpoint(client, checkpoint({ orchestrationRuntime: big, detectiveHistoryText: "z".repeat(50_000) }));
-  assert.ok(written.degraded.length > 0, "the oversized blob was reduced");
+  assert.deepEqual(written.degraded, ["orchestration_not_persisted"]);
   const hydrated = await storage.hydrateSession(client, "s1");
   assert.deepEqual(hydrated.degraded, written.degraded);
-  assert.equal(hydrated.degradedReason, written.degraded.join(";"));
+  assert.equal(client.rows.get("EDA_session|s1").degradedReason, written.degraded.join(";"));
   assert.equal(hydrated.conversationSummary, null);
   assert.equal(client.rows.get("EDA_session|s1").conversationSummariesJson, "null");
 });

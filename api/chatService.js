@@ -212,6 +212,11 @@ function bumpDetectiveTurnCount(sessionId) {
 /** Bump when the stored orchestration shape changes; blobs with another `v` are ignored on restore. v2: chunked storage layout and native-history chat histories. */
 const ORCHESTRATION_RUNTIME_V = 2;
 const DURABLE_EXPORT_HISTORY_MAX = 120;
+/**
+ * How many detective messages are stored. The model is sent the last `HISTORY_TAIL_TURNS` messages and
+ * the dossier analyzer reads the last `LAST_N_MESSAGES_FOR_DOSSIER`, so older ones are never read back.
+ */
+const DETECTIVE_HISTORY_KEEP_MESSAGES = Math.max(config.HISTORY_TAIL_TURNS, config.LAST_N_MESSAGES_FOR_DOSSIER);
 
 /**
  * @param {unknown[]|undefined} arr
@@ -364,7 +369,6 @@ function exportSessionRuntimeForDurable(sessionId) {
     v: ORCHESTRATION_RUNTIME_V,
     chatMachineSnapshot: getPersistedChatMachineSnapshot(id),
     attacheSession: attacheSessionByChatSessionId.get(id) ?? null,
-    detectiveChatHistory: sliceHistoryTail(detectiveChatHistoryBySessionId.get(id), DURABLE_EXPORT_HISTORY_MAX),
     currentStoryPhase: currentStoryPhaseBySessionId.get(id) ?? null,
     detectiveTurnCount: detectiveTurnCountByChatSessionId.get(id) ?? 0,
     attacheExchangeCount: attacheExchangeCountByChatSessionId.get(id) ?? 0,
@@ -404,8 +408,9 @@ function restoreSessionRuntimeFromDurable(sessionId, blob) {
   if (b.attacheSession != null && typeof b.attacheSession === "object") {
     attacheSessionByChatSessionId.set(id, b.attacheSession);
   }
+  // Older blobs carried the detective history; it now lives only in the row's `detectiveHistoryText`.
   if (Array.isArray(b.detectiveChatHistory)) {
-    detectiveChatHistoryBySessionId.set(id, b.detectiveChatHistory);
+    detectiveChatHistoryBySessionId.set(id, sliceHistoryTail(b.detectiveChatHistory, DETECTIVE_HISTORY_KEEP_MESSAGES));
   }
   if (b.currentStoryPhase != null) {
     currentStoryPhaseBySessionId.set(id, b.currentStoryPhase);
@@ -420,45 +425,90 @@ function restoreSessionRuntimeFromDurable(sessionId, blob) {
 }
 
 /**
- * Use the session row's own columns to fill in what the orchestration blob did not supply. The blob
- * is the primary source; these cover a blob that was not persisted, was rejected, or had its detective
- * history trimmed to fit.
+ * Use the session row's own columns to fill in what the orchestration blob does not carry.
  *
  * - `baselineCompleted`: with no routing snapshot, route to the detective.
  * - `detectiveIntroSent`: the detective has already spoken, so its turn count is at least 1 and it does
  *   not open a second time.
- * - `detectiveHistoryText` and `degraded` (the row's `degradedReason`): the stored transcript replaces the
- *   in-memory detective history when there is none, or when the checkpoint recorded that the blob's copy
- *   was trimmed and the transcript holds more messages.
+ * - `detectiveHistoryText`: the only stored copy of the detective history; it becomes the in-memory
+ *   history.
  *
  * @param {string|null|undefined} sessionId
- * @param {{ baselineCompleted?: boolean, detectiveIntroSent?: boolean, detectiveHistoryText?: string, degraded?: string[] }} row
- * @returns {{ routingSeeded: boolean, detectiveTurnFloor: boolean, detectiveHistoryFromText: boolean }}
+ * @param {{ baselineCompleted?: boolean, detectiveIntroSent?: boolean, detectiveHistoryText?: string }} row
  */
 function restoreSessionFromRowColumns(sessionId, row) {
-  const result = { routingSeeded: false, detectiveTurnFloor: false, detectiveHistoryFromText: false };
   const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
-  if (!id || !row || typeof row !== "object") return result;
+  if (!id || !row || typeof row !== "object") return;
 
-  result.routingSeeded = seedPersistedChatMachineFromFlags(id, { baselineCompleted: row.baselineCompleted });
+  seedPersistedChatMachineFromFlags(id, { baselineCompleted: row.baselineCompleted });
 
-  if (row.detectiveIntroSent === true && (detectiveTurnCountByChatSessionId.get(id) ?? 0) < 1) {
+  if (row.detectiveIntroSent === true && getDetectiveTurnCount(id) < 1) {
     detectiveTurnCountByChatSessionId.set(id, 1);
-    result.detectiveTurnFloor = true;
   }
 
   const stored = parseDetectiveHistoryText(row.detectiveHistoryText);
   if (stored.length > 0) {
-    const current = detectiveChatHistoryBySessionId.get(id) || [];
-    const reasons = Array.isArray(row.degraded) ? row.degraded : [];
-    const blobWasReduced =
-      reasons.includes("orchestration_history_trimmed") || reasons.includes("orchestration_not_persisted");
-    if (current.length === 0 || (blobWasReduced && stored.length > current.length)) {
-      detectiveChatHistoryBySessionId.set(id, stored);
-      result.detectiveHistoryFromText = true;
-    }
+    detectiveChatHistoryBySessionId.set(id, stored);
   }
-  return result;
+}
+
+/**
+ * What the log says about this session's counters, using the same reset rule as the live code: a return
+ * after a long absence starts a new attaché run and clears both counts (`clearSessionForAttacheRebaseline`),
+ * so only the most recent attaché run and the detective turns after it count. One attaché or detective
+ * reply is logged per turn, so replies are counted rather than user messages (synced client events carry
+ * no reliable phase on the user line).
+ *
+ * @param {unknown[]} events — the session log, oldest first
+ * @returns {{ attacheExchangeCount: number, detectiveTurnCount: number }}
+ */
+function deriveCountsFromLog(events) {
+  const replies = [];
+  for (const e of Array.isArray(events) ? events : []) {
+    if (e && (e.kind === "attache" || e.kind === "detective")) replies.push(e.kind);
+  }
+  const lastAttache = replies.lastIndexOf("attache");
+  if (lastAttache < 0) {
+    return { attacheExchangeCount: 0, detectiveTurnCount: replies.length };
+  }
+  let runStart = lastAttache;
+  while (runStart > 0 && replies[runStart - 1] === "attache") runStart -= 1;
+  return {
+    attacheExchangeCount: lastAttache - runStart + 1,
+    detectiveTurnCount: replies.length - 1 - lastAttache,
+  };
+}
+
+/**
+ * Raise the counters the checkpoint stores (attaché exchanges, detective turns) and the story phase, which
+ * follows the detective turn count, to what the log shows. The checkpoint can trail the log by up to
+ * `SESSION_CHECKPOINT_EVERY_K_TURNS - 1` turns, and is absent when the blob was not persisted. Values are
+ * only ever raised: a log that lost old events (`turn_oldest_N_events_not_persisted`) cannot lower them.
+ * The exchange cap (`MAX_USER_EXCHANGES`) is the sum of the two counts, so a restart cannot grant extra turns.
+ *
+ * @param {string|null|undefined} sessionId
+ * @param {unknown[]} events
+ * @returns {{ attacheExchangeCount: number, detectiveTurnCount: number, storyTurn: number }} values now in effect
+ */
+function restoreCountersFromLog(sessionId, events) {
+  const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
+  if (!id) return { attacheExchangeCount: 0, detectiveTurnCount: 0, storyTurn: 0 };
+  const derived = deriveCountsFromLog(events);
+  if (derived.attacheExchangeCount > getAttacheExchangeCount(id)) {
+    attacheExchangeCountByChatSessionId.set(id, derived.attacheExchangeCount);
+  }
+  if (derived.detectiveTurnCount > getDetectiveTurnCount(id)) {
+    detectiveTurnCountByChatSessionId.set(id, derived.detectiveTurnCount);
+  }
+  const detectiveTurns = getDetectiveTurnCount(id);
+  if (detectiveTurns > getStoryTurnFromCurrentStoryPhase(currentStoryPhaseBySessionId.get(id))) {
+    setCurrentStoryPhaseTurn(id, detectiveTurns);
+  }
+  return {
+    attacheExchangeCount: getAttacheExchangeCount(id),
+    detectiveTurnCount: detectiveTurns,
+    storyTurn: getStoryTurnFromCurrentStoryPhase(currentStoryPhaseBySessionId.get(id)),
+  };
 }
 
 /**
@@ -469,7 +519,9 @@ function restoreSessionFromRowColumns(sessionId, row) {
  */
 function exportDetectiveHistoryText(sessionId) {
   const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
-  return id ? renderDetectiveHistoryText(detectiveChatHistoryBySessionId.get(id)) : "";
+  return id
+    ? renderDetectiveHistoryText(sliceHistoryTail(detectiveChatHistoryBySessionId.get(id), DETECTIVE_HISTORY_KEEP_MESSAGES))
+    : "";
 }
 
 /**
@@ -603,6 +655,14 @@ function buildPhilosopherComposeSession(sessionId, dossier) {
 }
 
 /**
+ * @param {string} sessionId
+ * @param {number} targetTurn
+ */
+function setCurrentStoryPhaseTurnForLabSession(sessionId, targetTurn) {
+  setCurrentStoryPhaseTurn(sessionId, targetTurn);
+}
+
+/**
  * @param {string|null} sessionId
  */
 function advanceCurrentStoryPhase(sessionId) {
@@ -631,7 +691,7 @@ function advanceCurrentStoryPhase(sessionId) {
  * @param {string|null|undefined} sessionId
  * @param {number} targetTurn — non-negative; 0 = Exposition, etc.
  */
-function setCurrentStoryPhaseTurnForLabSession(sessionId, targetTurn) {
+function setCurrentStoryPhaseTurn(sessionId, targetTurn) {
   const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
   if (!id) return;
   const n =
@@ -1315,6 +1375,8 @@ module.exports = {
   exportSessionRuntimeForDurable,
   restoreSessionRuntimeFromDurable,
   restoreSessionFromRowColumns,
+  deriveCountsFromLog,
+  restoreCountersFromLog,
   exportDetectiveHistoryText,
   getDetectiveIntroSentForSession,
   setConversationSummaryForSession,

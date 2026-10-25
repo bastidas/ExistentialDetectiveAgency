@@ -85,7 +85,6 @@ test("P-02: an orchestration blob near the entity budget is saved, not rejected 
   const storage = require("./durableTableStorage");
   const client = storage.getTableClient();
   const sessionId = newSessionId();
-  const history = Array.from({ length: 200 }, (_, i) => ({ role: "user", content: "y".repeat(3000) + i }));
   const result = await storage.saveSessionCheckpoint(client, {
     sessionId,
     userId: "u_limits",
@@ -94,9 +93,9 @@ test("P-02: an orchestration blob near the entity budget is saved, not rejected 
     detectiveIntroSent: true,
     conversationSummary: null,
     detectiveHistoryText: "",
-    orchestrationRuntime: { v: 2, detectiveChatHistory: history, marker: "keep" },
+    orchestrationRuntime: { v: 2, padding: "y".repeat(280_000), marker: "keep" },
   });
-  assert.deepEqual(result.degraded, ["orchestration_history_trimmed"]);
+  assert.deepEqual(result.degraded, []);
   const h = await storage.hydrateSession(client, sessionId);
   assert.equal(h.orchestrationRuntime.marker, "keep");
 });

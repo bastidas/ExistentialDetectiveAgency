@@ -6,8 +6,9 @@
  *
  *   baselineCompleted      -> routing is rebuilt when the orchestration blob is missing
  *   detectiveIntroSent     -> the detective's turn count is at least 1, and /api/chat-state reports it
- *   detectiveHistoryText   -> the detective transcript when the blob has none (or a trimmed copy)
- *   degradedReason         -> durable health reports a reduced stored checkpoint; drives the choice above
+ *   detectiveHistoryText   -> the detective transcript (its only stored copy)
+ *   the session log        -> attaché / detective counters and the story turn, rebuilt when the blob is gone
+ *   degradedReason         -> durable health reports a reduced stored checkpoint
  *   conversationSummariesJson -> `preceding_conversation_summary` in the model packets
  */
 
@@ -130,6 +131,12 @@ test("hydrate reads the columns back when the orchestration blob is gone", async
     const { sessionId, userId } = await driveSession({ client: fake.createClient(), turns: 14 });
     const live = require("../chatService");
     const liveHistory = JSON.parse(JSON.stringify(live.peekDetectiveHistory(sessionId)));
+    const liveCounters = {
+      attache: live.getAttacheExchangeCountForSession(sessionId),
+      detective: live.getDetectiveTurnCountForSession(sessionId),
+      storyTurn: live.getCurrentStoryPhaseForSession(sessionId),
+    };
+    assert.ok(liveCounters.attache > 0 && liveCounters.detective > 0, JSON.stringify(liveCounters));
     assert.ok(liveHistory.length >= 2, "the first process holds a detective transcript");
 
     const row = sessionRow(table, sessionId);
@@ -177,6 +184,10 @@ test("hydrate reads the columns back when the orchestration blob is gone", async
     );
     assert.ok(restarted.getMsSinceLastVisitForSession(sessionId) > 0, "last activity is seeded from the stored row");
 
+    assert.equal(chatService.getAttacheExchangeCountForSession(sessionId), liveCounters.attache, "attaché exchanges come from the log");
+    assert.equal(chatService.getDetectiveTurnCountForSession(sessionId), liveCounters.detective, "detective turns come from the log");
+    assert.deepEqual(chatService.getCurrentStoryPhaseForSession(sessionId), liveCounters.storyTurn, "the story turn follows the detective turns");
+
     const state = await restarted.getChatStateForSession(sessionId, userId);
     assert.equal(state.detectiveIntroSent, true);
     assert.equal(state.userProgress.baselineCompleted, true);
@@ -186,24 +197,47 @@ test("hydrate reads the columns back when the orchestration blob is gone", async
   }
 });
 
-test("a trimmed blob history is replaced by the longer stored transcript, an intact one is kept", () => {
+test("the detective transcript has one source: the column wins, a legacy blob history is only a fallback", () => {
   const chatService = require("../chatService");
   const { renderDetectiveHistoryText } = require("../storage/detectiveHistoryText");
-  const long = [];
-  for (let i = 0; i < 10; i += 1) long.push({ role: i % 2 ? "assistant" : "user", content: `m${i}` });
-  const text = renderDetectiveHistoryText(long);
-  const blob = { v: 2, detectiveChatHistory: long.slice(-4), detectiveTurnCount: 5 };
+  const msgs = (n, tag) => Array.from({ length: n }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: `${tag}${i}` }));
+  const text = renderDetectiveHistoryText(msgs(10, "col"));
 
-  chatService.restoreSessionRuntimeFromDurable("trimmed-session", blob);
-  chatService.restoreSessionFromRowColumns("trimmed-session", {
-    detectiveHistoryText: text,
-    degraded: ["orchestration_history_trimmed"],
-  });
-  assert.equal(chatService.peekDetectiveHistory("trimmed-session").length, 10);
+  chatService.restoreSessionRuntimeFromDurable("blob-only", { v: 2, detectiveChatHistory: msgs(4, "blob") });
+  chatService.restoreSessionFromRowColumns("blob-only", { detectiveHistoryText: "" });
+  assert.equal(chatService.peekDetectiveHistory("blob-only")[0].content, "blob0", "an old blob's history is used when the column is empty");
 
-  chatService.restoreSessionRuntimeFromDurable("intact-session", blob);
-  chatService.restoreSessionFromRowColumns("intact-session", { detectiveHistoryText: text, degraded: [] });
-  assert.equal(chatService.peekDetectiveHistory("intact-session").length, 4);
+  chatService.restoreSessionRuntimeFromDurable("both", { v: 2, detectiveChatHistory: msgs(4, "blob") });
+  chatService.restoreSessionFromRowColumns("both", { detectiveHistoryText: text });
+  assert.equal(chatService.peekDetectiveHistory("both").length, 10);
+  assert.equal(chatService.peekDetectiveHistory("both")[0].content, "col0", "the column replaces the blob copy");
+
+  chatService.restoreSessionFromRowColumns("column-only", { detectiveHistoryText: text });
+  assert.equal(chatService.peekDetectiveHistory("column-only").length, 10);
+});
+
+test("the checkpoint blob no longer carries the detective history, and the column holds only what the models read", async () => {
+  const table = createMemoryTableClient();
+  const original = storage.getTableClient;
+  storage.getTableClient = () => table;
+  const fake = await summarizerAwareFake();
+  try {
+    freshServer();
+    const { driveSession } = require("./driveSession");
+    const { sessionId } = await driveSession({ client: fake.createClient(), turns: 14 });
+    const row = sessionRow(table, sessionId);
+    const hydrated = await storage.hydrateSession(table, sessionId);
+    assert.ok(hydrated.orchestrationRuntime, "the blob was written");
+    assert.equal("detectiveChatHistory" in hydrated.orchestrationRuntime, false);
+    const { parseDetectiveHistoryText } = require("../storage/detectiveHistoryText");
+    const config = require("../config");
+    const keep = Math.max(config.HISTORY_TAIL_TURNS, config.LAST_N_MESSAGES_FOR_DOSSIER);
+    const stored = parseDetectiveHistoryText(row.detectiveHistoryText);
+    assert.ok(stored.length > 0 && stored.length <= keep, `stored ${stored.length} messages, keep ${keep}`);
+  } finally {
+    storage.getTableClient = original;
+    await fake.close();
+  }
 });
 
 test("a returning user's new session sees the summary from their earlier session", async () => {
@@ -263,6 +297,36 @@ test("a failed summarizer call keeps the old summary and never stores raw transc
     const row = sessionRow(table, sessionId);
     assert.ok(row);
     assert.equal(row.conversationSummariesJson, "null");
+  } finally {
+    storage.getTableClient = original;
+    await fake.close();
+  }
+});
+
+test("a bug while applying stored state is reported as restore_failed and does not loop the hydrate", async () => {
+  const table = createMemoryTableClient();
+  const original = storage.getTableClient;
+  storage.getTableClient = () => table;
+  const fake = await summarizerAwareFake();
+  try {
+    freshServer();
+    const { driveSession } = require("./driveSession");
+    const { sessionId } = await driveSession({ client: fake.createClient(), turns: 4 });
+
+    const restarted = freshServer();
+    const chatService = require("../chatService");
+    const real = chatService.restoreCountersFromLog;
+    chatService.restoreCountersFromLog = () => {
+      throw new Error("boom");
+    };
+    try {
+      const hydrated = await restarted.hydrateSessionFromDurable(sessionId);
+      assert.ok(hydrated, "the session counts as hydrated, so checkpoints and the log can resume");
+    } finally {
+      chatService.restoreCountersFromLog = real;
+    }
+    assert.ok(restarted.getDurableHealth().lastReducedContent.includes("restore_failed"));
+    assert.equal(await restarted.hydrateSessionFromDurable(sessionId), null, "and it is not retried");
   } finally {
     storage.getTableClient = original;
     await fake.close();

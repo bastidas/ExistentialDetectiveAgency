@@ -135,6 +135,7 @@ async function extendSummary({ turns, previous, priorText, userId, sessionId, th
     v: SUMMARY_SCHEMA_V,
     userId: userId || "",
     sessionId: sessionId || "",
+    // With only a carried-over `priorText`, the record claims coverage from this session's first uncovered exchange.
     fromSeq: previous ? previous.fromSeq : Math.max(1, Math.min(...tail.map((t) => Number(t.seq) || 1))),
     throughSeq,
     text: text.slice(0, MAX_SUMMARY_TEXT_CHARS),

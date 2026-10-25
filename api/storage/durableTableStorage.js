@@ -33,10 +33,11 @@ const MAX_ENTITY_CHARS = 400_000;
 /** The orchestration blob may use at most this much of the entity budget before it is shrunk. */
 const MAX_ORCHESTRATION_CHARS = 300_000;
 
+/** Longest detective transcript stored in the session row (the `detectiveHistoryText` column). */
+const MAX_DETECTIVE_TEXT_CHARS = 60_000;
+
 /** Azure caps a partition key at 1,024 characters; stay well under it. */
 const MAX_PARTITION_KEY_CHARS = 900;
-
-const HISTORY_KEYS = ["detectiveChatHistory"];
 
 let _client = null;
 let _tableReady = false;
@@ -70,19 +71,20 @@ async function getEntity(client, partitionKey, rowKey) {
   }
 }
 
-function safeJsonParse(text, fallback) {
-  if (text == null || text === "") return fallback;
-  try {
-    return JSON.parse(String(text));
-  } catch (_) {
-    return fallback;
-  }
-}
-
+/**
+ * Keep the newest whole lines of the detective transcript that fit `MAX_DETECTIVE_TEXT_CHARS`. The
+ * model reads at most `HISTORY_TAIL_TURNS` messages of `HISTORY_TURN_MAX_CHARS` each, which is well
+ * under this, so nothing the detective can use is dropped.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
 function truncateDetectiveHistory(text) {
   const h = String(text || "");
-  const max = Math.min(config.DETECTIVE_HISTORY_STORAGE_CHAR_LIMIT, 60_000);
-  return h.length <= max ? h : h.slice(-max);
+  if (h.length <= MAX_DETECTIVE_TEXT_CHARS) return h;
+  const tail = h.slice(-MAX_DETECTIVE_TEXT_CHARS);
+  const firstBreak = tail.indexOf("\n");
+  return firstBreak < 0 ? "" : tail.slice(firstBreak + 1);
 }
 
 /**
@@ -165,34 +167,6 @@ function parseChunked(entity, name, fallback, problems) {
 }
 
 /**
- * Shrink an orchestration blob that is over budget by halving its chat-history tails, newest kept.
- * Returns `null` when even empty histories do not fit.
- *
- * @param {object} blob
- * @param {number} maxChars
- * @returns {{ json: string, shrunk: boolean } | null}
- */
-function fitOrchestration(blob, maxChars) {
-  let json = JSON.stringify(blob);
-  if (json.length <= maxChars) return { json, shrunk: false };
-  const work = { ...blob };
-  for (let round = 0; round < 12; round += 1) {
-    let changed = false;
-    for (const key of HISTORY_KEYS) {
-      const arr = work[key];
-      if (Array.isArray(arr) && arr.length > 0) {
-        work[key] = arr.slice(Math.floor(arr.length / 2));
-        changed = true;
-      }
-    }
-    json = JSON.stringify(work);
-    if (json.length <= maxChars) return { json, shrunk: true };
-    if (!changed) break;
-  }
-  return null;
-}
-
-/**
  * Drop the oldest thread events until the serialized array fits `maxChars`.
  *
  * @param {unknown[]} events
@@ -212,8 +186,9 @@ function fitThreadEvents(events, maxChars) {
 
 /**
  * Decide what the full state checkpoint writes (orchestration, summary, detective text), and say
- * so when something had to give. Nothing here throws on size: an oversized blob degrades (older
- * history is not persisted) and the reasons are returned and stored on the row instead of failing.
+ * so when something had to give. Nothing here throws on size: an oversized blob is not persisted
+ * (the detective transcript and summary have their own columns and still are) and the reason is
+ * returned and stored on the row instead of failing.
  * The chat history is not part of this row; it is written per exchange (see `saveThreadTurn`).
  *
  * @param {object} payload
@@ -222,7 +197,9 @@ function fitThreadEvents(events, maxChars) {
 function planSessionWrite(payload) {
   const degraded = [];
   const summariesJson = summaryToJson(payload.conversationSummary);
-  const detectiveText = truncateDetectiveHistory(payload.detectiveHistoryText || "");
+  const fullDetectiveText = String(payload.detectiveHistoryText || "");
+  const detectiveText = truncateDetectiveHistory(fullDetectiveText);
+  if (detectiveText.length < fullDetectiveText.length) degraded.push("detective_text_truncated");
 
   let orchJson = "";
   const orch = payload.orchestrationRuntime;
@@ -231,13 +208,9 @@ function planSessionWrite(payload) {
       MAX_ORCHESTRATION_CHARS,
       MAX_ENTITY_CHARS - summariesJson.length - detectiveText.length
     );
-    const fitted = fitOrchestration(orch, budget);
-    if (fitted) {
-      orchJson = fitted.json;
-      if (fitted.shrunk) degraded.push("orchestration_history_trimmed");
-    } else {
-      degraded.push("orchestration_not_persisted");
-    }
+    const json = JSON.stringify(orch);
+    if (json.length <= budget) orchJson = json;
+    else degraded.push("orchestration_not_persisted");
   }
 
   return { orchJson, summariesJson, detectiveText, degraded };
@@ -316,8 +289,8 @@ async function loadThread(client, sessionId) {
   return out;
 }
 
-async function hydrateSession(client, sessionId) {
-  const empty = {
+function emptyHydratedSession() {
+  return {
     threadEvents: [],
     threadTurns: [],
     updatedAt: null,
@@ -329,16 +302,18 @@ async function hydrateSession(client, sessionId) {
     baselineCompleted: false,
     detectiveIntroSent: false,
     detectiveHistoryText: "",
-    degradedReason: "",
     degraded: [],
     conversationSummary: null,
     problems: [],
   };
-  if (!client || !sessionId) return empty;
+}
+
+async function hydrateSession(client, sessionId) {
+  if (!client || !sessionId) return emptyHydratedSession();
   await ensureTable(client);
   const entity = await getEntity(client, PK.session, sessionId);
   const thread = await loadThread(client, sessionId);
-  if (!entity && thread.rows === 0) return empty;
+  if (!entity && thread.rows === 0) return emptyHydratedSession();
   const problems = thread.problems.slice();
   const row = entity || {};
   const orchestrationRuntime = entity ? parseChunked(row, "orchestrationRuntimeJson", null, problems) : null;
@@ -353,14 +328,13 @@ async function hydrateSession(client, sessionId) {
   if (problems.length > 0) {
     logger.warn("durableTableStorage", "hydrateSession", `session has unreadable values: ${problems.join(", ")}`);
   }
+  const updatedAt = row.updatedAt ? String(row.updatedAt) : null;
   return {
+    ...emptyHydratedSession(),
     threadEvents,
     threadTurns: thread.turns,
-    updatedAt: row.updatedAt ? String(row.updatedAt) : null,
-    lastActivityAt: [row.updatedAt ? String(row.updatedAt) : null, thread.lastTurnAt]
-      .filter(Boolean)
-      .sort()
-      .pop() || null,
+    updatedAt,
+    lastActivityAt: [updatedAt, thread.lastTurnAt].filter(Boolean).sort().pop() || null,
     sessionSeq: Math.max(Number(row.sessionSeq || 0), thread.lastSeq),
     userId: row.userId ? String(row.userId) : thread.userId,
     orchestrationRuntime,
@@ -368,8 +342,7 @@ async function hydrateSession(client, sessionId) {
     baselineCompleted: row.baselineCompleted === true,
     detectiveIntroSent: row.detectiveIntroSent === true,
     detectiveHistoryText: historyText.text,
-    degradedReason,
-    degraded: degradedReason ? degradedReason.split(";").filter(Boolean) : [],
+    degraded: degradedReason.split(";").filter(Boolean),
     conversationSummary: parseSummaryJson(summaryText.text),
     problems,
   };
