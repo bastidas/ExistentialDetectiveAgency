@@ -185,6 +185,8 @@ test("the checkpoint blob no longer carries the detective history, and the colum
     const hydrated = await storage.hydrateSession(table, sessionId);
     assert.ok(hydrated.orchestrationRuntime, "the blob was written");
     assert.equal("detectiveChatHistory" in hydrated.orchestrationRuntime, false);
+    assert.equal("attacheSession" in hydrated.orchestrationRuntime, false, "the blob holds no attaché transcript or session");
+    assert.equal("detectiveRuntime" in hydrated.orchestrationRuntime, false);
     const { parseDetectiveHistoryText } = require("../storage/detectiveHistoryText");
     const config = require("../config");
     const keep = Math.max(config.HISTORY_TAIL_TURNS, config.LAST_N_MESSAGES_FOR_DOSSIER);

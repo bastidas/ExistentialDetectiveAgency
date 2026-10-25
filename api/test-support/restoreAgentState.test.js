@@ -54,10 +54,11 @@ test("a session restarted in the middle of the attaché prelude gets its attach�
     assert.equal(liveSession.chat_history.length, 6);
 
     const blob = await storage.hydrateSession(table, sessionId);
-    assert.ok(
-      !blob.orchestrationRuntime || blob.orchestrationRuntime.attacheSession.attache_turn_count < 3,
-      "the checkpoint is behind the log, so the blob alone would restore an older attaché session"
-    );
+    assert.ok(blob.orchestrationRuntime, "a checkpoint blob was written");
+    assert.equal("attacheSession" in blob.orchestrationRuntime, false, "the blob holds no attaché session");
+    assert.equal("detectiveChatHistory" in blob.orchestrationRuntime, false);
+    assert.deepEqual(blob.agentState.attache.attache_turn_count, 3, "the newest log row has the live attaché state");
+    assert.equal("chat_history" in blob.agentState.attache, false, "the transcript stays in the events");
     dropBlob(table, sessionId);
 
     const restarted = freshServer();
@@ -103,11 +104,7 @@ test("the therapy phase and the phase-suggestion streak come back, and the log r
 
     const stored = await storage.hydrateSession(table, sessionId);
     assert.deepEqual(stored.agentState.therapy, liveTherapy, "the newest log row carries the exact therapy state");
-    assert.notDeepEqual(
-      stored.orchestrationRuntime && stored.orchestrationRuntime.detectiveRuntime,
-      liveTherapy,
-      "the blob is behind, which is why the row state takes precedence"
-    );
+    assert.equal("detectiveRuntime" in (stored.orchestrationRuntime || {}), false, "the blob no longer carries therapy state");
 
     const restarted = freshServer();
     const chat = require("../chatService");
@@ -146,13 +143,47 @@ test("exportTurnState leaves the attaché chat_history to the log, and restoreTu
   const chat = require("../chatService");
   const id = "shape-session";
   chat.setAttacheSessionForDevSession(id, { attacheState: { phase: "baseline1" }, chat_history: [{ role: "user", content: "hi" }], attache_turn_count: 1 });
-  assert.equal("chat_history" in chat.exportTurnState(id, { attache: true }).attache, false);
-  assert.equal(chat.exportTurnState(id).attache, undefined, "only on attaché turns");
+  assert.equal("chat_history" in chat.exportTurnState(id).attache, false);
+  assert.equal(chat.exportTurnState(id).attache.attache_turn_count, 1, "attaché machine state is stored whenever the session exists");
 
   const other = "shape-other";
   assert.deepEqual(chat.restoreTurnState(other, { attache: { nope: true }, therapy: { orchestratorSnapshot: null } }, []), { attache: false, therapy: false });
   assert.equal(chat.getAttacheSessionForDevSession(other), null);
   assert.deepEqual(chat.restoreTurnState(other, null, []), { attache: false, therapy: false });
+});
+
+test("a legacy blob's attaché chat_history is ignored; the log is the transcript", () => {
+  const chat = require("../chatService");
+  const id = "legacy-attache-hist";
+  chat.restoreSessionRuntimeFromDurable(id, {
+    v: 2,
+    attacheSession: {
+      attacheState: { phase: "baseline1" },
+      attache_turn_count: 1,
+      chat_history: [
+        { role: "user", content: "stale" },
+        { role: "assistant", content: "stale-reply" },
+      ],
+    },
+  });
+  chat.restoreTurnState(
+    id,
+    {},
+    [
+      { kind: "user", text: "live" },
+      { kind: "attache", text: "live-reply" },
+    ]
+  );
+  const s = chat.getAttacheSessionForDevSession(id);
+  assert.equal(s.attacheState.phase, "baseline1");
+  assert.deepEqual(s.chat_history, [
+    { role: "user", content: "live" },
+    { role: "assistant", content: "live-reply" },
+  ]);
+  const blob = chat.exportSessionRuntimeForDurable(id);
+  assert.equal("attacheSession" in blob, false);
+  assert.equal("detectiveChatHistory" in blob, false);
+  assert.equal("detectiveRuntime" in blob, false);
 });
 
 test("rebuildAttacheChatHistory returns the latest attaché run as user and assistant messages", () => {

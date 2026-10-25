@@ -9,7 +9,7 @@ Read it with [`durable-user-state.md`](durable-user-state.md) (tables, retention
 | Store | Key | What it holds | Written |
 |-------|-----|---------------|---------|
 | Session row (the checkpoint) | partition `EDA_session`, row `sessionId` | flags, counters, orchestration blob (`orchestrationRuntimeJson`) | first turn, then every `SESSION_CHECKPOINT_EVERY_K_TURNS` turns or `SESSION_CHECKPOINT_MIN_INTERVAL_MS`; a failed write is retried next turn |
-| Thread rows (the chat log) | partition `EDA_thread_<encoded sessionId>`, row `seq` (8 digits) | one row per exchange: `eventsJson` = user message plus every agent reply; `stateJson` = therapy phase and streak (every row) and the attaché session without `chat_history` (attaché turns) | every turn |
+| Thread rows (the chat log) | partition `EDA_thread_<encoded sessionId>`, row `seq` (8 digits) | one row per exchange: `eventsJson` = user message plus every agent reply; `stateJson` = therapy and the attaché session without `chat_history` | every turn |
 | Dossier row | partition `EDA_dossier`, row `userId` | the per-user dossier (`dossierJson`) | at the dossier interval; shared by all agents, not owned by one |
 | Process memory | `Map`s keyed by `sessionId` | everything else | n/a |
 
@@ -40,15 +40,15 @@ Source: `exportSessionRuntimeForDurable` in `api/chatService.js`, version consta
 |-------|------|-----------------------|-------|---------|
 | `v` | number | 1 char | all | Blob version |
 | `chatMachineSnapshot` | XState persisted snapshot | about 670 chars | routing (attaché and detective) | Which agent is active, time-away bin, dossier presence, turn counter, plus the invoked child snapshot |
-| `attacheSession` | object | 3.8K chars at 12 turns, grows 200 to 1,000 chars per attaché turn, **not trimmed** | attaché | Full attaché runtime state (fields below) |
+| ~~`attacheSession`~~ | removed from new blobs | n/a | attaché | Lives on the log row as `stateJson.attache` (no `chat_history`). A legacy blob that still has it is read as a fallback; its `chat_history` is stripped |
 | ~~`detectiveChatHistory`~~ | removed from the blob | n/a | detective | Now only in the row's `detectiveHistoryText`. An old blob that still has it is read as a fallback |
 | `currentStoryPhase` | XState persisted snapshot | about 100 chars | Lumen and Umbra | Narrative turn, which sets their narrative phase |
 | `detectiveTurnCount` | number | 1 to 2 chars | detective | Detective turns run (first-turn instructions, dossier interval, closure) |
 | `attacheExchangeCount` | number | 1 to 2 chars | attaché | User messages handled while routed to attaché; adds to detective count for `MAX_USER_EXCHANGES` |
-| `detectiveRuntime` | object | about 250 chars | detective | `{ orchestratorSnapshot, phaseSuggestionStreak }`, below |
+| ~~`detectiveRuntime`~~ | removed from new blobs | n/a | detective | Lives on the log row as `stateJson.therapy`. A legacy blob that still has it is read as a fallback |
 | `historyRef` | `{sessionId, fromSeq, toSeq}` | about 75 chars | Lumen and Umbra | Points at the thread rows the philosopher histories are rebuilt from. Added at write time in `shared.js`, not by the exporter |
 
-Not in the blob: `lumenChatHistory` and `umbraChatHistory`. They are rebuilt from the thread rows on hydrate, and a blob that still contains them is not read for them (`restoreSessionRuntimeFromDurable` ignores those keys; the test `a stored blob that still carries philosopher histories does not supply them` covers it).
+Not in the blob: any transcript (`lumenChatHistory`, `umbraChatHistory`, `detectiveChatHistory`, attaché `chat_history`) and, on new writes, `attacheSession` and `detectiveRuntime`. Philosopher histories are rebuilt from the thread rows. A blob that still contains the old keys is not used for those transcripts.
 
 ## Detective agent
 
@@ -75,7 +75,7 @@ Recovery: after a restart the detective resumes with the therapy phase and strea
 
 Sources: `api/agents/attache/attacheRuntime.js` (`createInitialAttacheSessionState`), `attacheMachine.js`, `api/chatService.js`.
 
-In memory it is `attacheSessionByChatSessionId` (one object per session) and `attacheExchangeCountByChatSessionId`. The whole session object is checkpointed as `attacheSession`; the 18 top-level fields below are what that object holds (measured 3.8K chars at 12 turns).
+In memory it is `attacheSessionByChatSessionId` (one object per session) and `attacheExchangeCountByChatSessionId`. The session without `chat_history` is stored on the log row as `stateJson.attache`; `chat_history` is rebuilt from the log. The 18 top-level fields below are what that object holds (measured 3.8K chars at 12 turns, of which `chat_history` was most of the growth).
 
 | # | Field | Type | Bound / size | Purpose |
 |---|-------|------|--------------|---------|
@@ -190,7 +190,7 @@ Measured through `api/shared.js` with a fake model.
 | 30 turns, 200-char messages, 1,500-char replies | 55.7K chars | 140.5K chars | 5.0K chars | 132K chars |
 | 40 turns, 9,990-char messages, 4,000-char replies (worst case allowed by the 10,000-character cap) | 565K chars (over the 300K blob cap, so history is halved) | 1.49M chars | 22.3K chars | 836K chars |
 
-Typical sessions fit comfortably. These blob sizes were measured before the detective history left the blob; the worst case was dominated by it (464K chars), and is now only the unbounded attaché `chat_history` (about 100K chars).
+Typical sessions fit comfortably. These blob sizes were measured when the blob still held the detective and attaché transcripts. New writes do not; the blob is routing, the story-phase snapshot and two counters.
 
 ## What this means for recovery
 
@@ -201,4 +201,4 @@ Typical sessions fit comfortably. These blob sizes were measured before the dete
 - Only in the checkpoint: routing snapshot (partly rebuilt from `baselineCompleted`) and `orchestrationUserTurnCount`. The detective history is in the `detectiveHistoryText` column. A checkpoint can lag the log by up to `SESSION_CHECKPOINT_EVERY_K_TURNS - 1` turns, and `historyRef.toSeq` against `sessionSeq` shows how many.
 - Only in the dossier row: the user's dossier.
 - Not stored at all: `lumenOtherResponse`, Lumen and Umbra notes and callouts, `lastMockReply` outside the snapshot, and the process-memory table above.
-- Open items for a later change: the blob still carries the attaché session including its unbounded `chat_history`, now a duplicate of the log rows. Once old rows without `stateJson` have aged out it could be dropped from the blob, which would shrink the blob to a few thousand characters regardless of session length.
+- Open items for a later change: `orchestrationUserTurnCount` is still blob-only. Old blobs that still carry transcripts are ignored for those transcripts.

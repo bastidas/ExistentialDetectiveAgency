@@ -640,7 +640,7 @@ async function handleChatRequest(sessionId, trimmed, options) {
     const nextSeq = (threadSeqBySession.get(sessionId) || 0) + 1;
     threadSeqBySession.set(sessionId, nextSeq);
     out.body.serverSeq = nextSeq;
-    queueThreadTurn(sessionId, nextSeq, turnEvents, chatService.exportTurnState(sessionId, { attache: phase === "baseline" }));
+    queueThreadTurn(sessionId, nextSeq, turnEvents, chatService.exportTurnState(sessionId));
     recordLogTurn(sessionId, nextSeq, turnEvents);
     await flushThreadTurnsToDurable(sessionId, options && options.userId ? options.userId : null);
     await maybeExtendConversationSummary(

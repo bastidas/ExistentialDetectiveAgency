@@ -357,7 +357,17 @@ function restorePhilosopherHistoriesFromThread(sessionId, threadEvents) {
 }
 
 /**
- * Allowlisted orchestration snapshot for Azure Table (versioned).
+ * Persist convention — one home per kind of fact, so a new item has an obvious place:
+ *
+ * - Transcripts live in the log and are rebuilt on hydrate (`rebuildAttacheChatHistory`,
+ *   `rebuildPhilosopherHistory`). Exception: the detective transcript is not faithfully
+ *   rebuildable (mock and fallback replies are logged but never enter it), so it lives only
+ *   in the session-row column `detectiveHistoryText`.
+ * - Agent machine state lives on each log row as `stateJson` (`exportTurnState` /
+ *   `restoreTurnState`). Keys today: `attache`, `therapy`. Add a new key there.
+ * - The checkpoint blob is routing, the story-phase snapshot, and the two turn counters.
+ *   It never carries a transcript. Older blobs may still have `attacheSession`,
+ *   `detectiveRuntime`, or `detectiveChatHistory`; those are read as a fallback only.
  *
  * @param {string|null|undefined} sessionId
  * @returns {object|null}
@@ -368,11 +378,9 @@ function exportSessionRuntimeForDurable(sessionId) {
   return {
     v: ORCHESTRATION_RUNTIME_V,
     chatMachineSnapshot: getPersistedChatMachineSnapshot(id),
-    attacheSession: attacheSessionByChatSessionId.get(id) ?? null,
     currentStoryPhase: currentStoryPhaseBySessionId.get(id) ?? null,
     detectiveTurnCount: detectiveTurnCountByChatSessionId.get(id) ?? 0,
     attacheExchangeCount: attacheExchangeCountByChatSessionId.get(id) ?? 0,
-    detectiveRuntime: exportDetectiveRuntimeForDurable(id),
   };
 }
 
@@ -406,7 +414,9 @@ function restoreSessionRuntimeFromDurable(sessionId, blob) {
     setPersistedChatMachineSnapshot(id, b.chatMachineSnapshot);
   }
   if (b.attacheSession != null && typeof b.attacheSession === "object") {
-    attacheSessionByChatSessionId.set(id, b.attacheSession);
+    // Legacy blobs carried the full session, including `chat_history`. The transcript is the log's.
+    const { chat_history: _ignored, ...session } = /** @type {Record<string, unknown>} */ (b.attacheSession);
+    attacheSessionByChatSessionId.set(id, session);
   }
   // Older blobs carried the detective history; it now lives only in the row's `detectiveHistoryText`.
   if (Array.isArray(b.detectiveChatHistory)) {
@@ -470,22 +480,20 @@ function rebuildAttacheChatHistory(events) {
 }
 
 /**
- * The agent state to store on a log row, as of the end of the turn just run: the therapy phase and
- * its streak on every row (small, and reset on a rebaseline), and the attaché session (without its
- * `chat_history`, which the log already holds) on attaché turns.
+ * The agent state to store on a log row, as of the end of the turn just run. Transcripts stay in
+ * the events of the row: the attaché session is stored without `chat_history`.
  *
  * @param {string|null|undefined} sessionId
- * @param {{ attache?: boolean }} [opts] — include the attaché session
  * @returns {{ attache?: object, therapy?: object }}
  */
-function exportTurnState(sessionId, opts) {
+function exportTurnState(sessionId) {
   const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
   if (!id) return {};
   const state = {};
   const therapy = exportDetectiveRuntimeForDurable(id);
   if (therapy) state.therapy = therapy;
   const session = attacheSessionByChatSessionId.get(id);
-  if (opts && opts.attache && session && typeof session === "object") {
+  if (session && typeof session === "object") {
     const { chat_history: _history, ...rest } = /** @type {Record<string, unknown>} */ (session);
     state.attache = rest;
   }
@@ -508,13 +516,17 @@ function restoreTurnState(sessionId, state, events) {
   if (!id || !state || typeof state !== "object") return restored;
   const attache = state.attache;
   if (attache && typeof attache === "object" && attache.attacheState && typeof attache.attacheState === "object") {
-    attacheSessionByChatSessionId.set(id, { ...attache, chat_history: rebuildAttacheChatHistory(events) });
+    attacheSessionByChatSessionId.set(id, attache);
     restored.attache = true;
   }
   const therapy = state.therapy;
   if (therapy && typeof therapy === "object" && therapy.orchestratorSnapshot != null) {
     restoreDetectiveRuntimeFromDurable(id, therapy);
     restored.therapy = true;
+  }
+  const existing = attacheSessionByChatSessionId.get(id);
+  if (existing) {
+    attacheSessionByChatSessionId.set(id, { ...existing, chat_history: rebuildAttacheChatHistory(events) });
   }
   return restored;
 }

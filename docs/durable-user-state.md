@@ -52,6 +52,14 @@ Per-agent field inventory (what is checkpointed, rebuilt from the log, or memory
 
 The persistence layer is five kinds of row in one Azure Table, plus a handful of process maps that are seeded from those rows. Each item below exists for a reason. Each has a bound so it cannot grow without limit. Nothing is trimmed because it "feels large": the bound is either the last thing a reader of that item actually uses, or an Azure Table hard limit.
 
+**Convention, so a new persisted item has an obvious home:**
+
+| Kind of fact | Home | How to add another |
+|--------------|------|--------------------|
+| Transcript (what was said) | The log. Rebuilt on hydrate. Exception: the detective transcript, which the log cannot rebuild faithfully, lives only in `detectiveHistoryText` | Add `rebuildXHistory(events)` and call it from `restoreSessionMemoryFromRows`. If the log is unfaithful, add a session-row text column like `detectiveHistoryText` |
+| Agent machine state (phase, streak, question order) | `stateJson` on the log row (`exportTurnState` / `restoreTurnState`) | Add a key next to `attache` and `therapy` |
+| Routing snapshot and turn counters | The checkpoint blob, with column and log fallbacks | Keep the blob small; do not put a transcript in it |
+
 Written from the code on the PR 13 branch. Function names are given instead of line numbers. The tables later on this page are the original field notes; this section is the inventory of intent, size and the bound that stops growth. For phases see [`phases.md`](phases.md). For the write-versus-read audit see [`storage-field-audit.md`](storage-field-audit.md).
 
 ### How the pieces sit together
@@ -61,7 +69,7 @@ A session is a short, bounded conversation. The log is the source of truth for w
 | Role | What it is | Why it is not the others |
 |------|------------|--------------------------|
 | Log (thread rows) | One row per user turn: the events of that turn, plus the agent state as of its end | Append-only. Never overwritten. The checkpoint can lag it; the summary is derived from it |
-| Checkpoint (session row + blob) | A point-in-time snapshot of routing, counters and machine state | Written every few turns so a restart does not replay the log into XState. Droppable when over budget |
+| Checkpoint (session row + blob) | A point-in-time snapshot of routing, the story phase and the two turn counters | Written every few turns so a restart does not replay the log into XState. Droppable when over budget. Holds no transcript |
 | Detective transcript column | The newest messages the detective model and the dossier analyzer will actually read | Not the log. The log also records mock and fallback replies that never enter this history |
 | Summaries | One condensed string covering a marked range of the log | Disposable. Rebuilt when the uncovered tail is long enough. The log stays |
 | Flags (`baselineCompleted`, `detectiveIntroSent`, `degradedReason`) | Booleans and a diagnostic list | Survive a missing blob. They do not grow |
@@ -105,16 +113,15 @@ The session-lifetime cap (`MAX_USER_EXCHANGES`, default 40) is the bound that st
 These are the new columns on the thread row, not on the session row. They exist because the blob is written every few turns and is dropped when over budget, and the three values they hold cannot be rebuilt from reply text alone.
 
 - **Therapy (`stateJson.therapy`).** The detective runtime: `orchestratorSnapshot` (the therapy phase `initial` / `middle` / `final` lives in its context) and `phaseSuggestionStreak` (`{ lastSuggested, runLength }`). About 260 characters. Written on every row so a detective turn after the attaché prelude still has a home for it.
-- **Attaché (`stateJson.attache`).** The attaché session without `chat_history`: phase, question index, shuffled question order, close and turn counters, stats, orchestrator snapshot. About 1,500 characters. Written on attaché turns only. `chat_history` is the user message and reply of each turn of the latest attaché run, rebuilt from the log by `rebuildAttacheChatHistory`.
+- **Attaché (`stateJson.attache`).** The attaché session without `chat_history`: phase, question index, shuffled question order, close and turn counters, stats, orchestrator snapshot. About 1,500 characters. Written whenever an attaché session exists. `chat_history` is the user message and reply of each turn of the latest attaché run, rebuilt from the log by `rebuildAttacheChatHistory`.
 - **Intention:** hydrate can restore the attaché session, the therapy phase and the streak exactly as of the last logged turn, with or without the blob. `restoreTurnState` applies the newest row that has each part, then the blob is used only for a part no row has (rows written before `stateJson` existed).
 - **Bound:** 40,000 characters for the whole `stateJson`. Over that it is left off and reported as `turn_state_not_persisted`. The events of the turn are still written. Because the attaché `chat_history` is not stored here, the column does not grow with reply length.
 
 ### 3. Checkpoint blob (`orchestrationRuntimeJson`)
 
-- **Intention:** a restartable snapshot of the machines that are not the log: routing (`chatMachineSnapshot`), the attaché session (still including `chat_history`, a duplicate of the log), `currentStoryPhase`, `detectiveTurnCount`, `attacheExchangeCount`, `detectiveRuntime`, `historyRef`. Written by `saveSessionCheckpoint` on the first turn, then every `SESSION_CHECKPOINT_EVERY_K_TURNS` (default 5) dirty turns or every `SESSION_CHECKPOINT_MIN_INTERVAL_MS` (default 5 minutes).
-- **Size and bound:** at most 300,000 characters, and not more than the leftover of the 400,000-character session-row budget after the summary and detective transcript are reserved. Over budget the blob is not persisted (`orchestration_not_persisted`). It no longer carries `detectiveChatHistory`; a legacy blob that still has it is read only when `detectiveHistoryText` is empty. A blob whose `v` is not `ORCHESTRATION_RUNTIME_V` (2) is ignored on restore.
-- **Relation:** the blob can trail the log by up to K−1 turns. Hydrate prefers `stateJson` for the attaché session, therapy phase and streak, and prefers the log for counters and philosopher histories. The remaining reason the blob exists is routing, `orchestrationUserTurnCount`, and a fallback for sessions whose log rows predate `stateJson`.
-- **Growth risk still in the blob:** the attaché `chat_history` is unbounded inside the session object. The session cap (40) and the attaché turn cap (100) keep it finite; it is the reason a worst-case blob can still exceed 300,000 characters. Once old rows without `stateJson` have aged out it can be dropped from the blob.
+- **Intention:** a restartable snapshot of routing (`chatMachineSnapshot`), `currentStoryPhase`, the two turn counters, and `historyRef`. Written by `saveSessionCheckpoint` on the first turn, then every `SESSION_CHECKPOINT_EVERY_K_TURNS` (default 5) dirty turns or every `SESSION_CHECKPOINT_MIN_INTERVAL_MS` (default 5 minutes). It holds no transcript.
+- **Size and bound:** at most 300,000 characters, and not more than the leftover of the 400,000-character session-row budget after the summary and detective transcript are reserved. Over budget the blob is not persisted (`orchestration_not_persisted`). A blob whose `v` is not `ORCHESTRATION_RUNTIME_V` (2) is ignored on restore. New writes omit `attacheSession`, `detectiveRuntime` and every `*ChatHistory`. A legacy blob that still has them is read as a fallback only: `chat_history` is stripped and rebuilt from the log; `detectiveChatHistory` is used only when `detectiveHistoryText` is empty.
+- **Relation:** the blob can trail the log by up to K−1 turns. Hydrate prefers `stateJson` for the attaché session, therapy phase and streak, and prefers the log for counters and all rebuildable histories. The remaining reason the blob exists is the routing snapshot (partly rebuilt from `baselineCompleted`) and `orchestrationUserTurnCount`.
 
 ### 4. Detective transcript (`detectiveHistoryText`)
 
@@ -165,7 +172,7 @@ Three different tails, one reason: the models and the dossier analyzer do not re
 | Sent to the model | 8 messages, 4,000 characters each | Detective, Lumen, Umbra (`sliceNativeHistory`) | Request time, not storage |
 | Sent to the dossier analyzer | 12 messages | Dossier update | Request time, not storage |
 | Rebuilt Lumen / Umbra history | 120 messages | Those agents after hydrate | `rebuildPhilosopherHistory`; not stored |
-| Attaché `chat_history` | The latest attaché run, from the log | The attaché after hydrate | Rebuilt; the blob copy is still the uncapped one |
+| Attaché `chat_history` | The latest attaché run, from the log | The attaché after hydrate | Rebuilt by `rebuildAttacheChatHistory`. Not stored |
 
 Lumen and Umbra histories are not in the checkpoint. They are rebuilt from detective-phase `user` + `lumen_user` / `umbra_user` events and then sliced to 120. In a 40-turn session that cap is not reached (two messages per detective turn).
 
@@ -201,7 +208,7 @@ Not persisted, and not reconstructed: Lumen and Umbra `otherResponse`, notes and
 
 The log is one row per turn of a 40-turn session, each row one user message (≤ 10,000 characters) plus the replies of that turn. That is the largest store, and it is the one that is supposed to be complete. The in-memory copy of it is the thing that is trimmed (400 events / 800,000 characters / 200 summarizer turns), so a long-lived process does not hold every session's full log.
 
-The next-largest thing was the detective history inside the blob. That copy is gone. The remaining blob growth is the attaché `chat_history`, bounded by the session cap. The summary is a 6,000-character overwrite. The flags do not grow. The user-summary row is one record per user, overwritten.
+The next-largest thing was the histories inside the blob. Those copies are gone. The blob is routing, the story-phase snapshot and two counters. The summary is a 6,000-character overwrite. The flags do not grow. The user-summary row is one record per user, overwritten.
 
 ## Session row (`partitionKey=EDA_session`, `rowKey=sessionId`)
 
@@ -213,7 +220,7 @@ Written by `saveSessionCheckpoint`, read by `hydrateSession`. Every column below
 | `updatedAt` | ISO time of this write | Seeds the session's last-activity time (with the newest log row's `ts`), so time-away after a restart is real |
 | `userId` | The `edaUserId` cookie value | Loads the dossier and the user's summary |
 | `sessionSeq` | Highest exchange number checkpointed | The log position (the larger of this and the last log row) |
-| `orchestrationRuntimeJson` (+ chunks) | Versioned blob: chat machine snapshot, attaché session, `currentStoryPhase`, counters, detective runtime, `historyRef`. It no longer carries the detective history | Primary restore of routing, attaché state, counters and phases. When it is missing, routing, the counters and the story turn are rebuilt from the other columns and the log (see Recovery without the blob) |
+| `orchestrationRuntimeJson` (+ chunks) | Versioned blob: chat machine snapshot, `currentStoryPhase`, counters, `historyRef`. No transcript | Primary restore of routing. Attaché state, therapy, histories and counters come from the log and the other columns (see Recovery without the blob) |
 | `baselineCompleted` | The attaché baseline is done and the detective has the floor | When no routing snapshot could be restored, routing is rebuilt as detective (`seedPersistedChatMachineFromFlags`) |
 | `detectiveIntroSent` | The detective has spoken at least once (`detectiveTurnCount > 0`) | Floors the detective turn count at 1 so it does not open twice; `GET /api/chat-state` reports it |
 | `detectiveHistoryText` (+ chunks) | The detective transcript, one `role<TAB>JSON string` line per message, the newest `max(HISTORY_TAIL_TURNS, LAST_N_MESSAGES_FOR_DOSSIER)` messages (12 by default, which is all either model reads), never more than 60,000 characters, cut on whole lines | The only stored copy of the detective history; it becomes the in-memory history. A legacy blob that still has `detectiveChatHistory` is used only when this column is empty |
@@ -242,7 +249,7 @@ A summary is derived from the append-only log and says which part of it it cover
 `stateJson` is `{ attache?, therapy? }` as of the end of that turn, written in the same upsert as the events, so it is never older than the log:
 
 - `therapy`: the detective runtime (`orchestratorSnapshot`, which holds the therapy phase, and `phaseSuggestionStreak`). About 260 characters, on every row.
-- `attache`: the attaché session without its `chat_history` (phase, question progress, question order, counters, stats, orchestrator snapshot). About 1,500 characters, on attaché turns only. The `chat_history` is rebuilt from the log (`rebuildAttacheChatHistory`).
+- `attache`: the attaché session without its `chat_history` (phase, question progress, question order, counters, stats, orchestrator snapshot). About 1,500 characters, whenever an attaché session exists. The `chat_history` is rebuilt from the log (`rebuildAttacheChatHistory`).
 
 State over 40,000 characters is left off and reported as `turn_state_not_persisted`. Hydrate takes the newest row that has each part and applies it over the blob's copy.
 

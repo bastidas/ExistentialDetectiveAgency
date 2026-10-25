@@ -85,6 +85,8 @@ test("the checkpoint omits both philosopher histories and points at the log rows
     const blob = checkpoints[checkpoints.length - 1].orchestrationRuntime;
     assert.equal("lumenChatHistory" in blob, false);
     assert.equal("umbraChatHistory" in blob, false);
+    assert.equal("attacheSession" in blob, false);
+    assert.equal("detectiveChatHistory" in blob, false);
     assert.deepEqual(Object.keys(blob.historyRef).sort(), ["fromSeq", "sessionId", "toSeq"]);
     assert.equal(blob.historyRef.sessionId, sessionId);
     assert.equal(blob.historyRef.fromSeq, 1);
