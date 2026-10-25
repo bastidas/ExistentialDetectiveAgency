@@ -21,6 +21,8 @@ Backend and API behavior are controlled by optional env vars. See `.env.example`
 | `OFFLINE=1` | Disables LLM calls: no API key required; agents return dummy responses. |
 | `DEBUG_LOGS=1` | Verbose logging: enables `/api/debug`, server startup logs, per-request logs, and debug info in chat responses. |
 | `DOSSIER_REFRESH_EVERY_N_DETECTIVE_TURNS` | Run the dossier analyzer every N completed detective exchanges (default `3`). |
+| `HISTORY_TAIL_TURNS` | How many prior messages (user or assistant entries) go to the model as native chat history; `8` is about 4 exchanges (default `8`, minimum `1`). |
+| `HISTORY_TURN_MAX_CHARS` | Max characters kept from each history message; longer ones are cut (default `4000`, minimum `200`). |
 
 These are independent: e.g. `DEV=1` with a real LLM shows the dev UI; `OFFLINE=1` without `DEV` returns dummies with the normal UI.
 
