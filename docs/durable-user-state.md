@@ -56,7 +56,7 @@ The persistence layer is five kinds of row in one Azure Table, plus a handful of
 
 | Kind of fact | Home | How to add another |
 |--------------|------|--------------------|
-| Transcript (what was said) | The log. Rebuilt on hydrate. Exception: the detective transcript, which the log cannot rebuild faithfully, lives only in `detectiveHistoryText` | Add `rebuildXHistory(events)` and call it from `restoreSessionMemoryFromRows`. If the log is unfaithful, add a session-row text column like `detectiveHistoryText` |
+| Transcript (what was said) | The log. Rebuilt on hydrate (`rebuildAttacheChatHistory`, `rebuildDetectiveHistory`, `rebuildPhilosopherHistory`). `detectiveHistoryText` is a leftover empty column | Add `rebuildXHistory(events)` and call it from `restoreSessionMemoryFromRows` |
 | Agent machine state (phase, streak, question order) | `stateJson` on the log row (`exportTurnState` / `restoreTurnState`) | Add a key next to `attache` and `therapy` |
 | Routing snapshot and turn counters | The checkpoint blob, with column and log fallbacks | Keep the blob small; do not put a transcript in it |
 
@@ -88,7 +88,7 @@ The session-lifetime cap (`MAX_USER_EXCHANGES`, default 40) is the bound that st
 | `HISTORY_TAIL_TURNS` | 8 messages | What the detective / Lumen / Umbra models are sent as native history | Older messages are not sent |
 | `HISTORY_TURN_MAX_CHARS` | 4,000 | One history message sent to the model | Truncated per message |
 | `LAST_N_MESSAGES_FOR_DOSSIER` | 12 | What the dossier analyzer is sent | Older messages are not sent |
-| Stored detective history | `max(HISTORY_TAIL_TURNS, LAST_N_MESSAGES_FOR_DOSSIER)` = 12 messages, and 60,000 characters cut on whole lines | The `detectiveHistoryText` column | Newest whole lines kept; `detective_text_truncated` |
+| Stored detective history | `max(HISTORY_TAIL_TURNS, LAST_N_MESSAGES_FOR_DOSSIER)` = 12 messages on hydrate | Rebuilt from the log | Oldest of the last run dropped; live memory can be longer until restart |
 | Philosopher history on hydrate | 120 messages (`DURABLE_EXPORT_HISTORY_MAX`) | Rebuilt Lumen and Umbra lists | Oldest dropped; they are not stored |
 | `CONVERSATION_CHAR_THRESHOLD_BEFORE_SUMMARY` | 6,000 characters of uncovered log text | When a summary is made | One model call; the summary text itself is capped at 6,000 characters (`MAX_SUMMARY_TEXT_CHARS`) |
 | In-memory thread | 400 events (`MAX_THREAD_EVENTS`) and 800,000 serialized characters (`MAX_THREAD_JSON_CHARS`) | Process copy of the log | Oldest events dropped in memory. Azure still has the rows |
@@ -125,7 +125,7 @@ These are the new columns on the thread row, not on the session row. They exist 
 
 ### 4. Detective transcript (`detectiveHistoryText`)
 
-- **Intention:** the only stored copy of the detective's LLM history. The model is sent the last 8 messages (`HISTORY_TAIL_TURNS`); the dossier analyzer is sent the last 12 (`LAST_N_MESSAGES_FOR_DOSSIER`). The column therefore keeps the newest 12 (`DETECTIVE_HISTORY_KEEP_MESSAGES`). It is not rebuilt from the log, because the log also records mock and fallback replies that never enter this history.
+- **Intention:** the detective's LLM history. The model is sent the last 8 messages; the dossier analyzer the last 12. Hydrate rebuilds the newest 12 from the log (`rebuildDetectiveHistory`), including mock, fallback and empty replies. The `detectiveHistoryText` column is no longer written.
 - **Size and bound:** 12 messages, and never more than 60,000 characters (`MAX_DETECTIVE_TEXT_CHARS`), cut on a whole line so a message is never split. A cut is reported as `detective_text_truncated`. Written with the checkpoint, so it can trail the log by up to K−1 turns.
 - **Relation:** this is what `restoreSessionFromRowColumns` puts into memory. The 8-message tail sent to the model is a further slice of this, each message truncated to 4,000 characters (`HISTORY_TURN_MAX_CHARS`) by `sliceNativeHistory`. It shares the session-row entity budget with the blob and the summary; keeping it to 12 messages is what lets the blob stay small.
 
@@ -223,7 +223,7 @@ Written by `saveSessionCheckpoint`, read by `hydrateSession`. Every column below
 | `orchestrationRuntimeJson` (+ chunks) | Versioned blob: chat machine snapshot, `currentStoryPhase`, counters, `historyRef`. No transcript | Primary restore of routing. Attaché state, therapy, histories and counters come from the log and the other columns (see Recovery without the blob) |
 | `baselineCompleted` | The attaché baseline is done and the detective has the floor | When no routing snapshot could be restored, routing is rebuilt as detective (`seedPersistedChatMachineFromFlags`) |
 | `detectiveIntroSent` | The detective has spoken at least once (`detectiveTurnCount > 0`) | Floors the detective turn count at 1 so it does not open twice; `GET /api/chat-state` reports it |
-| `detectiveHistoryText` (+ chunks) | The detective transcript, one `role<TAB>JSON string` line per message, the newest `max(HISTORY_TAIL_TURNS, LAST_N_MESSAGES_FOR_DOSSIER)` messages (12 by default, which is all either model reads), never more than 60,000 characters, cut on whole lines | The only stored copy of the detective history; it becomes the in-memory history. A legacy blob that still has `detectiveChatHistory` is used only when this column is empty |
+| `detectiveHistoryText` (+ chunks) | Leftover column, now written as `""` | Not read. History is rebuilt from the log |
 | `degradedReason` | `;`-joined reasons the write dropped content (`orchestration_not_persisted`, `detective_text_truncated`) | Surfaced in `GET /api/config` health as `stored_checkpoint_<reason>` |
 | `conversationSummariesJson` (+ chunks) | This session's summary record, or the text `null` | Published to the models as `preceding_conversation_summary` |
 
@@ -308,7 +308,7 @@ The blob is written at checkpoints and is not persisted when it is over budget, 
 | State | Source | Exact? |
 |-------|--------|--------|
 | Routing (detective has the floor) | `baselineCompleted` column | Yes |
-| Detective history | `detectiveHistoryText` column | Up to the checkpoint; can trail the log by up to `SESSION_CHECKPOINT_EVERY_K_TURNS - 1` turns |
+| Detective history | The log (`rebuildDetectiveHistory`) | Yes, as of the last logged turn (newest 12 messages) |
 | Attaché session (phase, question progress, question order, counters, stats) | `stateJson` on the newest attaché log row; `chat_history` rebuilt from the log | Yes, as of the last attaché turn |
 | Therapy phase, phase-suggestion streak | `stateJson` on the newest log row | Yes, as of the last turn |
 | Detective turn count, attaché exchange count | The log: `attache` and `detective` reply events after the last attaché run began (`deriveCountsFromLog`), raised never lowered | Yes while the log keeps those events |

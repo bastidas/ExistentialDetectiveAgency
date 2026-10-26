@@ -19,11 +19,14 @@ function trimEvents(events) {
 
 function pushEvent(events, evt) {
   const text = evt && evt.text != null ? String(evt.text) : "";
-  if (!text.trim()) return events;
+  const kind = String(evt.kind || "");
+  // Skip empty user lines and empty philosopher asides. An empty detective (or attaché) reply is
+  // kept: the live history records it and hydrate rebuilds the empty assistant turn from the log.
+  if (!text.trim() && kind !== "detective" && kind !== "attache") return events;
   events.push({
     ts: Date.now(),
     phase: evt.phase === "baseline" ? "baseline" : "detective",
-    kind: String(evt.kind || ""),
+    kind,
     text,
     agent: evt.agent ? String(evt.agent) : undefined,
   });
@@ -32,7 +35,7 @@ function pushEvent(events, evt) {
 
 /**
  * The events one exchange adds: the user's message and every agent reply (attaché or detective,
- * Lumen, Umbra). Empty replies are skipped.
+ * Lumen, Umbra). Empty agent replies are kept so hydrate can rebuild an empty assistant turn.
  *
  * @param {object} input
  * @returns {Array<object>}

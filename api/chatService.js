@@ -28,7 +28,7 @@ const { buildAgentUserPacket } = require("./prompting/packetRegistry");
 const { formatUserChannelMessage } = require("./prompting/userChannel");
 const config = require("./config");
 const logger = require("./logger");
-const { renderDetectiveHistoryText, parseDetectiveHistoryText } = require("./storage/detectiveHistoryText");
+const { renderDetectiveHistoryText } = require("./storage/detectiveHistoryText");
 const {
   createEmptyDossier,
   normalizeDossier,
@@ -357,12 +357,70 @@ function restorePhilosopherHistoriesFromThread(sessionId, threadEvents) {
 }
 
 /**
+ * Detective LLM history for the latest run (after the last attaché reply). Same pairing as
+ * `rebuildPhilosopherHistory`: each querent line with that turn's detective reply, or `""` if
+ * the reply was empty or missing. Mock and fallback replies are logged and so come back too.
+ *
+ * @param {unknown[]} events
+ * @returns {Array<{ role: "user"|"assistant", content: string }>}
+ */
+function rebuildDetectiveHistory(events) {
+  const list = Array.isArray(events) ? events : [];
+  let start = 0;
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    if (list[i] && list[i].kind === "attache") {
+      start = i + 1;
+      break;
+    }
+  }
+  const out = [];
+  let open = false;
+  for (const e of list.slice(start)) {
+    if (!e) continue;
+    if (e.kind === "user") {
+      if (open) out.push({ role: "assistant", content: "" });
+      out.push({ role: "user", content: String(e.text || "") });
+      open = true;
+    } else if (e.kind === "detective" && open) {
+      out.push({ role: "assistant", content: String(e.text || "") });
+      open = false;
+    }
+  }
+  if (open) out.push({ role: "assistant", content: "" });
+  return sliceHistoryTail(out, DETECTIVE_HISTORY_KEEP_MESSAGES);
+}
+
+/**
+ * @param {string|null|undefined} sessionId
+ * @param {unknown[]} threadEvents
+ */
+function restoreDetectiveHistoryFromThread(sessionId, threadEvents) {
+  const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
+  if (!id || !Array.isArray(threadEvents) || threadEvents.length === 0) return;
+  if (detectiveChatHistoryBySessionId.has(id)) return;
+  detectiveChatHistoryBySessionId.set(id, rebuildDetectiveHistory(threadEvents));
+}
+
+/**
+ * Every reply that reached the querent, including mock, fallback and empty.
+ *
+ * @param {string} sessionId
+ * @param {string} userMessage
+ * @param {string} reply
+ */
+function appendDetectiveHistory(sessionId, userMessage, reply) {
+  const hist = (detectiveChatHistoryBySessionId.get(sessionId) || []).slice();
+  hist.push({ role: "user", content: String(userMessage || "") });
+  hist.push({ role: "assistant", content: typeof reply === "string" ? reply : "" });
+  detectiveChatHistoryBySessionId.set(sessionId, hist);
+}
+
+/**
  * Persist convention — one home per kind of fact, so a new item has an obvious place:
  *
  * - Transcripts live in the log and are rebuilt on hydrate (`rebuildAttacheChatHistory`,
- *   `rebuildPhilosopherHistory`). Exception: the detective transcript is not faithfully
- *   rebuildable (mock and fallback replies are logged but never enter it), so it lives only
- *   in the session-row column `detectiveHistoryText`.
+ *   `rebuildPhilosopherHistory`, `rebuildDetectiveHistory`). The session-row column
+ *   `detectiveHistoryText` is a leftover cache, not the source of truth.
  * - Agent machine state lives on each log row as `stateJson` (`exportTurnState` /
  *   `restoreTurnState`). Keys today: `attache`, `therapy`. Add a new key there.
  * - The checkpoint blob is routing, the story-phase snapshot, and the two turn counters.
@@ -418,10 +476,7 @@ function restoreSessionRuntimeFromDurable(sessionId, blob) {
     const { chat_history: _ignored, ...session } = /** @type {Record<string, unknown>} */ (b.attacheSession);
     attacheSessionByChatSessionId.set(id, session);
   }
-  // Older blobs carried the detective history; it now lives only in the row's `detectiveHistoryText`.
-  if (Array.isArray(b.detectiveChatHistory)) {
-    detectiveChatHistoryBySessionId.set(id, sliceHistoryTail(b.detectiveChatHistory, DETECTIVE_HISTORY_KEEP_MESSAGES));
-  }
+  // Older blobs carried `detectiveChatHistory`. The log is the source of truth; ignore the copy.
   if (b.currentStoryPhase != null) {
     currentStoryPhaseBySessionId.set(id, b.currentStoryPhase);
   }
@@ -440,8 +495,7 @@ function restoreSessionRuntimeFromDurable(sessionId, blob) {
  * - `baselineCompleted`: with no routing snapshot, route to the detective.
  * - `detectiveIntroSent`: the detective has already spoken, so its turn count is at least 1 and it does
  *   not open a second time.
- * - `detectiveHistoryText`: the only stored copy of the detective history; it becomes the in-memory
- *   history.
+ * - `detectiveHistoryText`: leftover column, no longer read. History is rebuilt from the log.
  *
  * @param {string|null|undefined} sessionId
  * @param {{ baselineCompleted?: boolean, detectiveIntroSent?: boolean, detectiveHistoryText?: string }} row
@@ -454,11 +508,6 @@ function restoreSessionFromRowColumns(sessionId, row) {
 
   if (row.detectiveIntroSent === true && getDetectiveTurnCount(id) < 1) {
     detectiveTurnCountByChatSessionId.set(id, 1);
-  }
-
-  const stored = parseDetectiveHistoryText(row.detectiveHistoryText);
-  if (stored.length > 0) {
-    detectiveChatHistoryBySessionId.set(id, stored);
   }
 }
 
@@ -1204,10 +1253,6 @@ async function composeChatResponse(sessionId, message, options = {}) {
         );
       } else {
         reply = detReply;
-        const hist = prevHist.slice();
-        hist.push({ role: "user", content: message });
-        hist.push({ role: "assistant", content: reply });
-        detectiveChatHistoryBySessionId.set(sessionId, hist);
         if (out && typeof out === "object") {
           applyExistentialPhaseSuggestionAfterDetectiveTurn(sessionId, out.suggest_existential_phase, {
             hasDossier: userHasPersistedDossier(dossier),
@@ -1251,6 +1296,8 @@ async function composeChatResponse(sessionId, message, options = {}) {
       });
       umbraChatHistoryBySessionId.set(sessionId, uh);
     }
+
+    appendDetectiveHistory(sessionId, message, reply);
 
     advanceCurrentStoryPhase(sessionId);
     bumpDetectiveTurnCount(sessionId);
@@ -1496,7 +1543,9 @@ module.exports = {
   setConversationSummaryForSession,
   getConversationSummaryForSession,
   restorePhilosopherHistoriesFromThread,
+  restoreDetectiveHistoryFromThread,
   rebuildPhilosopherHistory,
+  rebuildDetectiveHistory,
   peekPhilosopherHistories,
   peekDetectiveHistory,
   setDossierForDevSession,

@@ -300,6 +300,7 @@ function restoreSessionMemoryFromRows(id, hydrated, userRecord) {
   chatService.restoreSessionFromRowColumns(id, hydrated);
   chatService.restoreCountersFromLog(id, hydrated.threadEvents);
   chatService.restorePhilosopherHistoriesFromThread(id, hydrated.threadEvents);
+  chatService.restoreDetectiveHistoryFromThread(id, hydrated.threadEvents);
   if (hydrated.lastActivityAt && !lastActivityAtBySession.has(id)) {
     const at = Date.parse(hydrated.lastActivityAt);
     if (Number.isFinite(at)) lastActivityAtBySession.set(id, at);
@@ -426,7 +427,7 @@ async function saveSessionCheckpointToDurable(sessionId, userId, envelope) {
     baselineCompleted: !!(envelope && envelope.baseline_completed),
     detectiveIntroSent: chatService.getDetectiveIntroSentForSession(id),
     conversationSummary: (summaryStateBySession.get(id) || {}).own || null,
-    detectiveHistoryText: chatService.exportDetectiveHistoryText(id),
+    detectiveHistoryText: "",
     orchestrationRuntime,
   };
   try {

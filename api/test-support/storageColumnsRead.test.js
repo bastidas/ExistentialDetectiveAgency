@@ -6,8 +6,8 @@
  *
  *   baselineCompleted      -> routing is rebuilt when the orchestration blob is missing
  *   detectiveIntroSent     -> the detective's turn count is at least 1, and /api/chat-state reports it
- *   detectiveHistoryText   -> the detective transcript (its only stored copy)
- *   the session log        -> attaché / detective counters and the story turn, rebuilt when the blob is gone
+ *   detectiveHistoryText   -> leftover column, no longer written or read
+ *   the session log        -> attaché / detective counters, story turn, and detective history, rebuilt when the blob is gone
  *   degradedReason         -> durable health reports a reduced stored checkpoint
  *   conversationSummariesJson -> `preceding_conversation_summary` in the model packets
  */
@@ -55,7 +55,7 @@ test("a conversation long enough to summarize writes real values to all five col
 
     assert.equal(row.baselineCompleted, true);
     assert.equal(row.detectiveIntroSent, true);
-    assert.ok(row.detectiveHistoryText.length > 0, "detective transcript is stored");
+    assert.equal(row.detectiveHistoryText, "", "detective transcript is no longer stored on the row");
     assert.equal(typeof row.degradedReason, "string");
 
     const { parseSummaryJson } = require("../dossier/conversationSummary");
@@ -118,18 +118,11 @@ test("hydrate reads the columns back when the orchestration blob is gone", async
     assert.ok(chatService.getDetectiveTurnCountForSession(sessionId) >= 1, "detectiveIntroSent floors the turn count");
     assert.equal(chatService.getDetectiveIntroSentForSession(sessionId), true);
 
-    const { parseDetectiveHistoryText } = require("../storage/detectiveHistoryText");
-    const storedHistory = parseDetectiveHistoryText(row.detectiveHistoryText);
-    assert.ok(storedHistory.length >= 2);
+    const keep = Math.max(require("../config").HISTORY_TAIL_TURNS, require("../config").LAST_N_MESSAGES_FOR_DOSSIER);
     assert.deepEqual(
       chatService.peekDetectiveHistory(sessionId),
-      storedHistory,
-      "the detective transcript came from detectiveHistoryText"
-    );
-    const liveJson = JSON.stringify(liveHistory);
-    assert.ok(
-      liveJson.includes(JSON.stringify(storedHistory).slice(1, -1)),
-      "and it is a contiguous slice of what the first process held (the checkpoint trails by its interval)"
+      liveHistory.slice(-keep),
+      "the detective transcript was rebuilt from the log (newest messages the models read)"
     );
 
     assert.equal(chatService.getConversationSummaryForSession(sessionId), SUMMARY_TEXT);
@@ -153,23 +146,23 @@ test("hydrate reads the columns back when the orchestration blob is gone", async
   }
 });
 
-test("the detective transcript has one source: the column wins, a legacy blob history is only a fallback", () => {
+test("the detective transcript has one source: the log; a leftover blob or column is ignored", () => {
   const chatService = require("../chatService");
-  const { renderDetectiveHistoryText } = require("../storage/detectiveHistoryText");
-  const msgs = (n, tag) => Array.from({ length: n }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: `${tag}${i}` }));
-  const text = renderDetectiveHistoryText(msgs(10, "col"));
-
-  chatService.restoreSessionRuntimeFromDurable("blob-only", { v: 2, detectiveChatHistory: msgs(4, "blob") });
-  chatService.restoreSessionFromRowColumns("blob-only", { detectiveHistoryText: "" });
-  assert.equal(chatService.peekDetectiveHistory("blob-only")[0].content, "blob0", "an old blob's history is used when the column is empty");
-
-  chatService.restoreSessionRuntimeFromDurable("both", { v: 2, detectiveChatHistory: msgs(4, "blob") });
-  chatService.restoreSessionFromRowColumns("both", { detectiveHistoryText: text });
-  assert.equal(chatService.peekDetectiveHistory("both").length, 10);
-  assert.equal(chatService.peekDetectiveHistory("both")[0].content, "col0", "the column replaces the blob copy");
-
-  chatService.restoreSessionFromRowColumns("column-only", { detectiveHistoryText: text });
-  assert.equal(chatService.peekDetectiveHistory("column-only").length, 10);
+  const events = [
+    { kind: "user", text: "q1" },
+    { kind: "detective", text: "a1" },
+    { kind: "user", text: "q2" },
+    { kind: "detective", text: "a2" },
+  ];
+  chatService.restoreSessionRuntimeFromDurable("from-log", { v: 2, detectiveChatHistory: [{ role: "user", content: "stale" }] });
+  chatService.restoreSessionFromRowColumns("from-log", { detectiveHistoryText: "user\t\"col\"" });
+  chatService.restoreDetectiveHistoryFromThread("from-log", events);
+  assert.deepEqual(chatService.peekDetectiveHistory("from-log"), [
+    { role: "user", content: "q1" },
+    { role: "assistant", content: "a1" },
+    { role: "user", content: "q2" },
+    { role: "assistant", content: "a2" },
+  ]);
 });
 
 test("the checkpoint blob no longer carries the detective history, and the column holds only what the models read", async () => {
@@ -187,11 +180,9 @@ test("the checkpoint blob no longer carries the detective history, and the colum
     assert.equal("detectiveChatHistory" in hydrated.orchestrationRuntime, false);
     assert.equal("attacheSession" in hydrated.orchestrationRuntime, false, "the blob holds no attaché transcript or session");
     assert.equal("detectiveRuntime" in hydrated.orchestrationRuntime, false);
-    const { parseDetectiveHistoryText } = require("../storage/detectiveHistoryText");
-    const config = require("../config");
-    const keep = Math.max(config.HISTORY_TAIL_TURNS, config.LAST_N_MESSAGES_FOR_DOSSIER);
-    const stored = parseDetectiveHistoryText(row.detectiveHistoryText);
-    assert.ok(stored.length > 0 && stored.length <= keep, `stored ${stored.length} messages, keep ${keep}`);
+    assert.equal(row.detectiveHistoryText, "");
+    const logHistory = require("../chatService").rebuildDetectiveHistory(hydrated.threadEvents);
+    assert.ok(logHistory.length >= 2, "the log holds the detective transcript");
   } finally {
     storage.getTableClient = original;
     await fake.close();
