@@ -19,19 +19,29 @@ function trimEvents(events) {
 
 function pushEvent(events, evt) {
   const text = evt && evt.text != null ? String(evt.text) : "";
-  if (!text.trim()) return events;
+  const kind = String(evt.kind || "");
+  // Skip empty user lines and empty philosopher asides. An empty detective (or attaché) reply is
+  // kept: the live history records it and hydrate rebuilds the empty assistant turn from the log.
+  if (!text.trim() && kind !== "detective" && kind !== "attache") return events;
   events.push({
     ts: Date.now(),
     phase: evt.phase === "baseline" ? "baseline" : "detective",
-    kind: String(evt.kind || ""),
+    kind,
     text,
     agent: evt.agent ? String(evt.agent) : undefined,
   });
   return events;
 }
 
-function appendTurn(events, input) {
-  const next = Array.isArray(events) ? events.slice() : [];
+/**
+ * The events one exchange adds: the user's message and every agent reply (attaché or detective,
+ * Lumen, Umbra). Empty agent replies are kept so hydrate can rebuild an empty assistant turn.
+ *
+ * @param {object} input
+ * @returns {Array<object>}
+ */
+function buildTurnEvents(input) {
+  const next = [];
   const phase = input && input.phase === "baseline" ? "baseline" : "detective";
   pushEvent(next, { phase, kind: "user", text: input && input.userMessage, agent: "user" });
   pushEvent(next, {
@@ -52,7 +62,12 @@ function appendTurn(events, input) {
     text: input && input.umbraUserResponse,
     agent: "umbra",
   });
-  return trimEvents(next);
+  return next;
+}
+
+function appendTurn(events, input) {
+  const prior = Array.isArray(events) ? events : [];
+  return trimEvents(prior.concat(buildTurnEvents(input)));
 }
 
 function toChatStateMessages(events) {
@@ -120,6 +135,7 @@ module.exports = {
   MAX_THREAD_EVENTS,
   MAX_THREAD_JSON_CHARS,
   trimEvents,
+  buildTurnEvents,
   appendTurn,
   toChatStateMessages,
 };

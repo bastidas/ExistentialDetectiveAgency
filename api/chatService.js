@@ -7,6 +7,7 @@ const {
   getChatEnvelopeForSession,
   getPersistedChatMachineSnapshot,
   setPersistedChatMachineSnapshot,
+  seedPersistedChatMachineFromFlags,
 } = require("./orchestration/chatMachine");
 const { createChatPostSuccessBody } = require("./contracts/chatApiContract");
 const { runAttacheTurn } = require("./agents/attache/attacheRuntime");
@@ -27,6 +28,7 @@ const { buildAgentUserPacket } = require("./prompting/packetRegistry");
 const { formatUserChannelMessage } = require("./prompting/userChannel");
 const config = require("./config");
 const logger = require("./logger");
+const { renderDetectiveHistoryText } = require("./storage/detectiveHistoryText");
 const {
   createEmptyDossier,
   normalizeDossier,
@@ -163,8 +165,17 @@ const detectiveChatHistoryBySessionId = new Map();
 const lumenChatHistoryBySessionId = new Map();
 const umbraChatHistoryBySessionId = new Map();
 
-/** Persisted XState snapshot for [`philosophersNarrativeMachine`](./philosophers/philosophersMachine.js). */
-const philosopherNarrativeSnapshotBySessionId = new Map();
+/**
+ * `currentStoryPhase`: persisted XState snapshot of [`philosophersNarrativeMachine`](./agents/philosophers/philosophersMachine.js).
+ * Its `narrativeTurn` counts detective turns; `narrativePhaseFromTurn` maps it to the story phase Lumen and Umbra see.
+ */
+const currentStoryPhaseBySessionId = new Map();
+
+/**
+ * Per chat session: the text of the conversation summary models read as `preceding_conversation_summary`.
+ * The record it comes from (with the log range it covers) lives in `shared.js` and in storage.
+ */
+const conversationSummaryBySessionId = new Map();
 
 /** Per chat session: how many detective turns have run (for first-turn TURN INSTRUCTIONS + opening line). */
 const detectiveTurnCountByChatSessionId = new Map();
@@ -198,8 +209,14 @@ function bumpDetectiveTurnCount(sessionId) {
   detectiveTurnCountByChatSessionId.set(id, getDetectiveTurnCount(sessionId) + 1);
 }
 
-const ORCHESTRATION_RUNTIME_V = 1;
+/** Bump when the stored orchestration shape changes; blobs with another `v` are ignored on restore. v2: chunked storage layout and native-history chat histories. */
+const ORCHESTRATION_RUNTIME_V = 2;
 const DURABLE_EXPORT_HISTORY_MAX = 120;
+/**
+ * How many detective messages are stored. The model is sent the last `HISTORY_TAIL_TURNS` messages and
+ * the dossier analyzer reads the last `LAST_N_MESSAGES_FOR_DOSSIER`, so older ones are never read back.
+ */
+const DETECTIVE_HISTORY_KEEP_MESSAGES = Math.max(config.HISTORY_TAIL_TURNS, config.LAST_N_MESSAGES_FOR_DOSSIER);
 
 /**
  * @param {unknown[]|undefined} arr
@@ -274,7 +291,141 @@ async function mergeDossierFromTableIfNewer(sessionId, userId, client) {
 }
 
 /**
- * Allowlisted orchestration snapshot for Azure Table (versioned).
+ * Lumen and Umbra each see the querent's message and their own user-facing reply. That is exactly
+ * what the per-exchange log already holds, so the checkpoint does not copy it; it is rebuilt from
+ * the log on hydrate. Only detective-phase exchanges involve the philosophers.
+ *
+ * @param {Array<{ phase?: string, kind?: string, text?: string }>} events — oldest first
+ * @param {"lumen_user"|"umbra_user"} kind
+ * @returns {Array<{ role: "user"|"assistant", content: string }>}
+ */
+function rebuildPhilosopherHistory(events, kind) {
+  const out = [];
+  let open = false;
+  for (const e of Array.isArray(events) ? events : []) {
+    if (!e || e.phase !== "detective") continue;
+    if (e.kind === "user") {
+      if (open) out.push({ role: "assistant", content: "" });
+      out.push({ role: "user", content: String(e.text || "") });
+      open = true;
+    } else if (e.kind === kind && open) {
+      out.push({ role: "assistant", content: String(e.text || "") });
+      open = false;
+    }
+  }
+  if (open) out.push({ role: "assistant", content: "" });
+  return sliceHistoryTail(out, DURABLE_EXPORT_HISTORY_MAX);
+}
+
+/**
+ * Read-only view of the in-memory Lumen and Umbra histories for one session (tests, lab).
+ *
+ * @param {string} sessionId
+ * @returns {{ lumen: object[], umbra: object[] }}
+ */
+function peekPhilosopherHistories(sessionId) {
+  return {
+    lumen: (lumenChatHistoryBySessionId.get(sessionId) || []).slice(),
+    umbra: (umbraChatHistoryBySessionId.get(sessionId) || []).slice(),
+  };
+}
+
+/**
+ * @param {string} sessionId
+ * @returns {Array<{ role: string, content: string }>} a copy of the in-memory detective history
+ */
+function peekDetectiveHistory(sessionId) {
+  return (detectiveChatHistoryBySessionId.get(sessionId) || []).slice();
+}
+
+/**
+ * After hydrate, rebuild the Lumen and Umbra histories from the per-exchange log. The checkpoint
+ * does not store them, and a live in-process history is never overwritten.
+ *
+ * @param {string|null|undefined} sessionId
+ * @param {unknown[]} threadEvents
+ */
+function restorePhilosopherHistoriesFromThread(sessionId, threadEvents) {
+  const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
+  if (!id || !Array.isArray(threadEvents) || threadEvents.length === 0) return;
+  if (!lumenChatHistoryBySessionId.has(id)) {
+    lumenChatHistoryBySessionId.set(id, rebuildPhilosopherHistory(threadEvents, "lumen_user"));
+  }
+  if (!umbraChatHistoryBySessionId.has(id)) {
+    umbraChatHistoryBySessionId.set(id, rebuildPhilosopherHistory(threadEvents, "umbra_user"));
+  }
+}
+
+/**
+ * Detective LLM history for the latest run (after the last attaché reply). Same pairing as
+ * `rebuildPhilosopherHistory`: each querent line with that turn's detective reply, or `""` if
+ * the reply was empty or missing. Mock and fallback replies are logged and so come back too.
+ *
+ * @param {unknown[]} events
+ * @returns {Array<{ role: "user"|"assistant", content: string }>}
+ */
+function rebuildDetectiveHistory(events) {
+  const list = Array.isArray(events) ? events : [];
+  let start = 0;
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    if (list[i] && list[i].kind === "attache") {
+      start = i + 1;
+      break;
+    }
+  }
+  const out = [];
+  let open = false;
+  for (const e of list.slice(start)) {
+    if (!e) continue;
+    if (e.kind === "user") {
+      if (open) out.push({ role: "assistant", content: "" });
+      out.push({ role: "user", content: String(e.text || "") });
+      open = true;
+    } else if (e.kind === "detective" && open) {
+      out.push({ role: "assistant", content: String(e.text || "") });
+      open = false;
+    }
+  }
+  if (open) out.push({ role: "assistant", content: "" });
+  return sliceHistoryTail(out, DETECTIVE_HISTORY_KEEP_MESSAGES);
+}
+
+/**
+ * @param {string|null|undefined} sessionId
+ * @param {unknown[]} threadEvents
+ */
+function restoreDetectiveHistoryFromThread(sessionId, threadEvents) {
+  const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
+  if (!id || !Array.isArray(threadEvents) || threadEvents.length === 0) return;
+  if (detectiveChatHistoryBySessionId.has(id)) return;
+  detectiveChatHistoryBySessionId.set(id, rebuildDetectiveHistory(threadEvents));
+}
+
+/**
+ * Every reply that reached the querent, including mock, fallback and empty.
+ *
+ * @param {string} sessionId
+ * @param {string} userMessage
+ * @param {string} reply
+ */
+function appendDetectiveHistory(sessionId, userMessage, reply) {
+  const hist = (detectiveChatHistoryBySessionId.get(sessionId) || []).slice();
+  hist.push({ role: "user", content: String(userMessage || "") });
+  hist.push({ role: "assistant", content: typeof reply === "string" ? reply : "" });
+  detectiveChatHistoryBySessionId.set(sessionId, hist);
+}
+
+/**
+ * Persist convention — one home per kind of fact, so a new item has an obvious place:
+ *
+ * - Transcripts live in the log and are rebuilt on hydrate (`rebuildAttacheChatHistory`,
+ *   `rebuildPhilosopherHistory`, `rebuildDetectiveHistory`). The session-row column
+ *   `detectiveHistoryText` is a leftover cache, not the source of truth.
+ * - Agent machine state lives on each log row as `stateJson` (`exportTurnState` /
+ *   `restoreTurnState`). Keys today: `attache`, `therapy`. Add a new key there.
+ * - The checkpoint blob is routing, the story-phase snapshot, and the two turn counters.
+ *   It never carries a transcript. Older blobs may still have `attacheSession`,
+ *   `detectiveRuntime`, or `detectiveChatHistory`; those are read as a fallback only.
  *
  * @param {string|null|undefined} sessionId
  * @returns {object|null}
@@ -285,14 +436,9 @@ function exportSessionRuntimeForDurable(sessionId) {
   return {
     v: ORCHESTRATION_RUNTIME_V,
     chatMachineSnapshot: getPersistedChatMachineSnapshot(id),
-    attacheSession: attacheSessionByChatSessionId.get(id) ?? null,
-    detectiveChatHistory: sliceHistoryTail(detectiveChatHistoryBySessionId.get(id), DURABLE_EXPORT_HISTORY_MAX),
-    lumenChatHistory: sliceHistoryTail(lumenChatHistoryBySessionId.get(id), DURABLE_EXPORT_HISTORY_MAX),
-    umbraChatHistory: sliceHistoryTail(umbraChatHistoryBySessionId.get(id), DURABLE_EXPORT_HISTORY_MAX),
-    philosopherNarrativeSnapshot: philosopherNarrativeSnapshotBySessionId.get(id) ?? null,
+    currentStoryPhase: currentStoryPhaseBySessionId.get(id) ?? null,
     detectiveTurnCount: detectiveTurnCountByChatSessionId.get(id) ?? 0,
     attacheExchangeCount: attacheExchangeCountByChatSessionId.get(id) ?? 0,
-    detectiveRuntime: exportDetectiveRuntimeForDurable(id),
   };
 }
 
@@ -303,16 +449,21 @@ function exportSessionRuntimeForDurable(sessionId) {
 function restoreSessionRuntimeFromDurable(sessionId, blob) {
   if (!blob || typeof blob !== "object") return;
   const o = /** @type {{ v?: number, truncated?: boolean }} */ (blob);
-  if (o.v !== ORCHESTRATION_RUNTIME_V || o.truncated) return;
+  if (o.v !== ORCHESTRATION_RUNTIME_V || o.truncated) {
+    logger.warn(
+      "chatService",
+      "restoreSessionRuntimeFromDurable",
+      `ignoring stored orchestration runtime (v=${String(o.v)}, expected ${ORCHESTRATION_RUNTIME_V}${o.truncated ? ", truncated" : ""})`
+    );
+    return;
+  }
   const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
   if (!id) return;
   const b = /** @type {{
     chatMachineSnapshot?: unknown,
     attacheSession?: object | null,
     detectiveChatHistory?: unknown[],
-    lumenChatHistory?: unknown[],
-    umbraChatHistory?: unknown[],
-    philosopherNarrativeSnapshot?: unknown,
+    currentStoryPhase?: unknown,
     detectiveTurnCount?: number,
     attacheExchangeCount?: number,
     detectiveRuntime?: unknown,
@@ -321,19 +472,13 @@ function restoreSessionRuntimeFromDurable(sessionId, blob) {
     setPersistedChatMachineSnapshot(id, b.chatMachineSnapshot);
   }
   if (b.attacheSession != null && typeof b.attacheSession === "object") {
-    attacheSessionByChatSessionId.set(id, b.attacheSession);
+    // Legacy blobs carried the full session, including `chat_history`. The transcript is the log's.
+    const { chat_history: _ignored, ...session } = /** @type {Record<string, unknown>} */ (b.attacheSession);
+    attacheSessionByChatSessionId.set(id, session);
   }
-  if (Array.isArray(b.detectiveChatHistory)) {
-    detectiveChatHistoryBySessionId.set(id, b.detectiveChatHistory);
-  }
-  if (Array.isArray(b.lumenChatHistory)) {
-    lumenChatHistoryBySessionId.set(id, b.lumenChatHistory);
-  }
-  if (Array.isArray(b.umbraChatHistory)) {
-    umbraChatHistoryBySessionId.set(id, b.umbraChatHistory);
-  }
-  if (b.philosopherNarrativeSnapshot != null) {
-    philosopherNarrativeSnapshotBySessionId.set(id, b.philosopherNarrativeSnapshot);
+  // Older blobs carried `detectiveChatHistory`. The log is the source of truth; ignore the copy.
+  if (b.currentStoryPhase != null) {
+    currentStoryPhaseBySessionId.set(id, b.currentStoryPhase);
   }
   if (typeof b.detectiveTurnCount === "number" && b.detectiveTurnCount >= 0) {
     detectiveTurnCountByChatSessionId.set(id, Math.floor(b.detectiveTurnCount));
@@ -342,6 +487,233 @@ function restoreSessionRuntimeFromDurable(sessionId, blob) {
     attacheExchangeCountByChatSessionId.set(id, Math.floor(b.attacheExchangeCount));
   }
   restoreDetectiveRuntimeFromDurable(id, b.detectiveRuntime);
+}
+
+/**
+ * Use the session row's own columns to fill in what the orchestration blob does not carry.
+ *
+ * - `baselineCompleted`: with no routing snapshot, route to the detective.
+ * - `detectiveIntroSent`: the detective has already spoken, so its turn count is at least 1 and it does
+ *   not open a second time.
+ * - `detectiveHistoryText`: leftover column, no longer read. History is rebuilt from the log.
+ *
+ * @param {string|null|undefined} sessionId
+ * @param {{ baselineCompleted?: boolean, detectiveIntroSent?: boolean, detectiveHistoryText?: string }} row
+ */
+function restoreSessionFromRowColumns(sessionId, row) {
+  const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
+  if (!id || !row || typeof row !== "object") return;
+
+  seedPersistedChatMachineFromFlags(id, { baselineCompleted: row.baselineCompleted });
+
+  if (row.detectiveIntroSent === true && getDetectiveTurnCount(id) < 1) {
+    detectiveTurnCountByChatSessionId.set(id, 1);
+  }
+}
+
+/**
+ * The attaché session's own `chat_history` is the user message and the user-facing reply of every
+ * attaché turn, which is what the log holds for the latest attaché run.
+ *
+ * @param {unknown[]} events
+ * @returns {Array<{ role: "user"|"assistant", content: string }>}
+ */
+function rebuildAttacheChatHistory(events) {
+  const replies = agentRepliesFromLog(events);
+  const run = lastAttacheRun(replies);
+  if (!run) return [];
+  return replies.slice(run.start, run.end + 1).flatMap((r) => [
+    { role: "user", content: r.user },
+    { role: "assistant", content: r.text },
+  ]);
+}
+
+/**
+ * The agent state to store on a log row, as of the end of the turn just run. Transcripts stay in
+ * the events of the row: the attaché session is stored without `chat_history`.
+ *
+ * @param {string|null|undefined} sessionId
+ * @returns {{ attache?: object, therapy?: object }}
+ */
+function exportTurnState(sessionId) {
+  const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
+  if (!id) return {};
+  const state = {};
+  const therapy = exportDetectiveRuntimeForDurable(id);
+  if (therapy) state.therapy = therapy;
+  const session = attacheSessionByChatSessionId.get(id);
+  if (session && typeof session === "object") {
+    const { chat_history: _history, ...rest } = /** @type {Record<string, unknown>} */ (session);
+    state.attache = rest;
+  }
+  return state;
+}
+
+/**
+ * Put back what `exportTurnState` stored. The log row is written every turn, the blob only at
+ * checkpoints, so this is never older than the blob and takes precedence over it. Stored state is
+ * only used when it has the shape live code needs; otherwise the blob's copy (if any) stays.
+ *
+ * @param {string|null|undefined} sessionId
+ * @param {{ attache?: any, therapy?: any }|null|undefined} state
+ * @param {unknown[]} events — the session log, for the attaché chat history
+ * @returns {{ attache: boolean, therapy: boolean }} which parts were restored
+ */
+function restoreTurnState(sessionId, state, events) {
+  const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
+  const restored = { attache: false, therapy: false };
+  if (!id || !state || typeof state !== "object") return restored;
+  const attache = state.attache;
+  if (attache && typeof attache === "object" && attache.attacheState && typeof attache.attacheState === "object") {
+    attacheSessionByChatSessionId.set(id, attache);
+    restored.attache = true;
+  }
+  const therapy = state.therapy;
+  if (therapy && typeof therapy === "object" && therapy.orchestratorSnapshot != null) {
+    restoreDetectiveRuntimeFromDurable(id, therapy);
+    restored.therapy = true;
+  }
+  const existing = attacheSessionByChatSessionId.get(id);
+  if (existing) {
+    attacheSessionByChatSessionId.set(id, { ...existing, chat_history: rebuildAttacheChatHistory(events) });
+  }
+  return restored;
+}
+
+/**
+ * What the log says about this session's counters, using the same reset rule as the live code: a return
+ * after a long absence starts a new attaché run and clears both counts (`clearSessionForAttacheRebaseline`),
+ * so only the most recent attaché run and the detective turns after it count. One attaché or detective
+ * reply is logged per turn, so replies are counted rather than user messages (synced client events carry
+ * no reliable phase on the user line).
+ *
+ * @param {unknown[]} events — the session log, oldest first
+ * @returns {{ attacheExchangeCount: number, detectiveTurnCount: number }}
+ */
+function deriveCountsFromLog(events) {
+  const replies = agentRepliesFromLog(events);
+  const run = lastAttacheRun(replies);
+  if (!run) return { attacheExchangeCount: 0, detectiveTurnCount: replies.length };
+  return {
+    attacheExchangeCount: run.end - run.start + 1,
+    detectiveTurnCount: replies.length - 1 - run.end,
+  };
+}
+
+/**
+ * The attaché and detective replies in the log, oldest first, each with the user message it answered.
+ *
+ * @param {unknown[]} events
+ * @returns {Array<{ kind: "attache"|"detective", user: string, text: string }>}
+ */
+function agentRepliesFromLog(events) {
+  const replies = [];
+  let user = "";
+  for (const e of Array.isArray(events) ? events : []) {
+    if (!e || typeof e !== "object") continue;
+    if (e.kind === "user") user = String(e.text ?? "");
+    else if (e.kind === "attache" || e.kind === "detective") {
+      replies.push({ kind: e.kind, user, text: String(e.text ?? "") });
+    }
+  }
+  return replies;
+}
+
+/**
+ * Index range (inclusive) of the most recent contiguous run of attaché replies, or null if there is none.
+ *
+ * @param {Array<{ kind: string }>} replies
+ * @returns {{ start: number, end: number } | null}
+ */
+function lastAttacheRun(replies) {
+  let end = -1;
+  for (let i = replies.length - 1; i >= 0; i -= 1) {
+    if (replies[i].kind === "attache") {
+      end = i;
+      break;
+    }
+  }
+  if (end < 0) return null;
+  let start = end;
+  while (start > 0 && replies[start - 1].kind === "attache") start -= 1;
+  return { start, end };
+}
+
+/**
+ * Raise the counters the checkpoint stores (attaché exchanges, detective turns) and the story phase, which
+ * follows the detective turn count, to what the log shows. The checkpoint can trail the log by up to
+ * `SESSION_CHECKPOINT_EVERY_K_TURNS - 1` turns, and is absent when the blob was not persisted. Values are
+ * only ever raised: a log that lost old events (`turn_oldest_N_events_not_persisted`) cannot lower them.
+ * The exchange cap (`MAX_USER_EXCHANGES`) is the sum of the two counts, so a restart cannot grant extra turns.
+ *
+ * @param {string|null|undefined} sessionId
+ * @param {unknown[]} events
+ * @returns {{ attacheExchangeCount: number, detectiveTurnCount: number, storyTurn: number }} values now in effect
+ */
+function restoreCountersFromLog(sessionId, events) {
+  const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
+  if (!id) return { attacheExchangeCount: 0, detectiveTurnCount: 0, storyTurn: 0 };
+  const derived = deriveCountsFromLog(events);
+  if (derived.attacheExchangeCount > getAttacheExchangeCount(id)) {
+    attacheExchangeCountByChatSessionId.set(id, derived.attacheExchangeCount);
+  }
+  if (derived.detectiveTurnCount > getDetectiveTurnCount(id)) {
+    detectiveTurnCountByChatSessionId.set(id, derived.detectiveTurnCount);
+  }
+  const detectiveTurns = getDetectiveTurnCount(id);
+  if (detectiveTurns > getStoryTurnFromCurrentStoryPhase(currentStoryPhaseBySessionId.get(id))) {
+    setCurrentStoryPhaseTurn(id, detectiveTurns);
+  }
+  return {
+    attacheExchangeCount: getAttacheExchangeCount(id),
+    detectiveTurnCount: detectiveTurns,
+    storyTurn: getStoryTurnFromCurrentStoryPhase(currentStoryPhaseBySessionId.get(id)),
+  };
+}
+
+/**
+ * The detective transcript as stored in the row's `detectiveHistoryText` column.
+ *
+ * @param {string|null|undefined} sessionId
+ * @returns {string}
+ */
+function exportDetectiveHistoryText(sessionId) {
+  const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
+  return id
+    ? renderDetectiveHistoryText(sliceHistoryTail(detectiveChatHistoryBySessionId.get(id), DETECTIVE_HISTORY_KEEP_MESSAGES))
+    : "";
+}
+
+/**
+ * Whether the detective has spoken in this session (the row's `detectiveIntroSent`).
+ *
+ * @param {string|null|undefined} sessionId
+ * @returns {boolean}
+ */
+function getDetectiveIntroSentForSession(sessionId) {
+  const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
+  return id ? (detectiveTurnCountByChatSessionId.get(id) ?? 0) > 0 : false;
+}
+
+/**
+ * @param {string|null|undefined} sessionId
+ * @param {string|null|undefined} text — empty clears it
+ */
+function setConversationSummaryForSession(sessionId, text) {
+  const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
+  if (!id) return;
+  const t = typeof text === "string" ? text.trim() : "";
+  if (t) conversationSummaryBySessionId.set(id, t);
+  else conversationSummaryBySessionId.delete(id);
+}
+
+/**
+ * @param {string|null|undefined} sessionId
+ * @returns {string}
+ */
+function getConversationSummaryForSession(sessionId) {
+  const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
+  return id ? conversationSummaryBySessionId.get(id) || "" : "";
 }
 
 /**
@@ -377,7 +749,7 @@ function clearSessionForAttacheRebaseline(sessionId, opts = {}) {
   detectiveChatHistoryBySessionId.delete(id);
   lumenChatHistoryBySessionId.delete(id);
   umbraChatHistoryBySessionId.delete(id);
-  philosopherNarrativeSnapshotBySessionId.delete(id);
+  currentStoryPhaseBySessionId.delete(id);
   detectiveTurnCountByChatSessionId.delete(id);
   attacheExchangeCountByChatSessionId.delete(id);
   dossierBySessionId.delete(id);
@@ -414,7 +786,7 @@ function temporalGreetingModeForDetective(visitBin, dossierStaleByAge, hasDossie
  * @param {unknown} snapshot
  * @returns {number}
  */
-function getNarrativeTurnFromSnapshot(snapshot) {
+function getStoryTurnFromCurrentStoryPhase(snapshot) {
   if (!snapshot || typeof snapshot !== "object") return 0;
   const ctx = /** @type {{ context?: { narrativeTurn?: number } }} */ (snapshot).context;
   if (!ctx || typeof ctx !== "object") return 0;
@@ -428,8 +800,8 @@ function getNarrativeTurnFromSnapshot(snapshot) {
  * @returns {Record<string, unknown>}
  */
 function buildPhilosopherComposeSession(sessionId, dossier) {
-  const snap = sessionId ? philosopherNarrativeSnapshotBySessionId.get(sessionId) : undefined;
-  const narrativeTurn = getNarrativeTurnFromSnapshot(snap);
+  const snap = sessionId ? currentStoryPhaseBySessionId.get(sessionId) : undefined;
+  const narrativeTurn = getStoryTurnFromCurrentStoryPhase(snap);
   /** @type {Record<string, unknown>} */
   const session = {
     narrative_phase: narrativePhaseFromTurn(narrativeTurn),
@@ -437,16 +809,26 @@ function buildPhilosopherComposeSession(sessionId, dossier) {
   if (dossier) {
     session.dossier_summary = buildTherapistSafeDossierSummary(dossier);
   }
+  const summary = sessionId ? conversationSummaryBySessionId.get(sessionId) : "";
+  if (summary) session.preceding_conversation_summary = summary;
   return session;
+}
+
+/**
+ * @param {string} sessionId
+ * @param {number} targetTurn
+ */
+function setCurrentStoryPhaseTurnForLabSession(sessionId, targetTurn) {
+  setCurrentStoryPhaseTurn(sessionId, targetTurn);
 }
 
 /**
  * @param {string|null} sessionId
  */
-function advancePhilosopherNarrative(sessionId) {
+function advanceCurrentStoryPhase(sessionId) {
   const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
   if (!id) return;
-  const prev = philosopherNarrativeSnapshotBySessionId.get(id);
+  const prev = currentStoryPhaseBySessionId.get(id);
   const actor = createActor(philosophersNarrativeMachine, prev ? { snapshot: prev } : {});
   actor.start();
   actor.send({ type: "NARRATIVE_TURN" });
@@ -459,7 +841,7 @@ function advancePhilosopherNarrative(sessionId) {
   } catch (_) {
     next = actor.getSnapshot();
   }
-  philosopherNarrativeSnapshotBySessionId.set(id, next);
+  currentStoryPhaseBySessionId.set(id, next);
   actor.stop();
 }
 
@@ -469,14 +851,14 @@ function advancePhilosopherNarrative(sessionId) {
  * @param {string|null|undefined} sessionId
  * @param {number} targetTurn — non-negative; 0 = Exposition, etc.
  */
-function setPhilosopherNarrativeTurnForLabSession(sessionId, targetTurn) {
+function setCurrentStoryPhaseTurn(sessionId, targetTurn) {
   const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
   if (!id) return;
   const n =
     typeof targetTurn === "number" && Number.isFinite(targetTurn) && targetTurn >= 0
       ? Math.floor(targetTurn)
       : 0;
-  philosopherNarrativeSnapshotBySessionId.delete(id);
+  currentStoryPhaseBySessionId.delete(id);
   const actor = createActor(philosophersNarrativeMachine);
   actor.start();
   for (let i = 0; i < n; i += 1) {
@@ -491,7 +873,7 @@ function setPhilosopherNarrativeTurnForLabSession(sessionId, targetTurn) {
   } catch (_) {
     next = actor.getSnapshot();
   }
-  philosopherNarrativeSnapshotBySessionId.set(id, next);
+  currentStoryPhaseBySessionId.set(id, next);
   actor.stop();
 }
 
@@ -520,7 +902,7 @@ function syncLabDetectiveOrchestrationFromPreset(sessionId, preset) {
 
   const narrLabel = pickNarrativePhase(p);
   const turns = narrativeTurnForPhaseLabel(narrLabel);
-  setPhilosopherNarrativeTurnForLabSession(sessionId, turns);
+  setCurrentStoryPhaseTurnForLabSession(sessionId, turns);
 }
 
 /**
@@ -777,6 +1159,8 @@ async function composeChatResponse(sessionId, message, options = {}) {
     if (dossier) {
       sessionPayload.dossier_summary = buildTherapistSafeDossierSummary(dossier);
     }
+    const precedingSummary = conversationSummaryBySessionId.get(sessionId);
+    if (precedingSummary) sessionPayload.preceding_conversation_summary = precedingSummary;
 
     sessionPayload.detective_prompt_instruction_ids = runDetectivePromptPolicyTurn(sessionId, {
       visit_bin: visitTier.bin,
@@ -869,10 +1253,6 @@ async function composeChatResponse(sessionId, message, options = {}) {
         );
       } else {
         reply = detReply;
-        const hist = prevHist.slice();
-        hist.push({ role: "user", content: message });
-        hist.push({ role: "assistant", content: reply });
-        detectiveChatHistoryBySessionId.set(sessionId, hist);
         if (out && typeof out === "object") {
           applyExistentialPhaseSuggestionAfterDetectiveTurn(sessionId, out.suggest_existential_phase, {
             hasDossier: userHasPersistedDossier(dossier),
@@ -917,7 +1297,9 @@ async function composeChatResponse(sessionId, message, options = {}) {
       umbraChatHistoryBySessionId.set(sessionId, uh);
     }
 
-    advancePhilosopherNarrative(sessionId);
+    appendDetectiveHistory(sessionId, message, reply);
+
+    advanceCurrentStoryPhase(sessionId);
     bumpDetectiveTurnCount(sessionId);
 
     const detCountAfter = getDetectiveTurnCount(sessionId);
@@ -1033,15 +1415,15 @@ function getAttacheSessionForDevSession(sessionId) {
 }
 
 /**
- * Dev / lab: persisted philosophers narrative machine snapshot (or null).
+ * Dev / lab: the persisted `currentStoryPhase` snapshot (or null).
  *
  * @param {string|null|undefined} sessionId
  * @returns {unknown|null}
  */
-function getPhilosopherNarrativeSnapshotForSession(sessionId) {
+function getCurrentStoryPhaseForSession(sessionId) {
   const id = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
   if (!id) return null;
-  const snap = philosopherNarrativeSnapshotBySessionId.get(id);
+  const snap = currentStoryPhaseBySessionId.get(id);
   return snap !== undefined ? snap : null;
 }
 
@@ -1150,12 +1532,28 @@ module.exports = {
   mergeDossierFromTableIfNewer,
   exportSessionRuntimeForDurable,
   restoreSessionRuntimeFromDurable,
+  restoreSessionFromRowColumns,
+  deriveCountsFromLog,
+  exportTurnState,
+  restoreTurnState,
+  rebuildAttacheChatHistory,
+  restoreCountersFromLog,
+  exportDetectiveHistoryText,
+  getDetectiveIntroSentForSession,
+  setConversationSummaryForSession,
+  getConversationSummaryForSession,
+  restorePhilosopherHistoriesFromThread,
+  restoreDetectiveHistoryFromThread,
+  rebuildPhilosopherHistory,
+  rebuildDetectiveHistory,
+  peekPhilosopherHistories,
+  peekDetectiveHistory,
   setDossierForDevSession,
   setAttacheSessionForDevSession,
   getAttacheSessionForDevSession,
-  getPhilosopherNarrativeSnapshotForSession,
-  advancePhilosopherNarrative,
-  setPhilosopherNarrativeTurnForLabSession,
+  getCurrentStoryPhaseForSession,
+  advanceCurrentStoryPhase,
+  setCurrentStoryPhaseTurnForLabSession,
   syncLabDetectiveOrchestrationFromPreset,
   simulateAttacheLabStep,
   simulateAttacheLabAdvanceQuestionIndexWithinPhase,

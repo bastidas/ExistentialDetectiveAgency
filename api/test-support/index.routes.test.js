@@ -95,7 +95,7 @@ test("no production route is registered for dev-only tooling", () => {
 test("config handler returns the client bootstrap fields", async () => {
   const res = await registered.config.handler(request());
   assert.equal(res.status, 200);
-  for (const k of ["devMode", "lastNClientTranscriptTurns", "durableStorageMode"]) {
+  for (const k of ["devMode", "lastNClientTranscriptTurns", "durableStorageMode", "maxMessageChars"]) {
     assert.ok(k in res.jsonBody, `config missing ${k}`);
   }
 });
@@ -145,7 +145,7 @@ test("POST chat answers 429 rate_limit once a client IP exceeds the per-minute l
 });
 
 test("POST chat rejects an over-long message with 400 bad_request", async () => {
-  const res = await registered.chat.handler(request({ body: { message: "x".repeat(5000) } }));
+  const res = await registered.chat.handler(request({ body: { message: "x".repeat(10_001) } }));
   assert.equal(res.status, 400);
   assert.equal(res.jsonBody.errorKind, "bad_request");
 });

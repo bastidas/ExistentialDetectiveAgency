@@ -468,6 +468,33 @@ function setPersistedChatMachineSnapshot(sessionId, snapshot) {
   }
 }
 
+/**
+ * Rebuild routing from the session row's `baselineCompleted` flag when no routing snapshot could be
+ * restored (the orchestration blob was not persisted or was rejected). A finished baseline means the
+ * detective has the floor, so the machine is moved through the attaché handoff. Does nothing when a
+ * snapshot already exists or the flag is false.
+ *
+ * @param {string|null|undefined} sessionId
+ * @param {{ baselineCompleted?: boolean }} flags
+ * @returns {boolean} whether routing was seeded
+ */
+function seedPersistedChatMachineFromFlags(sessionId, flags) {
+  const key = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
+  if (!key || !flags || flags.baselineCompleted !== true) return false;
+  if (persistedSnapshotBySessionId.has(key)) return false;
+  const actor = createActor(chatMachine);
+  actor.start();
+  actor.send({ type: "ATTACHE_HANDOFF_TO_DETECTIVE" });
+  try {
+    persistedSnapshotBySessionId.set(key, actor.getPersistedSnapshot());
+  } catch (_) {
+    actor.stop();
+    return false;
+  }
+  actor.stop();
+  return true;
+}
+
 module.exports = {
   chatMachine,
   initialChatContext,
@@ -479,6 +506,7 @@ module.exports = {
   getOrchestrationUserTurnCountForSession,
   getPersistedChatMachineSnapshot,
   setPersistedChatMachineSnapshot,
+  seedPersistedChatMachineFromFlags,
   /** @param {string} id */
   clearPersistedChatMachineSnapshot(id) {
     if (typeof id === "string" && id.length > 0) persistedSnapshotBySessionId.delete(id);

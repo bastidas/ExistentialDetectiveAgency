@@ -34,22 +34,41 @@ test(
     const client = durableTableStorage.getTableClient();
     assert.ok(client, "TableClient required (AZURE_STORAGE_CONNECTION_STRING + DOSSIER_TABLE_NAME)");
     const sid = `test_session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const orch = { v: 1, chatMachineSnapshot: null, truncated: false };
+    const orch = { v: 2, chatMachineSnapshot: null, truncated: false };
+    await durableTableStorage.saveThreadTurn(client, {
+      sessionId: sid,
+      userId: "u_test",
+      seq: 3,
+      events: [{ ts: 1, phase: "detective", kind: "user", text: "hi", agent: "user" }],
+    });
     await durableTableStorage.saveSessionCheckpoint(client, {
       sessionId: sid,
       userId: "u_test",
       sessionSeq: 3,
-      threadEvents: [{ ts: 1, phase: "detective", kind: "user", text: "hi", agent: "user" }],
       baselineCompleted: true,
       detectiveIntroSent: true,
-      conversationSummaries: null,
-      detectiveHistoryText: "",
+      conversationSummary: {
+        v: 1,
+        userId: "u_test",
+        sessionId: sid,
+        fromSeq: 1,
+        throughSeq: 3,
+        text: "summary",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+      detectiveHistoryText: 'user\t"hi"\nassistant\t"hello"',
       orchestrationRuntime: orch,
     });
     const hydrated = await durableTableStorage.hydrateSession(client, sid);
     assert.equal(hydrated.sessionSeq, 3);
     assert.equal(hydrated.userId, "u_test");
-    assert.ok(hydrated.orchestrationRuntime && hydrated.orchestrationRuntime.v === 1);
+    assert.ok(hydrated.orchestrationRuntime && hydrated.orchestrationRuntime.v === 2);
     assert.ok(Array.isArray(hydrated.threadEvents) && hydrated.threadEvents.length === 1);
+    assert.equal(hydrated.baselineCompleted, true);
+    assert.equal(hydrated.detectiveIntroSent, true);
+    assert.equal(hydrated.detectiveHistoryText, 'user\t"hi"\nassistant\t"hello"');
+    assert.equal(hydrated.conversationSummary.text, "summary");
+    assert.deepEqual(hydrated.degraded, []);
+    assert.ok(hydrated.lastActivityAt);
   }
 );

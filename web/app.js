@@ -84,6 +84,9 @@
           document.body.dataset.debugLlm = d.debugLlm ? "true" : "false";
           document.body.dataset.debugState = d.debugState ? "true" : "false";
         }
+        if (d && window.EDAChatMessageLimit) {
+          window.EDAChatMessageLimit.setMax(d.maxMessageChars);
+        }
       })
       .catch(function () {});
   }
@@ -123,6 +126,12 @@
     e.preventDefault();
     var message = EDAChatInput && EDAChatInput.getValue ? EDAChatInput.getValue().trim() : "";
     if (!message) return;
+
+    var lengthCheck = window.EDAChatMessageLimit && window.EDAChatMessageLimit.check(message);
+    if (lengthCheck && !lengthCheck.ok) {
+      EDAMessageUI.setStatus(window.EDAChatMessageLimit.messageFor(lengthCheck), true);
+      return;
+    }
 
     if (window.EDALogger) {
       window.EDALogger.debug("UI", "phil-annotations submit rules count", EDARules.getRulesCount());
